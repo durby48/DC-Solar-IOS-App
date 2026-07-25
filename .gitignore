@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.DS_Store
+website/
+# Local-only: contains the Supabase secret key (in scripts) and raw business
+# data exports. The database is the source of truth — nothing here is needed
+# to build or run the app.
+data/
+.expo/
+dist/

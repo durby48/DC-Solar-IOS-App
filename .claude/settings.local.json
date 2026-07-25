@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git clone *)",
+      "Bash(npm --version)",
+      "Bash(git --version)",
+      "Bash(xcodebuild -version)"
+    ]
+  }
+}
