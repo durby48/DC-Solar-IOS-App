@@ -10,7 +10,7 @@ Employee field-ops app for DC Solar LLC (solar installation, Kansas City). One E
 ## Repo layout
 
 - `app/` — the Expo app (SDK 57, TypeScript, expo-router, src/ layout). All app work happens here.
-- `supabase/migrations/` — 9 SQL files, run **manually** by Devon in the Supabase dashboard SQL Editor (no CLI access). Status: **1–7 confirmed applied; #8 (pending_install_stage) and #9 (push_tokens) delivered 2026-07-24 — ASK DEVON.**
+- `supabase/migrations/` — 9 SQL files, run **manually** by Devon in the Supabase dashboard SQL Editor (no CLI access). Status: **1–9 all confirmed applied (8 and 9 run 2026-07-24 night).**
 - `PLAN.md` — original build plan + phases; still the roadmap.
 - `HANDOFF.md` — this file. Keep it updated at the end of every session.
 - NOT in git: `app/.env` (recreate — see below), `data/` (local business-data exports; the DB is the source of truth), `website/` (separate repo: github.com/durby48/dcsolarkc).
