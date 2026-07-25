@@ -10,12 +10,15 @@ import {
   clockIn,
   clockOut,
   fetchOpenEntry,
+  fetchTodayCompletedSeconds,
   getSessionEmail,
   type TimeEntry,
 } from '@/lib/clock';
 import { fetchJobs } from '@/lib/data';
 import { formatElapsed, formatFullDate, formatShortDate, todayISO } from '@/lib/dates';
 import { type Job } from '@/lib/mockData';
+import { registerPushToken, scheduleJobReminders } from '@/lib/notifications';
+import { updateWidgetState } from '@/lib/widget';
 
 const PUNCH_KEY = 'dcsolar.punch';
 
@@ -169,6 +172,43 @@ export default function TodayScreen() {
       setPunchBusy(false);
     }
   }, [punchBusy, sessionEmail, openEntry, clockedInAt, jobs, selectedJobId, setLocalPunch]);
+
+  // Signed-in devices: keep 24h/1h job reminders synced with the schedule
+  // and register this device's push token (both silent no-ops on web/denied
+  // permission; reminders are skipped for demo data).
+  useEffect(() => {
+    if (!sessionEmail || isMock || jobs.length === 0) return;
+    scheduleJobReminders(jobs);
+    registerPushToken(sessionEmail);
+  }, [sessionEmail, isMock, jobs]);
+
+  // Keep the home-screen widget in sync: today's job, address, and clock
+  // state. Runs whenever jobs load or a punch changes; no-op off iOS.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const todaySeconds = sessionEmail
+        ? await fetchTodayCompletedSeconds(sessionEmail)
+        : 0;
+      if (cancelled) return;
+      const todayDate = todayISO();
+      const punchedJob =
+        openEntry?.job_id != null ? jobs.find((j) => j.id === openEntry.job_id) : null;
+      const widgetJob =
+        punchedJob ?? jobs.find((j) => j.scheduled_for === todayDate) ?? null;
+      const since = openEntry !== null ? Date.parse(openEntry.clock_in) : clockedInAt;
+      updateWidgetState({
+        jobName: widgetJob?.name ?? '',
+        jobNumber: widgetJob?.job_number ?? '',
+        address: widgetJob?.address ?? '',
+        clockInAt: since !== null && !Number.isNaN(since) ? since : 0,
+        todaySeconds,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobs, openEntry, clockedInAt, sessionEmail]);
 
   const today = todayISO();
   const todaysJobs = jobs.filter((j) => j.scheduled_for === today);

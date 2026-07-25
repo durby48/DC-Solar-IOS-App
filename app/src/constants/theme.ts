@@ -16,6 +16,7 @@ export const colors = {
   white: '#FFFFFF',
   card: '#FFFFFF',
   danger: '#C0564A',
+  success: '#3E8E5E',
 } as const;
 
 export const spacing = {

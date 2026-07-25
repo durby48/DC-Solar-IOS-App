@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -15,6 +14,7 @@ import {
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { getDocumentUrl } from '@/lib/data';
+import { shareDocument, viewDocument } from '@/lib/pdf';
 import { formatShortDate, todayISO } from '@/lib/dates';
 import {
   deleteFinanceEntry,
@@ -77,6 +77,7 @@ export function JobInvoices({
   // Two-tap delete confirm (works on native and web alike).
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [sharingId, setSharingId] = useState<string | null>(null);
   const [expensesOpen, setExpensesOpen] = useState(false);
 
   const load = useCallback(async () => {
@@ -107,11 +108,23 @@ export function JobInvoices({
   const openEntry = async (entry: FinanceEntry) => {
     if (!entry.document_path) return;
     const url = await getDocumentUrl(entry.document_path);
-    if (!url) {
+    if (!url || !(await viewDocument(url))) {
       setStatus({ kind: 'error', message: 'Could not open the document. Please try again.' });
-      return;
     }
-    Linking.openURL(url).catch(() => {});
+  };
+
+  const shareEntry = async (entry: FinanceEntry) => {
+    if (!entry.document_path) return;
+    setSharingId(entry.id);
+    try {
+      const url = await getDocumentUrl(entry.document_path);
+      const fileName = `${entry.document_number ?? 'document'}.pdf`;
+      if (!url || !(await shareDocument(url, fileName))) {
+        setStatus({ kind: 'error', message: 'Could not share the document. Please try again.' });
+      }
+    } finally {
+      setSharingId(null);
+    }
   };
 
   const startEdit = (entry: FinanceEntry) => {
@@ -257,6 +270,19 @@ export function JobInvoices({
             </View>
           </View>
           <Text style={styles.amountText}>{formatMoney(entry.amount)}</Text>
+          {entry.document_path ? (
+            <Pressable
+              onPress={() => void shareEntry(entry)}
+              disabled={sharingId !== null}
+              hitSlop={6}
+              style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
+              {sharingId === entry.id ? (
+                <ActivityIndicator size="small" color={colors.ocean} />
+              ) : (
+                <Ionicons name="share-outline" size={15} color={colors.ocean} />
+              )}
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={() => (editing ? cancelEdit() : startEdit(entry))}
             hitSlop={6}

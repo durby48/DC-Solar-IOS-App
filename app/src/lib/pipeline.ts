@@ -9,6 +9,7 @@
 import { fetchJobs } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
 import { MOCK_SCHEDULE_DATES, type Job } from '@/lib/mockData';
+import { stageOrDefault, type Stage } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
@@ -162,40 +163,73 @@ export function moneyByJobFromEntries(rows: FinanceRow[]): Map<string, JobMoney>
   return map;
 }
 
+/**
+ * Stages where the contract is signed but the job hasn't been invoiced yet —
+ * their invoice entries are really contract values, shown under "Contracted".
+ * Only Pending Payment jobs count as truly invoiced.
+ */
+const CONTRACTED_STAGES: readonly Stage[] = [
+  'Pending Removal',
+  'Pending Reinstall',
+  'Pending Install',
+  'Pending Permit',
+];
+
 /** Company-wide totals for the Pipeline header (admin only). */
 export interface CompanyTotals {
   /** Sum of each job's current (most recent) estimate + null-job estimates. */
   estimates: number;
-  /** Sum of all invoice entries. */
+  /** Contract values (invoice entries) of jobs contracted but not yet invoiced. */
+  contracted: number;
+  /** Contract values (invoice entries) of Pending Payment jobs only. */
   invoiced: number;
   /** Sum of all payment entries. */
   paid: number;
-  /** (paid − expenses − labor) / paid × 100, or null when paid is 0. */
-  avgPnlPct: number | null;
+  /**
+   * Average per-job profit % across Complete jobs with payments:
+   * (paid − expenses − labor) / paid × 100, averaged. Null when no
+   * completed job has been paid.
+   */
+  avgProfitPct: number | null;
 }
 
 /**
- * Company-wide totals across ALL finance entries (including null-job_id
- * overhead rows) plus labor from employee_hours (hours × rate) and completed
- * time_entries (duration × the employee's pay_rate, matched by email
- * case-insensitively; entries with unknown rates are skipped). At most 4
- * queries; pass prefetched finance rows to reuse the per-card fetch. Returns
- * null on any fetch failure (non-admin / offline) so the header hides.
+ * Company-wide totals for the Pipeline header. Contracted/Invoiced bucket
+ * each job's invoice entries by pipeline stage; Avg Profit averages per-job
+ * profit % over Complete jobs only, where labor = the job's employee_hours
+ * (hours × rate) plus completed time_entries (duration × the employee's
+ * pay_rate, matched by email case-insensitively; unknown rates skipped).
+ * At most 4 queries; pass prefetched finance rows to reuse the per-card
+ * fetch. Returns null on any fetch failure (non-admin / offline) so the
+ * header hides.
  */
 export async function fetchCompanyTotals(
+  jobs: Job[],
   prefetched?: FinanceRow[] | null,
 ): Promise<CompanyTotals | null> {
   try {
     const rows = prefetched ?? (await fetchFinanceEntries());
     if (!rows) return null;
 
+    const stageById = new Map<string, Stage>();
+    for (const job of jobs) {
+      stageById.set(
+        job.id,
+        stageOrDefault((job as unknown as { stage?: unknown }).stage, job.status),
+      );
+    }
+
     // Estimates: current (latest by occurred_on) per job; null-job estimate
-    // entries each count individually.
+    // entries each count individually. Invoices, payments, and expenses are
+    // also accumulated per job so stage buckets and per-job profit work.
     const latestByJob = new Map<string, { amount: number; when: string }>();
     let nullJobEstimates = 0;
-    let invoiced = 0;
     let paid = 0;
-    let expenses = 0;
+    const invoicedByJob = new Map<string, number>();
+    const paidByJob = new Map<string, number>();
+    const expensesByJob = new Map<string, number>();
+    const bump = (map: Map<string, number>, key: string, amount: number) =>
+      map.set(key, (map.get(key) ?? 0) + amount);
     for (const row of rows) {
       const amount = num(row.amount);
       switch (row.type) {
@@ -209,32 +243,46 @@ export async function fetchCompanyTotals(
           }
           break;
         case 'invoice':
-          invoiced += amount;
+          if (row.job_id) bump(invoicedByJob, row.job_id, amount);
           break;
         case 'payment':
           paid += amount;
+          if (row.job_id) bump(paidByJob, row.job_id, amount);
           break;
         case 'expense':
-          expenses += amount;
+          if (row.job_id) bump(expensesByJob, row.job_id, amount);
           break;
       }
     }
     let estimates = nullJobEstimates;
     for (const { amount } of latestByJob.values()) estimates += amount;
 
+    // Contracted vs Invoiced: bucket each job's invoice total by stage.
+    let contracted = 0;
+    let invoiced = 0;
+    for (const [jobId, amount] of invoicedByJob) {
+      const stage = stageById.get(jobId);
+      if (stage === 'Pending Payment') invoiced += amount;
+      else if (stage && CONTRACTED_STAGES.includes(stage)) contracted += amount;
+    }
+
     const [hoursRes, timeRes, employeesRes] = await Promise.all([
-      supabase.from('employee_hours').select('hours, rate').eq('company', COMPANY),
+      supabase.from('employee_hours').select('job_id, hours, rate').eq('company', COMPANY),
       supabase
         .from('time_entries')
-        .select('employee, clock_in, clock_out')
+        .select('job_id, employee, clock_in, clock_out')
         .eq('company', COMPANY),
       supabase.from('employees').select('email, pay_rate'),
     ]);
     if (hoursRes.error || timeRes.error || employeesRes.error) return null;
 
-    let labor = 0;
-    for (const row of (hoursRes.data ?? []) as { hours: unknown; rate: unknown }[]) {
-      labor += num(row.hours) * num(row.rate);
+    const laborByJob = new Map<string, number>();
+    for (const row of (hoursRes.data ?? []) as {
+      job_id: string | null;
+      hours: unknown;
+      rate: unknown;
+    }[]) {
+      if (row.job_id) bump(laborByJob, row.job_id, num(row.hours) * num(row.rate));
     }
 
     const rateByEmail = new Map<string, number>();
@@ -244,19 +292,33 @@ export async function fetchCompanyTotals(
       }
     }
     for (const row of (timeRes.data ?? []) as {
+      job_id: string | null;
       employee: string | null;
       clock_in: string | null;
       clock_out: string | null;
     }[]) {
-      if (!row.clock_in || !row.clock_out) continue; // only completed entries
+      if (!row.job_id || !row.clock_in || !row.clock_out) continue; // only completed entries
       const ms = new Date(row.clock_out).getTime() - new Date(row.clock_in).getTime();
       if (!Number.isFinite(ms) || ms <= 0) continue;
       const rate = row.employee ? rateByEmail.get(row.employee.toLowerCase()) : undefined;
-      if (rate != null) labor += (ms / 3_600_000) * rate; // skip unknown rates
+      if (rate != null) bump(laborByJob, row.job_id, (ms / 3_600_000) * rate); // skip unknown rates
     }
 
-    const avgPnlPct = paid > 0 ? ((paid - expenses - labor) / paid) * 100 : null;
-    return { estimates, invoiced, paid, avgPnlPct };
+    // Avg Profit: mean of per-job profit % over Complete jobs that have
+    // payments — (paid − expenses − labor) / paid per job.
+    let pctSum = 0;
+    let pctCount = 0;
+    for (const [jobId, stage] of stageById) {
+      if (stage !== 'Complete') continue;
+      const jobPaid = paidByJob.get(jobId) ?? 0;
+      if (jobPaid <= 0) continue;
+      const jobCosts = (expensesByJob.get(jobId) ?? 0) + (laborByJob.get(jobId) ?? 0);
+      pctSum += ((jobPaid - jobCosts) / jobPaid) * 100;
+      pctCount += 1;
+    }
+    const avgProfitPct = pctCount > 0 ? pctSum / pctCount : null;
+
+    return { estimates, contracted, invoiced, paid, avgProfitPct };
   } catch {
     return null;
   }

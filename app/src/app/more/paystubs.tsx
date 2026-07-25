@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -17,6 +16,7 @@ import {
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
+import { viewDocument } from '@/lib/pdf';
 import {
   fetchEmployees,
   fetchMyEmployeeId,
@@ -187,11 +187,9 @@ export default function PaystubsScreen() {
 
   const openPaystub = async (doc: EmployeeDocument) => {
     const url = await getPaystubUrl(doc.file_path);
-    if (!url) {
+    if (!url || !(await viewDocument(url))) {
       notify(setStatus, 'error', 'Could not open paystub', 'Please try again.');
-      return;
     }
-    Linking.openURL(url).catch(() => {});
   };
 
   const pickAndUpload = async () => {

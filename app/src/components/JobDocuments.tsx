@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -22,6 +21,7 @@ import {
   type JobDocument,
 } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
+import { shareDocument, viewDocument } from '@/lib/pdf';
 import { supabase } from '@/lib/supabase';
 
 const DOC_TYPES = Object.keys(DOC_TYPE_LABELS) as DocType[];
@@ -57,6 +57,7 @@ export function JobDocuments({ jobId }: { jobId: string }) {
   const [status, setStatus] = useState<{ kind: 'success' | 'error'; message: string } | null>(
     null,
   );
+  const [sharingId, setSharingId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,11 +91,21 @@ export function JobDocuments({ jobId }: { jobId: string }) {
 
   const openDocument = async (doc: JobDocument) => {
     const url = await getDocumentUrl(doc.storage_path);
-    if (!url) {
+    if (!url || !(await viewDocument(url))) {
       notify(setStatus, 'error', 'Could not open document', 'Please try again.');
-      return;
     }
-    Linking.openURL(url).catch(() => {});
+  };
+
+  const shareDoc = async (doc: JobDocument) => {
+    setSharingId(doc.id);
+    try {
+      const url = await getDocumentUrl(doc.storage_path);
+      if (!url || !(await shareDocument(url, doc.file_name))) {
+        notify(setStatus, 'error', 'Could not share document', 'Please try again.');
+      }
+    } finally {
+      setSharingId(null);
+    }
   };
 
   const pickAndUpload = async () => {
@@ -181,6 +192,17 @@ export function JobDocuments({ jobId }: { jobId: string }) {
                   </Text>
                 </View>
               </View>
+              <Pressable
+                onPress={() => shareDoc(doc)}
+                disabled={sharingId !== null}
+                hitSlop={8}
+                style={({ pressed }) => [styles.shareButton, pressed && styles.rowPressed]}>
+                {sharingId === doc.id ? (
+                  <ActivityIndicator size="small" color={colors.ocean} />
+                ) : (
+                  <Ionicons name="share-outline" size={18} color={colors.ocean} />
+                )}
+              </Pressable>
               <Ionicons name="chevron-forward" size={18} color={colors.inkSoft} />
             </Pressable>
           ))}
@@ -281,6 +303,13 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: radii.sm,
     backgroundColor: colors.skySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shareButton: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },

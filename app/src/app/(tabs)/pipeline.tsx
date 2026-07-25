@@ -39,39 +39,39 @@ function jobStage(job: Job) {
 }
 
 function TotalsHeader({ totals }: { totals: CompanyTotals }) {
-  const pnl = totals.avgPnlPct;
+  const pnl = totals.avgProfitPct;
+  const moneyTiles: [string, number][] = [
+    ['Estimates', totals.estimates],
+    ['Contracted', totals.contracted],
+    ['Invoiced', totals.invoiced],
+    ['Paid', totals.paid],
+  ];
   return (
     <View style={styles.totalsCard}>
-      <View style={styles.totalsTile}>
-        <Text style={styles.totalsLabel}>Estimates</Text>
-        <Text style={styles.totalsValue} numberOfLines={1} adjustsFontSizeToFit>
-          {formatCurrency(totals.estimates)}
-        </Text>
+      <View style={styles.totalsGrid}>
+        {moneyTiles.map(([label, amount]) => (
+          <View key={label} style={styles.totalsTile}>
+            <Text style={styles.totalsLabel}>{label}</Text>
+            <Text style={styles.totalsValue} numberOfLines={1} adjustsFontSizeToFit>
+              {formatCurrency(amount)}
+            </Text>
+          </View>
+        ))}
       </View>
-      <View style={styles.totalsTile}>
-        <Text style={styles.totalsLabel}>Invoiced</Text>
-        <Text style={styles.totalsValue} numberOfLines={1} adjustsFontSizeToFit>
-          {formatCurrency(totals.invoiced)}
-        </Text>
-      </View>
-      <View style={styles.totalsTile}>
-        <Text style={styles.totalsLabel}>Paid</Text>
-        <Text style={styles.totalsValue} numberOfLines={1} adjustsFontSizeToFit>
-          {formatCurrency(totals.paid)}
-        </Text>
-      </View>
-      <View style={styles.totalsTile}>
-        <Text style={styles.totalsLabel}>Avg P&L</Text>
+      <View style={styles.profitRow}>
+        <View>
+          <Text style={styles.totalsLabel}>Avg Profit</Text>
+          <Text style={styles.totalsSublabel}>completed jobs</Text>
+        </View>
         <Text
           style={[
-            styles.totalsValue,
-            pnl !== null && pnl < 0 && styles.totalsValueNegative,
+            styles.profitValue,
+            pnl !== null && (pnl >= 0 ? styles.profitPositive : styles.profitNegative),
           ]}
           numberOfLines={1}
           adjustsFontSizeToFit>
-          {pnl !== null ? `${pnl.toFixed(1)}%` : '—'}
+          {pnl !== null ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)}%` : '—'}
         </Text>
-        <Text style={styles.totalsSublabel}>paid − expenses − labor</Text>
       </View>
     </View>
   );
@@ -146,7 +146,7 @@ export default function PipelineScreen() {
       // company totals header; both hide when it fails.
       const financeRows = await fetchFinanceEntries();
       setMoney(financeRows ? moneyByJobFromEntries(financeRows) : null);
-      setTotals(financeRows ? await fetchCompanyTotals(financeRows) : null);
+      setTotals(financeRows ? await fetchCompanyTotals(fetched, financeRows) : null);
       setMyHours(new Map());
     } else if (!mock && role) {
       setMoney(null);
@@ -271,34 +271,55 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     padding: spacing.md,
     marginBottom: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
     ...shadows.card,
   },
+  totalsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: spacing.md,
+  },
   totalsTile: {
-    flex: 1,
+    width: '50%',
     gap: 2,
-    paddingRight: spacing.xs,
+    paddingRight: spacing.sm,
   },
   totalsLabel: {
     color: colors.inkSoft,
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    letterSpacing: 0.6,
   },
   totalsValue: {
     color: colors.ink,
-    fontSize: 15,
+    fontSize: 20,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
   },
-  totalsValueNegative: {
+  profitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.tan,
+  },
+  profitValue: {
+    color: colors.ink,
+    fontSize: 24,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  profitPositive: {
+    color: colors.success,
+  },
+  profitNegative: {
     color: colors.danger,
   },
   totalsSublabel: {
     color: colors.inkSoft,
-    fontSize: 9,
+    fontSize: 10,
   },
   cardWrap: {
     marginBottom: spacing.md,

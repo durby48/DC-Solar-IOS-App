@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
+import { verseOfTheDay } from '@/lib/verses';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -65,7 +66,10 @@ export default function LoginScreen() {
             style={styles.logo}
             resizeMode="contain"
           />
-          <Text style={styles.tagline}>Employee field app</Text>
+          <View style={styles.verseBlock}>
+            <Text style={styles.verseText}>“{verseOfTheDay().text}”</Text>
+            <Text style={styles.verseReference}>— {verseOfTheDay().reference}</Text>
+          </View>
 
           <View style={styles.form}>
             <TextInput
@@ -132,11 +136,24 @@ const styles = StyleSheet.create({
     width: 240,
     height: 91,
   },
-  tagline: {
+  verseBlock: {
+    maxWidth: 340,
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  verseText: {
     color: colors.inkSoft,
     fontSize: 15,
     fontWeight: '600',
-    marginBottom: spacing.md,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  verseReference: {
+    color: colors.ocean,
+    fontSize: 13,
+    fontWeight: '800',
   },
   form: {
     width: '100%',

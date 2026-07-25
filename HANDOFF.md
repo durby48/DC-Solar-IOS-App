@@ -1,6 +1,6 @@
 # DC Solar KC App — Session Handoff
 
-*Last updated 2026-07-24 (end of day-one build session, on a borrowed Mac).*
+*Last updated 2026-07-24 (evening session 2, new Mac: pipeline metrics rework, Pending Install stage, PDF share, home-screen widget).*
 *New Claude Code session? Read this file and [PLAN.md](PLAN.md) first — they replace all prior context.*
 
 ## What this is
@@ -10,7 +10,7 @@ Employee field-ops app for DC Solar LLC (solar installation, Kansas City). One E
 ## Repo layout
 
 - `app/` — the Expo app (SDK 57, TypeScript, expo-router, src/ layout). All app work happens here.
-- `supabase/migrations/` — 7 SQL files, run **manually** by Devon in the Supabase dashboard SQL Editor (no CLI access). Status: **1–6 confirmed applied; #7 (finance_editing) delivered but not yet confirmed — ASK DEVON.**
+- `supabase/migrations/` — 9 SQL files, run **manually** by Devon in the Supabase dashboard SQL Editor (no CLI access). Status: **1–7 confirmed applied; #8 (pending_install_stage) and #9 (push_tokens) delivered 2026-07-24 — ASK DEVON.**
 - `PLAN.md` — original build plan + phases; still the roadmap.
 - `HANDOFF.md` — this file. Keep it updated at the end of every session.
 - NOT in git: `app/.env` (recreate — see below), `data/` (local business-data exports; the DB is the source of truth), `website/` (separate repo: github.com/durby48/dcsolarkc).
@@ -20,7 +20,13 @@ Employee field-ops app for DC Solar LLC (solar installation, Kansas City). One E
 - Supabase: https://kjamxfezsathrsbztiln.supabase.co — publishable key `sb_publishable_rETJcVvcbKk79wOFSNIlTg_CEFCfbdF` (client-safe). The **secret key** is in Supabase dashboard → Settings → API keys — needed only for admin scripts, never in the app or git.
 - Expo/EAS: account `durby`, org `dc-solar`, project `dc-solar-kc` (id c1bf33f2-33a6-4730-9fb3-4b98405c2c82). `npx eas-cli login` once per machine.
 - Apple: ASC App ID 6794484032, bundle `com.dcsolarkc.fieldapp`, Apple ID devonsd311@gmail.com. TestFlight: https://appstoreconnect.apple.com/apps/6794484032/testflight/ios
-- Builds shipped: #2 (first TestFlight), #3 (Pipeline/PM/More), #4 (stages/totals), #5 (picker fix, stage refresh, finance editing, skyline icon) — #5 submitted at end of session.
+- Builds shipped: #2 (first TestFlight), #3 (Pipeline/PM/More), #4 (stages/totals), #5 (picker fix, stage refresh, finance editing, skyline icon), #14 (session 2: pipeline Contracted/Invoiced buckets + per-completed-job Avg Profit, Pending Install stage, in-app PDF view + share sheet, home-screen widget; #6–#13 were burned by failed attempts — autoIncrement bumps on every try).
+- Apple Team ID: E4B2Y6BWCH (in app.json ios.appleTeamId — needed by @bacons/apple-targets).
+- EAS env vars (production): EXPO_PUBLIC_SUPABASE_URL/KEY now live on EAS servers — needed because the repo-root .gitignore excludes `.env` from EAS uploads (day-one builds predated the git repo, so this only bit now).
+- **EAS build gotchas (learned the hard way on 2026-07-24):**
+  - EAS builders run npm 10; local Mac has npm 11. After adding/updating deps, regenerate the lock with `npx -y npm@10 install --package-lock-only` and verify `npx -y npm@10 ci --dry-run`, or the build dies at Install dependencies with "lock file out of sync".
+  - eas-cli's App Groups capability auto-sync hits an Apple API bug ("request entity is not a valid request document object"). App Groups were enabled manually in the Apple Developer portal (group.com.dcsolarkc.fieldapp on both com.dcsolarkc.fieldapp and .widget) — done, shouldn't recur.
+  - Creating a provisioning profile for a NEW target requires a real Apple ID login (interactive) once; after that, builds are fully `--non-interactive` again.
 - Twilio: not yet created. EIN for A2P registration: 93-3073873 (Devon enters it into Twilio forms personally).
 
 ## Windows setup (first time)
@@ -59,7 +65,21 @@ All 6 employees have Supabase auth logins; shared temp password `DCSolarKC2026` 
 - **finance_entries** got admin UPDATE/DELETE only in migration 7; older code paths assume insert-only — the app's edit UI shows a friendly migration message if #7 isn't applied.
 - **Receipts** are a review queue: crew insert → admin approve → the approval INSERTS a finance_entries expense (tagged in `extracted`). Don't let crew write finance_entries directly.
 - **Location**: foreground-only GPS at clock in/out (no background tracking yet — that's a future phase with a consent policy).
+- **Pipeline header buckets (session 2):** "Contracted" = invoice-entry totals of jobs in Pending Removal/Reinstall/Install/Permit; "Invoiced" = Pending Payment jobs only; "Avg Profit" = mean of per-job (paid − expenses − labor)/paid over Complete jobs with payments. All in `lib/pipeline.ts::fetchCompanyTotals` (needs the jobs list for stages).
+- **Home-screen widget (session 2):** WidgetKit target in `app/targets/widget/` via @bacons/apple-targets; app pushes today's job + clock state through App Group `group.com.dcsolarkc.fieldapp` (`lib/widget.ts`, called from the Today screen). Widget shows a live timer while clocked in. Data refreshes only when the app runs — no background fetch.
+- **PDF view/share (session 2):** `lib/pdf.ts` — in-app browser sheet for viewing, expo-file-system download + share sheet (iMessage etc.) for sharing. Used by JobDocuments, JobInvoices, paystubs.
 - Historic data imported from Devon's P&L spreadsheet is tagged `pnl-import-2026-07-24` (finance_entries.extracted / employee_hours description).
+
+## Notifications (added 2026-07-24 evening)
+
+- **Local job reminders** (shipped): `lib/notifications.ts` schedules on-device notifications 24h and 1h before each job_schedule_dates start (next 14 days, default 8:00 AM when start_time is null). Re-synced on every Today-screen load; deduped via data.type tag. No server needed.
+- **Verse of the day** (shipped): `lib/verses.ts` (42 public-domain-phrasing verses about work), shown on the sign-in screen instead of the old tagline; rotates daily, same verse for the whole crew.
+- **Push token registration** (shipped, dormant): devices upsert Expo push tokens into `push_tokens` (migration 9) on sign-in. Nothing sends pushes yet.
+- **Email-triggered pushes** (NEXT PHASE — payments received / contracts signed / estimates accepted, which Devon currently learns about via email to devon@dcsolarkc.com). Plan:
+  1. Devon runs `npx eas-cli credentials -p ios` once to add an APNs push key (remote push won't deliver without it; local reminders are unaffected).
+  2. Supabase Edge Function `notify` (service role): takes {title, body, emails?} → looks up push_tokens → POSTs to https://exp.host/--/api/v2/push/send.
+  3. Email ingestion into that function — need to know Devon's email provider for devon@dcsolarkc.com (Google Workspace? forwarded Gmail?). Options: Gmail Apps Script filter-forwarder (simplest), Cloudflare Email Routing worker on dcsolarkc.com, or polling Gmail API from a scheduled edge function. Parse sender/subject (QuickBooks/DocuSign/etc.) → call notify.
+  4. ASK DEVON: which provider hosts dcsolarkc.com mail, and which services send the payment/contract/estimate emails.
 
 ## State / near-term TODO
 

@@ -150,6 +150,33 @@ export async function clockIn(params: {
   }
 }
 
+/**
+ * Seconds worked today across the employee's COMPLETED punches (open punches
+ * are excluded — the caller adds live elapsed time itself). Zero on error.
+ */
+export async function fetchTodayCompletedSeconds(email: string): Promise<number> {
+  try {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const { data, error } = await supabase
+      .from('time_entries')
+      .select('clock_in, clock_out')
+      .eq('company', COMPANY)
+      .eq('employee', email)
+      .gte('clock_in', startOfDay.toISOString())
+      .not('clock_out', 'is', null);
+    if (error || !data) return 0;
+    let seconds = 0;
+    for (const row of data as { clock_in: string; clock_out: string }[]) {
+      const ms = new Date(row.clock_out).getTime() - new Date(row.clock_in).getTime();
+      if (Number.isFinite(ms) && ms > 0) seconds += ms / 1000;
+    }
+    return seconds;
+  } catch {
+    return 0;
+  }
+}
+
 /** Close an open punch with a clock-out timestamp and fresh best-effort coords. */
 export async function clockOut(entry: TimeEntry): Promise<ClockResult> {
   const gps = await captureGps();

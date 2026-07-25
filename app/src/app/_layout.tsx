@@ -2,6 +2,10 @@ import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 import { colors } from '@/constants/theme';
+import { configureNotificationHandler } from '@/lib/notifications';
+
+// Show notification banners even while the app is in the foreground.
+configureNotificationHandler();
 
 const appTheme = {
   ...DefaultTheme,

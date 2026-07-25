@@ -9,7 +9,11 @@
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "com.dcsolarkc.fieldapp",
+      "appleTeamId": "E4B2Y6BWCH",
       "supportsTablet": false,
+      "entitlements": {
+        "com.apple.security.application-groups": ["group.com.dcsolarkc.fieldapp"]
+      },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "DC Solar uses your location to stamp clock-in and clock-out punches for accurate job records.",
         "NSCameraUsageDescription": "DC Solar uses the camera to take job photos and receipt pictures.",
@@ -41,7 +45,9 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-sharing"
+      "expo-sharing",
+      "expo-notifications",
+      "@bacons/apple-targets"
     ],
     "experiments": {
       "typedRoutes": true,
