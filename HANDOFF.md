@@ -78,8 +78,8 @@ All 6 employees have Supabase auth logins; shared temp password `DCSolarKC2026` 
 - **Email-triggered pushes** (NEXT PHASE — payments received / contracts signed / estimates accepted, which Devon currently learns about via email to devon@dcsolarkc.com). Plan:
   1. Devon runs `npx eas-cli credentials -p ios` once to add an APNs push key (remote push won't deliver without it; local reminders are unaffected).
   2. Supabase Edge Function `notify` (service role): takes {title, body, emails?} → looks up push_tokens → POSTs to https://exp.host/--/api/v2/push/send.
-  3. Email ingestion into that function — need to know Devon's email provider for devon@dcsolarkc.com (Google Workspace? forwarded Gmail?). Options: Gmail Apps Script filter-forwarder (simplest), Cloudflare Email Routing worker on dcsolarkc.com, or polling Gmail API from a scheduled edge function. Parse sender/subject (QuickBooks/DocuSign/etc.) → call notify.
-  4. ASK DEVON: which provider hosts dcsolarkc.com mail, and which services send the payment/contract/estimate emails.
+  3. Email ingestion (ANSWERED 2026-07-24): devon@dcsolarkc.com is **Google Workspace**; payment confirmations come from **varied contracting companies** (no single fixed sender like QuickBooks). Because senders vary, match via Gmail filters Devon curates, not a hardcoded sender list. Design: Devon creates Gmail filters that apply label `DC-Notify` (e.g., subject contains "payment"/"remittance"/"contract"/"estimate accepted", or per-GC sender filters). A **Google Apps Script** on his account runs every 5 min: search `label:DC-Notify -label:DC-Notified`, POST {from, subject, snippet} to the Supabase Edge Function (shared-secret header), then relabel to DC-Notified. New GC? Devon just adds a Gmail filter — no code change.
+  4. Complementary in-app trigger (no email needed): Supabase database webhook on finance_entries INSERT (type=payment) → same notify function, so payments recorded in the app also push to admins.
 
 ## State / near-term TODO
 
