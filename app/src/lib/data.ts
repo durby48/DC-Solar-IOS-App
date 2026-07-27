@@ -310,6 +310,36 @@ export async function uploadJobPhoto(params: {
   }
 }
 
+export type DeletePhotoResult = { ok: true } | { ok: false; message: string };
+
+/**
+ * Delete a job photo (admin-only per RLS): remove the job_photos row, then
+ * best-effort delete the storage file (an orphaned file is harmless; a
+ * dangling row is not, so the row goes first). Never throws.
+ */
+export async function deleteJobPhoto(photo: JobPhoto): Promise<DeletePhotoResult> {
+  try {
+    const { data, error } = await supabase
+      .from('job_photos')
+      .delete()
+      .eq('company', COMPANY)
+      .eq('id', photo.id)
+      .select('id');
+    if (error) return { ok: false, message: error.message };
+    if (!data || data.length === 0) {
+      return { ok: false, message: 'Only admins can delete photos.' };
+    }
+    // Best-effort file cleanup (needs the media-delete migration).
+    await supabase.storage
+      .from(PHOTOS_BUCKET)
+      .remove([photo.storage_path])
+      .catch(() => {});
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not delete the photo.' };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Schedule dates (job_schedule_dates)
 // ---------------------------------------------------------------------------

@@ -14,7 +14,14 @@ import {
 } from 'react-native';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
-import { fetchJobPhotos, getPhotoUrl, uploadJobPhoto, type JobPhoto } from '@/lib/data';
+import {
+  deleteJobPhoto,
+  fetchJobPhotos,
+  getPhotoUrl,
+  uploadJobPhoto,
+  type JobPhoto,
+} from '@/lib/data';
+import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
 /** Show success/error feedback: Alert on native, inline status text on web. */
@@ -33,11 +40,15 @@ function notify(
 }
 
 export function JobPhotos({ jobId }: { jobId: string }) {
+  const role = useRole();
   const [photos, setPhotos] = useState<JobPhoto[]>([]);
   const [photosState, setPhotosState] = useState<'loading' | 'ok' | 'unavailable'>('loading');
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [signedIn, setSignedIn] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // Two-tap delete confirm (admins): first tap arms the red badge, second deletes.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [status, setStatus] = useState<{ kind: 'success' | 'error'; message: string } | null>(
     null,
   );
@@ -94,6 +105,24 @@ export function JobPhotos({ jobId }: { jobId: string }) {
       return;
     }
     Linking.openURL(url).catch(() => {});
+  };
+
+  const pressDelete = async (photo: JobPhoto) => {
+    if (confirmDeleteId !== photo.id) {
+      setStatus(null);
+      setConfirmDeleteId(photo.id);
+      return;
+    }
+    setConfirmDeleteId(null);
+    setDeletingId(photo.id);
+    const result = await deleteJobPhoto(photo);
+    setDeletingId(null);
+    if (result.ok) {
+      setStatus({ kind: 'success', message: 'Photo deleted.' });
+      await loadPhotos();
+    } else {
+      notify(setStatus, 'error', 'Could not delete photo', result.message);
+    }
   };
 
   const uploadAssets = async (assets: ImagePicker.ImagePickerAsset[]) => {
@@ -189,25 +218,47 @@ export function JobPhotos({ jobId }: { jobId: string }) {
         </View>
       ) : (
         <View style={styles.grid}>
-          {photos.map((photo) => (
-            <Pressable
-              key={photo.id}
-              onPress={() => openPhoto(photo)}
-              style={({ pressed }) => [styles.thumbWrap, pressed && styles.thumbPressed]}>
-              {urls[photo.id] ? (
-                <Image
-                  source={{ uri: urls[photo.id] }}
-                  style={styles.thumb}
-                  contentFit="cover"
-                  transition={150}
-                />
-              ) : (
-                <View style={[styles.thumb, styles.thumbLoading]}>
-                  <ActivityIndicator color={colors.ocean} size="small" />
-                </View>
-              )}
-            </Pressable>
-          ))}
+          {photos.map((photo) => {
+            const confirming = confirmDeleteId === photo.id;
+            const busy = deletingId === photo.id;
+            return (
+              <Pressable
+                key={photo.id}
+                onPress={() => openPhoto(photo)}
+                style={({ pressed }) => [styles.thumbWrap, pressed && styles.thumbPressed]}>
+                {urls[photo.id] ? (
+                  <Image
+                    source={{ uri: urls[photo.id] }}
+                    style={styles.thumb}
+                    contentFit="cover"
+                    transition={150}
+                  />
+                ) : (
+                  <View style={[styles.thumb, styles.thumbLoading]}>
+                    <ActivityIndicator color={colors.ocean} size="small" />
+                  </View>
+                )}
+                {role?.isAdmin ? (
+                  <Pressable
+                    onPress={() => void pressDelete(photo)}
+                    disabled={busy}
+                    hitSlop={6}
+                    style={[styles.deleteBadge, confirming && styles.deleteBadgeArmed]}>
+                    {busy ? (
+                      <ActivityIndicator size="small" color={colors.white} />
+                    ) : (
+                      <Ionicons name="trash" size={13} color={colors.white} />
+                    )}
+                  </Pressable>
+                ) : null}
+                {confirming ? (
+                  <View style={styles.confirmStrip}>
+                    <Text style={styles.confirmStripText}>Tap again to delete</Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            );
+          })}
         </View>
       )}
 
@@ -302,6 +353,34 @@ const styles = StyleSheet.create({
   },
   thumbPressed: {
     opacity: 0.7,
+  },
+  deleteBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(61, 53, 46, 0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteBadgeArmed: {
+    backgroundColor: colors.danger,
+  },
+  confirmStrip: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.danger,
+    paddingVertical: 2,
+  },
+  confirmStripText: {
+    color: colors.white,
+    fontSize: 10,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   thumb: {
     width: '100%',
