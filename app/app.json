@@ -56,8 +56,31 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "c1bf33f2-33a6-4730-9fb3-4b98405c2c82"
+        "projectId": "c1bf33f2-33a6-4730-9fb3-4b98405c2c82",
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "bundleIdentifier": "com.dcsolarkc.fieldapp.widget",
+                  "targetName": "widget",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.dcsolarkc.fieldapp"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/c1bf33f2-33a6-4730-9fb3-4b98405c2c82"
     }
   }
 }
