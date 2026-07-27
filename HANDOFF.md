@@ -28,6 +28,7 @@ Employee field-ops app for DC Solar LLC (solar installation, Kansas City). One E
   - eas-cli's App Groups capability auto-sync hits an Apple API bug ("request entity is not a valid request document object"). App Groups were enabled manually in the Apple Developer portal (group.com.dcsolarkc.fieldapp on both com.dcsolarkc.fieldapp and .widget) — done, shouldn't recur.
   - Creating a provisioning profile for a NEW target requires a real Apple ID login (interactive) once; after that, builds are fully `--non-interactive` again.
 - Twilio: not yet created. EIN for A2P registration: 93-3073873 (Devon enters it into Twilio forms personally).
+- **Web app (2026-07-27):** Vercel project `dc-solar-app` (account devonsd311-2585, same one as the dcsolarkc website) serves the static Expo web export — live at https://dc-solar-app.vercel.app, aliased to **app.dcsolarkc.com** (⚠️ works only after Devon adds DNS: CNAME `app` → `cname.vercel-dns.com` at the domain's Google DNS — dcsolarkc.com is NOT on Vercel nameservers). Same Supabase/auth/RLS as iOS; native-only features (widget, push, share sheet, contract-PDF generation) degrade gracefully on web.
 
 ## Windows setup (first time)
 
@@ -39,8 +40,9 @@ Employee field-ops app for DC Solar LLC (solar installation, Kansas City). One E
    EXPO_PUBLIC_SUPABASE_KEY=sb_publishable_rETJcVvcbKk79wOFSNIlTg_CEFCfbdF
    ```
 4. Dev: `npx expo start` → scan QR with Expo Go on iPhone (same Wi-Fi), or press `w` for web.
-5. Ship: `npx eas-cli login` then `npx eas-cli build --platform ios --profile production --auto-submit --non-interactive` (fully hands-free; ascAppId is in eas.json).
+5. Ship iOS: `npx eas-cli login` then `npx eas-cli build --platform ios --profile production --auto-submit --non-interactive` (fully hands-free; ascAppId is in eas.json).
 6. Verify before shipping: `npx tsc --noEmit` and `npx expo export --platform web` must both pass.
+7. Ship web (added 2026-07-27 — do this with every iOS build so app.dcsolarkc.com stays in lockstep): from `app/`, after a fresh `npx expo export --platform web`: `Copy-Item .vercel dist -Recurse -Force; cd dist; npx vercel deploy --prod --yes`. The Vercel project link lives at `app/.vercel` (gitignored — recreate with `npx vercel link --yes --project dc-solar-app`); `app/public/vercel.json` (cleanUrls + dynamic-route rewrites) rides into every export automatically.
 
 ## People / logins
 

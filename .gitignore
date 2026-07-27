@@ -10,3 +10,5 @@ website/
 data/
 .expo/
 dist/
+
+.vercel
