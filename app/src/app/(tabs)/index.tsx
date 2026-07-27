@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,10 +14,11 @@ import {
   getSessionEmail,
   type TimeEntry,
 } from '@/lib/clock';
-import { fetchJobs } from '@/lib/data';
-import { formatElapsed, formatFullDate, formatShortDate, todayISO } from '@/lib/dates';
+import { fetchJobs, fetchScheduleEntries, type ScheduleEntry } from '@/lib/data';
+import { formatElapsed, formatFullDate, todayISO } from '@/lib/dates';
 import { type Job } from '@/lib/mockData';
 import { registerPushToken, scheduleJobReminders } from '@/lib/notifications';
+import { formatTimeLabel } from '@/lib/time';
 import { updateWidgetState } from '@/lib/widget';
 
 const PUNCH_KEY = 'dcsolar.punch';
@@ -29,11 +30,52 @@ function greeting(): string {
   return 'Good evening';
 }
 
-export default function TodayScreen() {
+/** One row of the week list: a day label plus that day's schedule entries. */
+interface WeekRow {
+  dateISO: string;
+  label: string;
+  isTomorrow: boolean;
+  entries: ScheduleEntry[];
+}
+
+/**
+ * The rest of the working week, starting tomorrow through Saturday
+ * (Mon–Sat week; a Saturday "tomorrow" is Sunday, then the loop stops at
+ * the following Saturday so weekends still show what's coming).
+ */
+function buildWeekRows(entries: ScheduleEntry[]): WeekRow[] {
+  const byDate = new Map<string, ScheduleEntry[]>();
+  for (const entry of entries) {
+    const list = byDate.get(entry.work_date) ?? [];
+    list.push(entry);
+    byDate.set(entry.work_date, list);
+  }
+  const rows: WeekRow[] = [];
+  for (let i = 1; i <= 7; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    const dow = d.getDay();
+    if (i > 1 && dow === 0) break; // ran past Saturday — week over
+    const dateISO = `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+    rows.push({
+      dateISO,
+      label: i === 1 ? 'Tomorrow' : d.toLocaleDateString('en-US', { weekday: 'long' }),
+      isTomorrow: i === 1,
+      entries: byDate.get(dateISO) ?? [],
+    });
+    if (i > 1 && dow === 6) break; // Saturday included — stop
+  }
+  return rows;
+}
+
+export default function CalendarScreen() {
+  const router = useRouter();
   const [clockedInAt, setClockedInAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isMock, setIsMock] = useState(false);
+  const [scheduleEntries, setScheduleEntries] = useState<ScheduleEntry[]>([]);
+  const [scheduleIsMock, setScheduleIsMock] = useState(false);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [openEntry, setOpenEntry] = useState<TimeEntry | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -107,6 +149,11 @@ export default function TodayScreen() {
         if (cancelled) return;
         setJobs(fetched);
         setIsMock(mock);
+      });
+      fetchScheduleEntries().then(({ entries, isMock: mock }) => {
+        if (cancelled) return;
+        setScheduleEntries(entries);
+        setScheduleIsMock(mock);
       });
       return () => {
         cancelled = true;
@@ -211,10 +258,17 @@ export default function TodayScreen() {
   }, [jobs, openEntry, clockedInAt, sessionEmail]);
 
   const today = todayISO();
-  const todaysJobs = jobs.filter((j) => j.scheduled_for === today);
-  const nextJob = jobs
-    .filter((j) => j.scheduled_for !== null && j.scheduled_for > today && j.status !== 'completed')
-    .sort((a, b) => (a.scheduled_for ?? '').localeCompare(b.scheduled_for ?? ''))[0];
+  // Signed-in with an empty real schedule: the schedule fetch falls back to
+  // mock — treat that as "no entries" instead of showing demo rows.
+  const realEntries = scheduleIsMock && !isMock ? [] : scheduleEntries;
+  const todayEntries = realEntries.filter((e) => e.work_date === today);
+  const todaysJobs =
+    todayEntries.length > 0
+      ? todayEntries
+          .map((e) => e.job)
+          .filter((job, index, arr) => arr.findIndex((j) => j.id === job.id) === index)
+      : jobs.filter((j) => j.scheduled_for === today);
+  const weekRows = buildWeekRows(realEntries);
 
   const showJobChips = sessionEmail !== null && !clockedIn && todaysJobs.length > 0;
 
@@ -300,12 +354,39 @@ export default function TodayScreen() {
           </View>
         )}
 
-        {nextJob ? (
-          <>
-            <Text style={styles.sectionTitle}>Up next</Text>
-            <JobCard job={nextJob} subtitle={formatShortDate(nextJob.scheduled_for)} />
-          </>
-        ) : null}
+        <Text style={styles.sectionTitle}>This week</Text>
+        <View style={styles.weekCard}>
+          {weekRows.map((row, index) => (
+            <View
+              key={row.dateISO}
+              style={[styles.weekRow, index > 0 && styles.weekRowBorder]}>
+              <Text style={styles.weekDay}>{row.label}</Text>
+              <View style={styles.weekJobs}>
+                {row.entries.length > 0 ? (
+                  row.entries.map((entry) => {
+                    const time = formatTimeLabel(entry.start_time);
+                    return (
+                      <Pressable
+                        key={entry.id}
+                        onPress={() =>
+                          router.push({ pathname: '/job/[id]', params: { id: entry.job.id } })
+                        }
+                        style={({ pressed }) => pressed && styles.pressed}>
+                        <Text style={styles.weekJobText} numberOfLines={2}>
+                          {entry.job.name}
+                          {entry.job.address ? ` — ${entry.job.address}` : ''}
+                          {time ? ` · ${time}` : ''}
+                        </Text>
+                      </Pressable>
+                    );
+                  })
+                ) : row.isTomorrow ? (
+                  <Text style={styles.weekEmptyText}>No work for tomorrow</Text>
+                ) : null}
+              </View>
+            </View>
+          ))}
+        </View>
 
         {isMock ? <Text style={styles.mockNote}>Showing demo data</Text> : null}
       </ScrollView>
@@ -420,6 +501,44 @@ const styles = StyleSheet.create({
   },
   jobList: {
     gap: spacing.md,
+  },
+  weekCard: {
+    backgroundColor: colors.white,
+    borderRadius: radii.md,
+    ...shadows.card,
+  },
+  weekRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 4,
+  },
+  weekRowBorder: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.tan,
+  },
+  weekDay: {
+    width: 92,
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  weekJobs: {
+    flex: 1,
+    gap: spacing.xs,
+    minHeight: 18,
+  },
+  weekJobText: {
+    color: colors.ocean,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  weekEmptyText: {
+    color: colors.inkSoft,
+    fontSize: 14,
+    fontWeight: '600',
+    fontStyle: 'italic',
   },
   emptyCard: {
     backgroundColor: colors.skySoft,
