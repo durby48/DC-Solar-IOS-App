@@ -105,11 +105,6 @@ export default function LoginScreen() {
               )}
             </Pressable>
 
-            <Pressable
-              onPress={() => router.replace('/(tabs)')}
-              style={({ pressed }) => pressed && styles.pressed}>
-              <Text style={styles.demoLink}>Continue in demo mode</Text>
-            </Pressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -189,12 +184,5 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 17,
     fontWeight: '800',
-  },
-  demoLink: {
-    color: colors.ocean,
-    fontSize: 15,
-    fontWeight: '700',
-    textAlign: 'center',
-    paddingVertical: spacing.sm,
   },
 });

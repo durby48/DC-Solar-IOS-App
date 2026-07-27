@@ -42,7 +42,14 @@ export async function fetchJobs(): Promise<{ jobs: Job[]; isMock: boolean }> {
   }
 }
 
-export type DocType = 'contract' | 'estimate' | 'invoice' | 'permit' | 'photo_report' | 'other';
+export type DocType =
+  | 'contract'
+  | 'estimate'
+  | 'invoice'
+  | 'permit'
+  | 'photo_report'
+  | 'materials'
+  | 'other';
 
 export const DOC_TYPE_LABELS: Record<DocType, string> = {
   contract: 'Contract',
@@ -50,6 +57,7 @@ export const DOC_TYPE_LABELS: Record<DocType, string> = {
   invoice: 'Invoice',
   permit: 'Permit',
   photo_report: 'Photo report',
+  materials: 'Materials',
   other: 'Other',
 };
 

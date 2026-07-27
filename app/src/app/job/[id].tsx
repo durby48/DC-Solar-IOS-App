@@ -15,6 +15,7 @@ import { CustomerCard } from '@/components/CustomerCard';
 import { JobDocuments } from '@/components/JobDocuments';
 import { JobFinanceHeader } from '@/components/JobFinanceHeader';
 import { JobInvoices } from '@/components/JobInvoices';
+import { JobMaterials } from '@/components/JobMaterials';
 import { JobPhotos } from '@/components/JobPhotos';
 import { JobScheduleDates } from '@/components/JobScheduleDates';
 import { StatusPill } from '@/components/StatusPill';
@@ -204,11 +205,11 @@ export default function JobDetailScreen() {
 
             <JobPhotos jobId={job.id} />
 
-            <Text style={styles.sectionTitle}>Materials</Text>
-            <View style={styles.placeholderCard}>
-              <Ionicons name="hammer" size={22} color={colors.inkSoft} />
-              <Text style={styles.placeholderText}>Coming soon</Text>
-            </View>
+            <JobMaterials
+              jobId={job.id}
+              isAdmin={role?.isAdmin ?? false}
+              isMock={isMockJob}
+            />
           </>
         )}
       </ScrollView>
