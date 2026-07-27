@@ -168,7 +168,7 @@ export function moneyByJobFromEntries(rows: FinanceRow[]): Map<string, JobMoney>
  * their invoice entries are really contract values, shown under "Contracted".
  * Only Pending Payment jobs count as truly invoiced.
  */
-const CONTRACTED_STAGES: readonly Stage[] = [
+export const CONTRACTED_STAGES: readonly Stage[] = [
   'Pending Removal',
   'Pending Reinstall',
   'Pending Install',

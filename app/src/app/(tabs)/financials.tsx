@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -24,7 +24,11 @@ import {
   type FinancialsData,
   type LedgerEntry,
 } from '@/lib/financials';
-import { fetchPipelineJobs } from '@/lib/pipeline';
+import {
+  fetchCompanyTotals,
+  fetchPipelineJobs,
+  type CompanyTotals,
+} from '@/lib/pipeline';
 import { useRole } from '@/lib/role';
 import { isValidISODate } from '@/lib/time';
 
@@ -72,10 +76,61 @@ function OverviewCard({ data }: { data: FinancialsData }) {
   );
 }
 
+/**
+ * Pipeline-mirror card: the exact numbers from the Pipeline header, each
+ * money tile tappable to its company-wide drill-down ledger.
+ */
+function PipelineTotalsCard({ totals }: { totals: CompanyTotals }) {
+  const router = useRouter();
+  const pnl = totals.avgProfitPct;
+  const tiles: { label: string; amount: number; view: string }[] = [
+    { label: 'Estimates', amount: totals.estimates, view: 'estimates' },
+    { label: 'Contracted', amount: totals.contracted, view: 'contracted' },
+    { label: 'Invoiced', amount: totals.invoiced, view: 'invoices' },
+    { label: 'Paid', amount: totals.paid, view: 'paid' },
+  ];
+  return (
+    <View style={styles.overviewCard}>
+      <View style={styles.overviewGrid}>
+        {tiles.map((tile) => (
+          <Pressable
+            key={tile.label}
+            onPress={() => router.push(`/ledger/${tile.view}` as never)}
+            style={({ pressed }) => [styles.overviewTile, pressed && styles.buttonPressed]}>
+            <View style={styles.tileLabelRow}>
+              <Text style={styles.tileLabel}>{tile.label}</Text>
+              <Ionicons name="chevron-forward" size={12} color={colors.ocean} />
+            </View>
+            <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
+              {formatRounded(tile.amount)}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <View style={styles.profitRow}>
+        <View>
+          <Text style={styles.tileLabel}>Avg Profit</Text>
+          <Text style={styles.profitSublabel}>completed jobs</Text>
+        </View>
+        <Text
+          style={[
+            styles.profitValue,
+            pnl !== null && (pnl >= 0 ? styles.netPositive : styles.netNegative),
+          ]}
+          numberOfLines={1}
+          adjustsFontSizeToFit>
+          {pnl !== null ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)}%` : '—'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 export default function FinancialsScreen() {
   const role = useRole();
 
   const [data, setData] = useState<FinancialsData | null>(null);
+  const [totals, setTotals] = useState<CompanyTotals | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [jobOptions, setJobOptions] = useState<JobOption[]>([]);
@@ -109,12 +164,17 @@ export default function FinancialsScreen() {
         fetchPipelineJobs(),
       ]);
       setData(financials);
+      // Same math as the Pipeline header, fed by the same rows we just got.
+      setTotals(
+        financials && !isMock ? await fetchCompanyTotals(jobs, financials.allEntries) : null,
+      );
       if (!isMock) {
         setJobOptions(jobs.map((j) => ({ id: j.id, label: j.job_number ?? j.name })));
         setJobLabels(new Map(jobs.map((j) => [j.id, j.job_number ?? j.name])));
       }
     } else {
       setData(null);
+      setTotals(null);
     }
     setLoaded(true);
   }, [role]);
@@ -402,7 +462,10 @@ export default function FinancialsScreen() {
       ) : !data ? (
         placeholder('Financials are not available right now.')
       ) : (
-        <OverviewCard data={data} />
+        <>
+          <OverviewCard data={data} />
+          {totals ? <PipelineTotalsCard totals={totals} /> : null}
+        </>
       )}
 
       {formOpen && role?.isAdmin && data ? (
@@ -613,6 +676,30 @@ const styles = StyleSheet.create({
   },
   netNegative: {
     color: colors.danger,
+  },
+  tileLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  profitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.tan,
+  },
+  profitSublabel: {
+    color: colors.inkSoft,
+    fontSize: 10,
+  },
+  profitValue: {
+    color: colors.ink,
+    fontSize: 24,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
   },
   formCard: {
     backgroundColor: colors.white,

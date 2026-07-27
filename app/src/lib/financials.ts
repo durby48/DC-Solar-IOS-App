@@ -19,6 +19,8 @@ export interface LedgerEntry {
   description: string | null;
   occurred_on: string | null; // YYYY-MM-DD
   job_id: string | null;
+  document_number: string | null;
+  document_path: string | null;
 }
 
 /** Company money overview + the full expense ledger. */
@@ -33,6 +35,9 @@ export interface FinancialsData {
   expensesThisMonth: number;
   /** Every expense entry, newest first (null dates last). */
   expenseEntries: LedgerEntry[];
+  /** EVERY finance entry (all types), newest first — feeds the pipeline
+   *  mirror card (via fetchCompanyTotals) and the ledger drill-downs. */
+  allEntries: LedgerEntry[];
 }
 
 function num(v: unknown): number {
@@ -53,7 +58,9 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
   try {
     const { data, error } = await supabase
       .from('finance_entries')
-      .select('id, type, amount, counterparty, description, occurred_on, job_id')
+      .select(
+        'id, type, amount, counterparty, description, occurred_on, job_id, document_number, document_path',
+      )
       .eq('company', COMPANY);
     if (error || !data) return null;
 
@@ -76,8 +83,9 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       }
     }
     expenseEntries.sort(byDateDesc);
+    const allEntries = [...rows].sort(byDateDesc);
 
-    return { paid, expenses, net: paid - expenses, expensesThisMonth, expenseEntries };
+    return { paid, expenses, net: paid - expenses, expensesThisMonth, expenseEntries, allEntries };
   } catch {
     return null;
   }
