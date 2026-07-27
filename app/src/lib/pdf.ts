@@ -35,6 +35,35 @@ function safeFileName(fileName: string): string {
 }
 
 /**
+ * Share a freshly generated local PDF (e.g. Print.printToFileAsync output,
+ * whose temp file has a random UUID name) under its proper document name —
+ * the file is copied into cache as `fileName` first so the share sheet and
+ * the receiving app both see "DC-26012-Estimate.pdf", not gibberish.
+ */
+export async function shareLocalPdf(localUri: string, fileName: string): Promise<boolean> {
+  try {
+    if (!(await Sharing.isAvailableAsync())) return false;
+    let uri = localUri;
+    try {
+      const destination = new File(Paths.cache, safeFileName(fileName));
+      if (destination.exists) destination.delete();
+      new File(localUri).copy(destination);
+      uri = destination.uri;
+    } catch {
+      // Copy failed — share the temp file anyway (wrong name beats no share).
+    }
+    await Sharing.shareAsync(uri, {
+      mimeType: 'application/pdf',
+      UTI: 'com.adobe.pdf',
+      dialogTitle: fileName,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Download a signed document URL to cache and open the share sheet
  * (iMessage, Mail, AirDrop…). On web, just opens the URL in a new tab.
  */

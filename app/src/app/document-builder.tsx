@@ -1,7 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Print from 'expo-print';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
-import * as Sharing from 'expo-sharing';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -27,6 +26,7 @@ import {
   type LineItem,
 } from '@/lib/documents';
 import { type Job } from '@/lib/mockData';
+import { shareLocalPdf } from '@/lib/pdf';
 import { getRole, type RoleInfo } from '@/lib/role';
 
 interface ItemRow {
@@ -280,20 +280,10 @@ export default function DocumentBuilderScreen() {
 
   const sharePdf = async () => {
     if (!localPdfUri) return;
-    try {
-      const available = await Sharing.isAvailableAsync();
-      if (!available) {
-        setError('Sharing is not available on this device.');
-        return;
-      }
-      await Sharing.shareAsync(localPdfUri, {
-        mimeType: 'application/pdf',
-        UTI: 'com.adobe.pdf',
-        dialogTitle: `${typeLabel} ${docNumber ?? ''}`.trim(),
-      });
-    } catch {
-      // user cancelled the share sheet — nothing to do
-    }
+    // Copy under the real document name first — the printer's temp file has
+    // a random UUID name that would otherwise show up in the share sheet.
+    const shared = await shareLocalPdf(localPdfUri, `${docNumber ?? 'document'}.pdf`);
+    if (!shared) setError('Sharing is not available on this device.');
   };
 
   const screenTitle = `New ${type}`;

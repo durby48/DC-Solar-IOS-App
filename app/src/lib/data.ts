@@ -246,17 +246,36 @@ export async function uploadJobPhoto(params: {
 }): Promise<UploadPhotoResult> {
   const { jobId, uri } = params;
   try {
-    const response = await fetch(uri);
-    const body = await response.arrayBuffer();
+    // Reading the picked file and pushing it to storage can both hit
+    // transient network timeouts on cell connections — retry each once
+    // automatically before surfacing an error.
+    let body: ArrayBuffer | null = null;
+    for (let attempt = 0; attempt < 2 && !body; attempt++) {
+      try {
+        const response = await fetch(uri);
+        body = await response.arrayBuffer();
+      } catch (e) {
+        if (attempt === 1) throw e;
+      }
+    }
+    if (!body) return { ok: false, message: 'Could not read the photo.' };
 
     const rawName = params.fileName ?? 'photo.jpg';
     const base = rawName.replace(/\.[A-Za-z0-9]+$/, '').replace(/[^A-Za-z0-9._-]+/g, '_');
-    const storagePath = `${jobId}/${Date.now()}-${base || 'photo'}.jpg`;
     const contentType = params.contentType ?? 'image/jpeg';
 
-    const { error: uploadError } = await supabase.storage
-      .from(PHOTOS_BUCKET)
-      .upload(storagePath, body, { contentType });
+    // Fresh path per attempt (the bucket is insert-only; a retry must not
+    // collide with a partially-written first attempt).
+    let storagePath = '';
+    let uploadError: { message: string } | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      storagePath = `${jobId}/${Date.now()}-${base || 'photo'}.jpg`;
+      const { error } = await supabase.storage
+        .from(PHOTOS_BUCKET)
+        .upload(storagePath, body, { contentType });
+      uploadError = error;
+      if (!error) break;
+    }
     if (uploadError) return { ok: false, message: uploadError.message };
 
     const { data: userData } = await supabase.auth.getUser();
