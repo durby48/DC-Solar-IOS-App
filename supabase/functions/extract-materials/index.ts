@@ -10,10 +10,18 @@
 
 import { extractText, getDocumentProxy } from 'npm:unpdf';
 
+// Browser callers (the web app) preflight with OPTIONS — answer it and
+// echo CORS headers on every response, or the browser blocks the call.
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+
 function json(status: number, payload: Record<string, unknown>): Response {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...CORS_HEADERS },
   });
 }
 
@@ -71,6 +79,7 @@ function parseItems(text: string): { name: string; qty: number }[] {
 }
 
 Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
   if (req.method !== 'POST') return json(405, { error: 'POST only' });
 
   const url = Deno.env.get('SUPABASE_URL');
