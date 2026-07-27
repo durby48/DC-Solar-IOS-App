@@ -1,9 +1,10 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -26,7 +27,7 @@ import {
   type NextDate,
 } from '@/lib/pipeline';
 import { useRole } from '@/lib/role';
-import { stageOrDefault } from '@/lib/stages';
+import { STAGES, stageOrDefault, type Stage } from '@/lib/stages';
 import { formatTimeLabel } from '@/lib/time';
 
 function formatCurrency(amount: number): string {
@@ -134,6 +135,7 @@ export default function PipelineScreen() {
   const [money, setMoney] = useState<Map<string, JobMoney> | null>(null);
   const [totals, setTotals] = useState<CompanyTotals | null>(null);
   const [myHours, setMyHours] = useState<Map<string, number>>(new Map());
+  const [stageFilter, setStageFilter] = useState<Stage | 'All'>('All');
 
   const load = useCallback(async () => {
     const { jobs: fetched, isMock: mock } = await fetchPipelineJobs();
@@ -180,10 +182,26 @@ export default function PipelineScreen() {
     }
   }, [load]);
 
+  const stageCounts = useMemo(() => {
+    const counts = new Map<Stage, number>();
+    for (const job of jobs) {
+      const stage = jobStage(job);
+      counts.set(stage, (counts.get(stage) ?? 0) + 1);
+    }
+    return counts;
+  }, [jobs]);
+
+  const filteredJobs = useMemo(
+    () => (stageFilter === 'All' ? jobs : jobs.filter((job) => jobStage(job) === stageFilter)),
+    [jobs, stageFilter],
+  );
+
+  const filterChips: (Stage | 'All')[] = ['All', ...STAGES];
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <FlatList
-        data={jobs}
+        data={filteredJobs}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.container}
         refreshControl={
@@ -208,6 +226,31 @@ export default function PipelineScreen() {
               ) : null}
             </View>
             {role?.isAdmin && totals ? <TotalsHeader totals={totals} /> : null}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.filterScroll}>
+              <View style={styles.filterRow}>
+                {filterChips.map((chip) => {
+                  const active = stageFilter === chip;
+                  const count = chip === 'All' ? jobs.length : (stageCounts.get(chip) ?? 0);
+                  return (
+                    <Pressable
+                      key={chip}
+                      onPress={() => setStageFilter(chip)}
+                      style={[styles.filterChip, active && styles.filterChipActive]}>
+                      <Text
+                        style={[
+                          styles.filterChipText,
+                          active && styles.filterChipTextActive,
+                        ]}>
+                        {`${chip} (${count})`}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </ScrollView>
           </View>
         }
         renderItem={({ item }) => (
@@ -221,7 +264,13 @@ export default function PipelineScreen() {
           </View>
         )}
         ListEmptyComponent={
-          loaded ? <Text style={styles.empty}>No projects yet.</Text> : null
+          loaded ? (
+            <Text style={styles.empty}>
+              {stageFilter === 'All'
+                ? 'No projects yet.'
+                : `No projects in ${stageFilter}.`}
+            </Text>
+          ) : null
         }
         ListFooterComponent={
           isMock ? <Text style={styles.mockNote}>Showing demo data</Text> : null
@@ -320,6 +369,30 @@ const styles = StyleSheet.create({
   totalsSublabel: {
     color: colors.inkSoft,
     fontSize: 10,
+  },
+  filterScroll: {
+    marginBottom: spacing.md,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  filterChip: {
+    backgroundColor: colors.skySoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs + 2,
+  },
+  filterChipActive: {
+    backgroundColor: colors.ocean,
+  },
+  filterChipText: {
+    color: colors.ocean,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  filterChipTextActive: {
+    color: colors.white,
   },
   cardWrap: {
     marginBottom: spacing.md,

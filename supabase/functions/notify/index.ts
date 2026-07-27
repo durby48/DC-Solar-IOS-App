@@ -58,7 +58,8 @@ function fromName(from: string): string {
   return (match ? match[1] : from).trim();
 }
 
-const MONEY_WORDS = /payment|deposit|remittance|paid|credit/i;
+const MONEY_WORDS =
+  /payment|deposit|remittance|paid|credit|purchase|transaction|debit|withdrawal|charge|transfer/i;
 
 /** Normalize any accepted body shape into {title, body, emails?, audience}. */
 function normalize(payload: Record<string, unknown>): {

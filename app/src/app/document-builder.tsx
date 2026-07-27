@@ -34,7 +34,21 @@ interface ItemRow {
   name: string;
   qty: string;
   rate: string;
+  /** Row added by the Supplement checkbox — carries the warranty description. */
+  supplement?: boolean;
 }
+
+/**
+ * Prefilled "Supplement" estimate line item (racking & railing warranty).
+ * Devon adjusts the quantity per estimate; the price is per panel.
+ */
+const SUPPLEMENT_NAME = 'Supplement';
+const SUPPLEMENT_RATE = '136';
+const SUPPLEMENT_DESCRIPTION =
+  'Replacement of Racking & Railing for modules. Removing the racking and railing voids ' +
+  'the manufacturers warranty on the installed racking, railing, and mounting hardware. ' +
+  'In order to maintain the warranty, new racking and railing must be supplied for this ' +
+  'system. Pricing is listed per panel.';
 
 function formatMoney(amount: number): string {
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -121,6 +135,30 @@ export default function DocumentBuilderScreen() {
     setItems((prev) => (prev.length > 1 ? prev.filter((row) => row.key !== key) : prev));
   };
 
+  const supplementOn = items.some((row) => row.supplement);
+
+  const toggleSupplement = () => {
+    if (supplementOn) {
+      setItems((prev) =>
+        prev.length > 1 || !prev.every((row) => row.supplement)
+          ? prev.filter((row) => !row.supplement)
+          : prev,
+      );
+      return;
+    }
+    setItems((prev) => [
+      ...prev,
+      {
+        key: nextKey,
+        name: SUPPLEMENT_NAME,
+        qty: '1',
+        rate: SUPPLEMENT_RATE,
+        supplement: true,
+      },
+    ]);
+    setNextKey((k) => k + 1);
+  };
+
   const create = async () => {
     if (!job || !docNumber) return;
     setError(null);
@@ -128,7 +166,12 @@ export default function DocumentBuilderScreen() {
 
     const lineItems: LineItem[] = items
       .filter((row) => row.name.trim().length > 0)
-      .map((row) => ({ name: row.name.trim(), qty: parseNum(row.qty), rate: parseNum(row.rate) }));
+      .map((row) => ({
+        name: row.name.trim(),
+        ...(row.supplement ? { description: SUPPLEMENT_DESCRIPTION } : {}),
+        qty: parseNum(row.qty),
+        rate: parseNum(row.rate),
+      }));
     if (lineItems.length === 0) {
       setError('Add at least one line item with a name.');
       return;
@@ -392,6 +435,29 @@ export default function DocumentBuilderScreen() {
                 <Ionicons name="add-circle" size={18} color={colors.ocean} />
                 <Text style={styles.addRowText}>Add line item</Text>
               </Pressable>
+              {type === 'estimate' ? (
+                <>
+                  <Pressable
+                    onPress={toggleSupplement}
+                    style={({ pressed }) => [styles.addRow, pressed && styles.rowPressed]}>
+                    <Ionicons
+                      name={supplementOn ? 'checkbox' : 'square-outline'}
+                      size={18}
+                      color={colors.ocean}
+                    />
+                    <Text style={styles.addRowText}>
+                      Supplement — racking & railing ($136 / panel)
+                    </Text>
+                  </Pressable>
+                  {supplementOn ? (
+                    <Text style={styles.supplementHint}>
+                      Adds the prefilled racking & railing warranty item — set the quantity to
+                      the panel count. The full warranty wording prints under the item on the
+                      PDF.
+                    </Text>
+                  ) : null}
+                </>
+              ) : null}
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>Total</Text>
                 <Text style={styles.totalValue}>{formatMoney(total)}</Text>
@@ -575,6 +641,12 @@ const styles = StyleSheet.create({
   },
   rowPressed: {
     opacity: 0.6,
+  },
+  supplementHint: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: -spacing.xs,
   },
   totalRow: {
     flexDirection: 'row',

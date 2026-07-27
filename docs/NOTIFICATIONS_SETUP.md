@@ -6,6 +6,15 @@ phones as push notifications, and payments recorded in the app push too.
 Devon's Chase side is DONE (2026-07-27): business alerts enabled for
 "online deposit submitted" and "deposit over $1 posted", delivered by email.
 
+**Purchases / outgoing transactions too (added 2026-07-27):** in Chase →
+Profile & Settings → Alerts, also enable the spending-side alerts —
+debit card purchase, ACH/electronic withdrawal, wire transfer sent, and
+check cleared (set thresholds to $1 so everything fires), delivered to
+the same email. They ride the SAME Gmail filter (same Chase sender) —
+no new code or filters needed. The notify function tags any alert whose
+subject/body mentions payment/deposit/purchase/transaction/debit/
+withdrawal/charge/transfer with 💰.
+
 The pipeline: **Chase/GC email → Gmail filter applies `DC-Notify` label →
 Apps Script (every 5 min) → Supabase `notify` edge function → Expo push →
 admin phones.** Plus a direct path with no email: **finance_entries payment
