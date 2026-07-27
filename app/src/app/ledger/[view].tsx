@@ -3,11 +3,13 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
@@ -15,6 +17,11 @@ import { useFocusEffect } from 'expo-router';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { getDocumentUrl } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
+import {
+  generateContractPdf,
+  setJobContractValue,
+  updateFinanceEntry,
+} from '@/lib/documents';
 import { fetchFinancials, type LedgerEntry } from '@/lib/financials';
 import { type Job } from '@/lib/mockData';
 import { shareDocument, viewDocument } from '@/lib/pdf';
@@ -84,7 +91,10 @@ interface JobInfo {
   label: string; // job number or name
   name: string;
   customer: string | null;
+  customerId: string | null;
   stage: Stage;
+  /** Full fetched job row — needed for contract PDF generation. */
+  raw: Job;
 }
 
 interface JobGroup {
@@ -113,6 +123,12 @@ export default function LedgerScreen() {
   const [jobStatus, setJobStatus] = useState<JobStatusFilter>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Inline contract-value editing (contracted view).
+  const [editingJobId, setEditingJobId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [genContract, setGenContract] = useState(true);
+  const [savingContract, setSavingContract] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (role?.isAdmin) {
@@ -129,7 +145,9 @@ export default function LedgerScreen() {
             label: job.job_number ?? job.name,
             name: job.name,
             customer: job.customer?.name ?? null,
+            customerId: job.customer_id,
             stage: stageOrDefault((job as unknown as { stage?: unknown }).stage, job.status),
+            raw: job,
           });
         }
         setJobs(map);
@@ -229,6 +247,50 @@ export default function LedgerScreen() {
     if (!url || !(await viewDocument(url))) {
       setError('Could not open the PDF. Please try again.');
     }
+  };
+
+  const saveContractValue = async (job: JobInfo) => {
+    const target = Number(editValue.replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(target) || target < 0) {
+      setError('Enter a contract value of zero or more.');
+      return;
+    }
+    setSavingContract(true);
+    setError(null);
+    setStatusMsg(null);
+    const result = await setJobContractValue({
+      jobId: job.id,
+      customerId: job.customerId,
+      target,
+    });
+    if (!result.ok) {
+      setSavingContract(false);
+      setError(result.message);
+      return;
+    }
+
+    let message = 'Contract value saved.';
+    if (genContract && target > 0 && Platform.OS !== 'web') {
+      const generated = await generateContractPdf({ job: job.raw, target });
+      if (generated.ok) {
+        if (result.entryId) {
+          await updateFinanceEntry(result.entryId, {
+            document_number: generated.documentNumber,
+            document_path: generated.storagePath,
+          });
+        }
+        message = `Contract value saved — ${generated.documentNumber}.pdf generated.`;
+      } else {
+        message = `Contract value saved, but the contract PDF failed: ${generated.message}`;
+      }
+    } else if (genContract && Platform.OS === 'web') {
+      message = 'Contract value saved. Generate the contract PDF from the iOS app.';
+    }
+
+    setSavingContract(false);
+    setEditingJobId(null);
+    setStatusMsg(message);
+    await load();
   };
 
   const sharePdf = async (entry: LedgerEntry) => {
@@ -345,24 +407,99 @@ export default function LedgerScreen() {
         ) : null}
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {statusMsg ? <Text style={styles.statusText}>{statusMsg}</Text> : null}
 
         {view === 'contracted'
-          ? contractedJobs.map(({ job, value }) => (
-              <Pressable
-                key={job.id}
-                onPress={() => router.push({ pathname: '/job/[id]', params: { id: job.id } })}
-                style={({ pressed }) => [styles.jobCard, pressed && styles.pressed]}>
-                <View style={styles.jobCardHeader}>
-                  <View style={styles.jobChip}>
-                    <Text style={styles.jobChipText}>{job.label}</Text>
+          ? contractedJobs.map(({ job, value }) => {
+              const editing = editingJobId === job.id;
+              return (
+                <View key={job.id} style={styles.jobCard}>
+                  <Pressable
+                    onPress={() =>
+                      router.push({ pathname: '/job/[id]', params: { id: job.id } })
+                    }
+                    style={({ pressed }) => [pressed && styles.pressed]}>
+                    <View style={styles.jobCardHeader}>
+                      <View style={styles.jobChip}>
+                        <Text style={styles.jobChipText}>{job.label}</Text>
+                      </View>
+                      <Text style={styles.stageText}>{job.stage}</Text>
+                    </View>
+                    <Text style={styles.jobName}>{job.name}</Text>
+                    {job.customer ? (
+                      <Text style={styles.jobCustomer}>{job.customer}</Text>
+                    ) : null}
+                  </Pressable>
+                  <View style={styles.valueRow}>
+                    <Text style={styles.jobValue}>Contract value {formatMoney(value)}</Text>
+                    <Pressable
+                      onPress={() => {
+                        setError(null);
+                        setStatusMsg(null);
+                        if (editing) {
+                          setEditingJobId(null);
+                        } else {
+                          setEditingJobId(job.id);
+                          setEditValue(value > 0 ? String(value) : '');
+                          setGenContract(true);
+                        }
+                      }}
+                      hitSlop={6}
+                      style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
+                      <Ionicons name="pencil" size={15} color={colors.ocean} />
+                    </Pressable>
                   </View>
-                  <Text style={styles.stageText}>{job.stage}</Text>
+                  {editing ? (
+                    <View style={styles.editCard}>
+                      <Text style={styles.editLabel}>Contract value ($)</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={editValue}
+                        onChangeText={setEditValue}
+                        placeholder="0.00"
+                        placeholderTextColor={colors.inkSoft}
+                        keyboardType="decimal-pad"
+                      />
+                      <Pressable
+                        onPress={() => setGenContract((on) => !on)}
+                        style={({ pressed }) => [styles.toggleRow, pressed && styles.pressed]}>
+                        <Ionicons
+                          name={genContract ? 'checkbox' : 'square-outline'}
+                          size={18}
+                          color={colors.ocean}
+                        />
+                        <Text style={styles.toggleText}>Generate contract PDF</Text>
+                      </Pressable>
+                      <Text style={styles.toggleHint}>
+                        Creates {job.label}-Contract.pdf in the job's documents. Turn off for
+                        historical jobs where you upload the signed contract instead.
+                      </Text>
+                      <View style={styles.editButtons}>
+                        <Pressable
+                          onPress={() => setEditingJobId(null)}
+                          disabled={savingContract}
+                          hitSlop={8}>
+                          <Text style={styles.cancelText}>Cancel</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => void saveContractValue(job)}
+                          disabled={savingContract}
+                          style={({ pressed }) => [
+                            styles.saveButton,
+                            (pressed || savingContract) && styles.pressed,
+                          ]}>
+                          {savingContract ? (
+                            <ActivityIndicator color={colors.ink} />
+                          ) : (
+                            <Text style={styles.saveButtonText}>Save</Text>
+                          )}
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : null}
                 </View>
-                <Text style={styles.jobName}>{job.name}</Text>
-                {job.customer ? <Text style={styles.jobCustomer}>{job.customer}</Text> : null}
-                <Text style={styles.jobValue}>Contract value {formatMoney(value)}</Text>
-              </Pressable>
-            ))
+              );
+            })
           : groups.map((group) => (
               <View key={group.key} style={styles.groupWrap}>
                 <Pressable
@@ -634,5 +771,85 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: spacing.sm,
+  },
+  statusText: {
+    color: colors.ocean,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
+  valueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  editCard: {
+    backgroundColor: colors.cream,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  editLabel: {
+    color: colors.inkSoft,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  editInput: {
+    backgroundColor: colors.white,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.tan,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm - 2,
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingTop: spacing.xs,
+  },
+  toggleText: {
+    color: colors.ocean,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  toggleHint: {
+    color: colors.inkSoft,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  editButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: spacing.md,
+    marginTop: spacing.xs,
+  },
+  cancelText: {
+    color: colors.inkSoft,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  saveButton: {
+    backgroundColor: colors.sun,
+    borderRadius: radii.pill,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadows.card,
+  },
+  saveButtonText: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

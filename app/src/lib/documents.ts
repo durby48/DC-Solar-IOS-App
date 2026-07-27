@@ -19,6 +19,8 @@ import {
   COMPANY_PHONE,
   COMPANY_WEBSITE,
 } from '@/lib/company';
+import { todayISO } from '@/lib/dates';
+import { type Job } from '@/lib/mockData';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
@@ -89,6 +91,8 @@ export interface FinanceEntryEdit {
   occurred_on?: string | null; // YYYY-MM-DD
   description?: string | null;
   status?: string | null;
+  document_number?: string | null;
+  document_path?: string | null;
 }
 
 /**
@@ -200,7 +204,7 @@ export function lineItemsTotal(items: LineItem[]): number {
 }
 
 export interface DocumentHtmlParams {
-  type: DocumentType;
+  type: DocumentType | 'contract';
   documentNumber: string;
   /** YYYY-MM-DD */
   dateISO: string;
@@ -217,7 +221,8 @@ export interface DocumentHtmlParams {
 
 /** Build the branded, print-friendly HTML for an invoice or estimate. */
 export function buildDocumentHtml(params: DocumentHtmlParams): string {
-  const title = params.type === 'invoice' ? 'Invoice' : 'Estimate';
+  const title =
+    params.type === 'invoice' ? 'Invoice' : params.type === 'contract' ? 'Contract' : 'Estimate';
   const total = lineItemsTotal(params.lineItems);
   const date = new Date(`${params.dateISO}T12:00:00`).toLocaleDateString('en-US', {
     year: 'numeric',
@@ -463,6 +468,180 @@ export async function insertDocumentEntry(params: {
     return { ok: true };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not save the entry.' };
+  }
+}
+
+/**
+ * Set a job's contract value (its "Invoiced" total) directly. Invoice
+ * DOCUMENTS are never touched: the function maintains at most one
+ * document-less "Contract value" invoice entry per job (matched by that
+ * exact description) and sizes it so the job's invoice total equals the
+ * target. Lowering below the documents' own total is refused — edit those
+ * invoices instead. Admin-only via RLS; delete/update need migration 7.
+ */
+export type SetContractValueResult =
+  | { ok: true; entryId: string | null }
+  | { ok: false; message: string };
+
+export async function setJobContractValue(params: {
+  jobId: string;
+  customerId?: string | null;
+  target: number;
+}): Promise<SetContractValueResult> {
+  try {
+    const { data, error } = await supabase
+      .from('finance_entries')
+      .select('id, amount, description, document_path')
+      .eq('company', COMPANY)
+      .eq('job_id', params.jobId)
+      .eq('type', 'invoice');
+    if (error) return { ok: false, message: error.message };
+
+    let othersTotal = 0;
+    let adjustment: { id: string } | null = null;
+    for (const row of (data ?? []) as {
+      id: string;
+      amount: unknown;
+      description: string | null;
+      document_path: string | null;
+    }[]) {
+      const amount = Number(row.amount) || 0;
+      if (!adjustment && row.description === 'Contract value' && row.document_path == null) {
+        adjustment = { id: row.id };
+      } else {
+        othersTotal += amount;
+      }
+    }
+
+    const needed = params.target - othersTotal;
+    if (needed < 0) {
+      return {
+        ok: false,
+        message: `This job's invoice entries already total $${othersTotal.toLocaleString('en-US')}. Edit or delete those entries (on the job's Invoices card) to go lower.`,
+      };
+    }
+    if (adjustment) {
+      if (needed === 0) {
+        const removed = await deleteFinanceEntry(adjustment.id);
+        return removed.ok ? { ok: true, entryId: null } : removed;
+      }
+      const updated = await updateFinanceEntry(adjustment.id, { amount: needed });
+      return updated.ok ? { ok: true, entryId: adjustment.id } : updated;
+    }
+    if (needed === 0) return { ok: true, entryId: null };
+
+    const { data: inserted, error: insertError } = await supabase
+      .from('finance_entries')
+      .insert({
+        company: COMPANY,
+        type: 'invoice',
+        direction: 'in',
+        amount: needed,
+        currency: 'USD',
+        counterparty: null,
+        description: 'Contract value',
+        occurred_on: todayISO(),
+        status: 'recorded',
+        job_id: params.jobId,
+        customer_id: params.customerId ?? null,
+      })
+      .select('id')
+      .single();
+    if (insertError || !inserted) {
+      return { ok: false, message: insertError?.message ?? 'Could not save the contract value.' };
+    }
+    return { ok: true, entryId: (inserted as { id: string }).id };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : 'Could not set the contract value.',
+    };
+  }
+}
+
+export type GenerateContractResult =
+  | { ok: true; documentNumber: string; storagePath: string }
+  | { ok: false; message: string };
+
+/**
+ * Generate the branded Contract PDF for a job at the given contract value,
+ * upload it to the contracts bucket (upsert — regenerating after a value
+ * change overwrites the same file), and record it once in job_documents.
+ * Native only (uses expo-print); callers should attach the returned
+ * document number/path to the job's "Contract value" finance entry so it
+ * opens from the Invoices card and the ledger. Number is always
+ * `<job_number>-Contract` — one living contract document per job.
+ */
+export async function generateContractPdf(params: {
+  job: Job;
+  target: number;
+}): Promise<GenerateContractResult> {
+  const { job } = params;
+  try {
+    const Print = await import('expo-print');
+    const documentNumber = `${job.job_number ?? job.id.slice(0, 8)}-Contract`;
+    const html = buildDocumentHtml({
+      type: 'contract',
+      documentNumber,
+      dateISO: todayISO(),
+      customerName: job.customer?.name ?? 'Customer',
+      customerAddress: job.customer?.address,
+      customerEmail: job.customer?.email,
+      customerPhone: job.customer?.phone,
+      jobNumber: job.job_number,
+      jobName: job.name,
+      jobAddress: job.address,
+      lineItems: [
+        {
+          name: 'Contract value',
+          description:
+            'Total agreed value for the scope of work on this project, per the agreement between DC Solar LLC and the customer.',
+          qty: 1,
+          rate: params.target,
+        },
+      ],
+      notes: 'This document reflects the agreed contract value for the project.',
+    });
+
+    const { uri } = await Print.printToFileAsync({ html });
+    const response = await fetch(uri);
+    const body = await response.arrayBuffer();
+    const fileName = `${documentNumber}.pdf`;
+    const storagePath = `${job.id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(DOCUMENTS_BUCKET)
+      .upload(storagePath, body, { contentType: 'application/pdf', upsert: true });
+    if (uploadError) return { ok: false, message: uploadError.message };
+
+    // Record in job_documents only once — regeneration reuses the same file.
+    const { data: existing } = await supabase
+      .from('job_documents')
+      .select('id')
+      .eq('company', COMPANY)
+      .eq('job_id', job.id)
+      .eq('storage_path', storagePath)
+      .limit(1);
+    if (!existing || existing.length === 0) {
+      const { data: userData } = await supabase.auth.getUser();
+      await supabase.from('job_documents').insert({
+        company: COMPANY,
+        job_id: job.id,
+        doc_type: 'contract',
+        storage_path: storagePath,
+        file_name: fileName,
+        content_type: 'application/pdf',
+        size_bytes: body.byteLength,
+        uploaded_by: userData?.user?.email ?? null,
+      });
+    }
+
+    return { ok: true, documentNumber, storagePath };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : 'Could not generate the contract PDF.',
+    };
   }
 }
 
