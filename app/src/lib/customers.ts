@@ -46,6 +46,108 @@ export async function fetchCustomers(): Promise<CustomersResult> {
 
 export type CustomerMutationResult = { ok: true } | { ok: false; message: string };
 
+// ---------------------------------------------------------------------------
+// Customer documents (insurance certificates etc.) — admin-only, files in
+// the contracts bucket under customers/<customer_id>/…
+// ---------------------------------------------------------------------------
+
+const DOCUMENTS_BUCKET = 'contracts';
+
+export interface CustomerDocument {
+  id: string;
+  created_at: string;
+  customer_id: string;
+  doc_type: 'insurance' | 'other';
+  storage_path: string;
+  file_name: string;
+}
+
+/**
+ * All customer documents for the company in one query, grouped by
+ * customer. Null on error (non-admin / pre-migration) so the screen can
+ * hide the section.
+ */
+export async function fetchCustomerDocuments(): Promise<Map<
+  string,
+  CustomerDocument[]
+> | null> {
+  try {
+    const { data, error } = await supabase
+      .from('customer_documents')
+      .select('id, created_at, customer_id, doc_type, storage_path, file_name')
+      .eq('company', COMPANY)
+      .order('created_at', { ascending: false });
+    if (error) return null;
+    const map = new Map<string, CustomerDocument[]>();
+    for (const row of (data ?? []) as CustomerDocument[]) {
+      const list = map.get(row.customer_id) ?? [];
+      list.push(row);
+      map.set(row.customer_id, list);
+    }
+    return map;
+  } catch {
+    return null;
+  }
+}
+
+/** Admin: upload a customer's insurance PDF and record it. */
+export async function uploadCustomerDocument(params: {
+  customerId: string;
+  fileName: string;
+  uri: string;
+  contentType: string;
+}): Promise<CustomerMutationResult> {
+  try {
+    const response = await fetch(params.uri);
+    const body = await response.arrayBuffer();
+    const safeName = params.fileName.replace(/[^A-Za-z0-9._-]+/g, '_') || 'insurance.pdf';
+    const storagePath = `customers/${params.customerId}/${Date.now()}-${safeName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(DOCUMENTS_BUCKET)
+      .upload(storagePath, body, { contentType: params.contentType });
+    if (uploadError) return { ok: false, message: uploadError.message };
+
+    const { data: userData } = await supabase.auth.getUser();
+    const { error: insertError } = await supabase.from('customer_documents').insert({
+      company: COMPANY,
+      customer_id: params.customerId,
+      doc_type: 'insurance',
+      storage_path: storagePath,
+      file_name: params.fileName,
+      content_type: params.contentType,
+      size_bytes: body.byteLength,
+      uploaded_by: userData?.user?.email ?? null,
+    });
+    if (insertError) {
+      return { ok: false, message: friendlyMessage(insertError.message, 'Could not save the document.') };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Upload failed.' };
+  }
+}
+
+/** Admin: delete a customer document (row first, then best-effort file). */
+export async function deleteCustomerDocument(
+  doc: CustomerDocument,
+): Promise<CustomerMutationResult> {
+  try {
+    const { data, error } = await supabase
+      .from('customer_documents')
+      .delete()
+      .eq('company', COMPANY)
+      .eq('id', doc.id)
+      .select('id');
+    if (error) return { ok: false, message: error.message };
+    if (!data || data.length === 0) return { ok: false, message: 'Could not delete the document.' };
+    await supabase.storage.from(DOCUMENTS_BUCKET).remove([doc.storage_path]).catch(() => {});
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not delete the document.' };
+  }
+}
+
 function friendlyMessage(raw: string | undefined, fallback: string): string {
   if (!raw) return fallback;
   // Policy not applied yet / RLS denial reads badly raw — soften it.

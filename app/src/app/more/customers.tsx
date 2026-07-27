@@ -14,14 +14,23 @@ import {
   View,
 } from 'react-native';
 
+import * as DocumentPicker from 'expo-document-picker';
+
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import {
   addCustomer,
+  deleteCustomerDocument,
+  fetchCustomerDocuments,
   fetchCustomers,
   updateCustomer,
+  uploadCustomerDocument,
+  type CustomerDocument,
   type CustomerInput,
   type CustomerRecord,
 } from '@/lib/customers';
+import { getDocumentUrl } from '@/lib/data';
+import { formatShortDate } from '@/lib/dates';
+import { shareDocument, viewDocument } from '@/lib/pdf';
 import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
@@ -110,6 +119,14 @@ export default function CustomersScreen() {
     null,
   );
 
+  // Insurance documents (admin-only): customer_id → docs.
+  const [docsByCustomer, setDocsByCustomer] = useState<Map<string, CustomerDocument[]> | null>(
+    null,
+  );
+  const [uploadingFor, setUploadingFor] = useState<string | null>(null);
+  const [busyDocId, setBusyDocId] = useState<string | null>(null);
+  const [confirmDeleteDocId, setConfirmDeleteDocId] = useState<string | null>(null);
+
   const loadCustomers = useCallback(async () => {
     const result = await fetchCustomers();
     if (result.status === 'ok') {
@@ -121,10 +138,19 @@ export default function CustomersScreen() {
     }
   }, []);
 
+  const loadDocs = useCallback(async () => {
+    setDocsByCustomer(await fetchCustomerDocuments());
+  }, []);
+
   useEffect(() => {
     if (auth.state !== 'in') return;
     loadCustomers();
   }, [auth.state, loadCustomers]);
+
+  useEffect(() => {
+    if (auth.state !== 'in' || !isAdmin) return;
+    loadDocs();
+  }, [auth.state, isAdmin, loadDocs]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -240,6 +266,148 @@ export default function CustomersScreen() {
         <Ionicons name="chevron-forward" size={18} color={colors.inkSoft} />
       </Pressable>
     ));
+  };
+
+  const uploadInsurance = async (customer: CustomerRecord) => {
+    setStatus(null);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (result.canceled || result.assets.length === 0) return;
+      const asset = result.assets[0];
+      setUploadingFor(customer.id);
+      const upload = await uploadCustomerDocument({
+        customerId: customer.id,
+        fileName: asset.name ?? 'insurance.pdf',
+        uri: asset.uri,
+        contentType: asset.mimeType ?? 'application/pdf',
+      });
+      setUploadingFor(null);
+      if (upload.ok) {
+        notify(setStatus, 'success', 'Uploaded', `Insurance saved for ${customer.name}.`);
+        await loadDocs();
+      } else {
+        notify(setStatus, 'error', 'Upload failed', upload.message);
+      }
+    } catch (e) {
+      setUploadingFor(null);
+      notify(
+        setStatus,
+        'error',
+        'Upload failed',
+        e instanceof Error ? e.message : 'Something went wrong.',
+      );
+    }
+  };
+
+  const openDoc = async (doc: CustomerDocument) => {
+    const url = await getDocumentUrl(doc.storage_path);
+    if (!url || !(await viewDocument(url))) {
+      notify(setStatus, 'error', 'Could not open', 'Please try again.');
+    }
+  };
+
+  const shareDoc = async (doc: CustomerDocument) => {
+    setBusyDocId(doc.id);
+    try {
+      const url = await getDocumentUrl(doc.storage_path);
+      if (!url || !(await shareDocument(url, doc.file_name))) {
+        notify(setStatus, 'error', 'Could not share', 'Please try again.');
+      }
+    } finally {
+      setBusyDocId(null);
+    }
+  };
+
+  const pressDeleteDoc = async (doc: CustomerDocument) => {
+    if (confirmDeleteDocId !== doc.id) {
+      setStatus(null);
+      setConfirmDeleteDocId(doc.id);
+      return;
+    }
+    setConfirmDeleteDocId(null);
+    setBusyDocId(doc.id);
+    const result = await deleteCustomerDocument(doc);
+    setBusyDocId(null);
+    if (result.ok) {
+      notify(setStatus, 'success', 'Deleted', `${doc.file_name} removed.`);
+      await loadDocs();
+    } else {
+      notify(setStatus, 'error', 'Could not delete', result.message);
+    }
+  };
+
+  const renderInsurance = (customer: CustomerRecord) => {
+    if (!isAdmin || docsByCustomer === null) return null;
+    const docs = docsByCustomer.get(customer.id) ?? [];
+    const uploading = uploadingFor === customer.id;
+    return (
+      <View style={styles.insuranceArea}>
+        <Text style={styles.contactLabel}>Insurance</Text>
+        {docs.map((doc) => {
+          const confirming = confirmDeleteDocId === doc.id;
+          const busy = busyDocId === doc.id;
+          return (
+            <View key={doc.id} style={styles.docRow}>
+              <Pressable
+                onPress={() => void openDoc(doc)}
+                style={({ pressed }) => [styles.docBody, pressed && styles.pressed]}>
+                <Ionicons name="shield-checkmark" size={16} color={colors.ocean} />
+                <Text style={styles.docName} numberOfLines={1}>
+                  {doc.file_name}
+                </Text>
+                <Text style={styles.docDate}>{formatShortDate(doc.created_at.slice(0, 10))}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void shareDoc(doc)}
+                disabled={busy}
+                hitSlop={6}
+                style={({ pressed }) => [styles.docIconButton, pressed && styles.pressed]}>
+                {busy && !confirming ? (
+                  <ActivityIndicator size="small" color={colors.ocean} />
+                ) : (
+                  <Ionicons name="share-outline" size={14} color={colors.ocean} />
+                )}
+              </Pressable>
+              <Pressable
+                onPress={() => void pressDeleteDoc(doc)}
+                disabled={busy}
+                hitSlop={6}
+                style={({ pressed }) => [
+                  styles.docIconButton,
+                  confirming && styles.docIconDanger,
+                  pressed && styles.pressed,
+                ]}>
+                <Ionicons
+                  name="trash"
+                  size={14}
+                  color={confirming ? colors.white : colors.inkSoft}
+                />
+              </Pressable>
+            </View>
+          );
+        })}
+        {confirmDeleteDocId && docs.some((d) => d.id === confirmDeleteDocId) ? (
+          <Text style={styles.confirmHint}>Tap the trash again to delete.</Text>
+        ) : null}
+        <Pressable
+          onPress={() => void uploadInsurance(customer)}
+          disabled={uploading}
+          style={({ pressed }) => [styles.uploadRow, pressed && styles.pressed]}>
+          {uploading ? (
+            <ActivityIndicator size="small" color={colors.ocean} />
+          ) : (
+            <Ionicons name="cloud-upload" size={16} color={colors.ocean} />
+          )}
+          <Text style={styles.uploadRowText}>
+            {uploading ? 'Uploading…' : 'Upload insurance PDF'}
+          </Text>
+        </Pressable>
+      </View>
+    );
   };
 
   const renderEditForm = (customer: CustomerRecord) => (
@@ -406,6 +574,7 @@ export default function CustomersScreen() {
                             <Text style={styles.notesText}>{customer.notes}</Text>
                           </View>
                         ) : null}
+                        {renderInsurance(customer)}
                       </>
                     )}
                   </View>
@@ -634,6 +803,63 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 14,
     fontWeight: '500',
+  },
+  insuranceArea: {
+    padding: spacing.md,
+    gap: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.tan,
+  },
+  docRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  docBody: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
+  docName: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  docDate: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  docIconButton: {
+    width: 26,
+    height: 26,
+    borderRadius: radii.sm,
+    backgroundColor: colors.skySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  docIconDanger: {
+    backgroundColor: colors.danger,
+  },
+  confirmHint: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  uploadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
+  uploadRowText: {
+    color: colors.ocean,
+    fontSize: 14,
+    fontWeight: '700',
   },
   editArea: {
     paddingHorizontal: spacing.md,
