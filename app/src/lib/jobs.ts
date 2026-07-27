@@ -20,12 +20,17 @@ export const PM_MIGRATION_WARNING =
 
 export const STAGE_MIGRATION_WARNING = 'Stages need the latest database migration';
 
+export const COMPLETED_ON_MIGRATION_WARNING =
+  'The completed date needs the latest database migration — the rest of the job was saved.';
+
 /** Optional columns (may not exist in the DB yet). */
 export interface JobProjectManager {
   project_manager?: string | null;
   project_manager_phone?: string | null;
   /** Pipeline stage (added in migration 6; may be absent pre-migration). */
   stage?: string | null;
+  /** Date the project completed (migration 10; may be absent pre-migration). */
+  completed_on?: string | null;
 }
 
 export type JobWithPM = Job & JobProjectManager;
@@ -154,6 +159,8 @@ export interface JobEditableFields {
   customer_id: string | null;
   project_manager: string | null;
   project_manager_phone: string | null;
+  /** YYYY-MM-DD when stage is Complete, null otherwise (migration 10). */
+  completed_on: string | null;
 }
 
 export type SaveJobResult =
@@ -162,35 +169,43 @@ export type SaveJobResult =
 
 /**
  * Build the write payloads to attempt, most complete first. Each optional
- * column set (stage; PM fields) that the database may not have yet gets
- * dropped in turn, with the matching warning, so a job save still lands on
- * an un-migrated database.
+ * column group (stage; PM fields; completed_on) that the database may not
+ * have yet gets dropped in turn — every subset is generated, ordered by how
+ * many groups were dropped — so a job save still lands on an un-migrated
+ * database, with the matching warning(s).
  */
 function payloadAttempts(fields: JobEditableFields): {
   payload: Record<string, unknown>;
   warnings: string[];
   droppedColumns: string[];
 }[] {
-  const { project_manager, project_manager_phone, stage, ...rest } = fields;
-  const pm = { project_manager, project_manager_phone };
-  return [
-    { payload: { ...rest, stage, ...pm }, warnings: [], droppedColumns: [] },
+  const { project_manager, project_manager_phone, stage, completed_on, ...rest } = fields;
+  const groups = [
+    { marker: 'stage', warning: STAGE_MIGRATION_WARNING, payload: { stage } },
     {
-      payload: { ...rest, ...pm },
-      warnings: [STAGE_MIGRATION_WARNING],
-      droppedColumns: ['stage'],
+      marker: 'project_manager',
+      warning: PM_MIGRATION_WARNING,
+      payload: { project_manager, project_manager_phone },
     },
     {
-      payload: { ...rest, stage },
-      warnings: [PM_MIGRATION_WARNING],
-      droppedColumns: ['project_manager'],
-    },
-    {
-      payload: rest,
-      warnings: [STAGE_MIGRATION_WARNING, PM_MIGRATION_WARNING],
-      droppedColumns: ['stage', 'project_manager'],
+      marker: 'completed_on',
+      warning: COMPLETED_ON_MIGRATION_WARNING,
+      payload: { completed_on },
     },
   ];
+  const attempts: { payload: Record<string, unknown>; warnings: string[]; droppedColumns: string[] }[] =
+    [];
+  for (let mask = 0; mask < 1 << groups.length; mask++) {
+    const kept = groups.filter((_, i) => !(mask & (1 << i)));
+    const dropped = groups.filter((_, i) => mask & (1 << i));
+    attempts.push({
+      payload: Object.assign({ ...rest }, ...kept.map((g) => g.payload)),
+      warnings: dropped.map((g) => g.warning),
+      droppedColumns: dropped.map((g) => g.marker),
+    });
+  }
+  attempts.sort((a, b) => a.droppedColumns.length - b.droppedColumns.length);
+  return attempts;
 }
 
 /**
@@ -206,6 +221,7 @@ function nextAttempt(
   error: { code?: string; message?: string } | null,
 ): number {
   if (isMissingColumnError(error, 'stage')) rejected.add('stage');
+  else if (isMissingColumnError(error, 'completed_on')) rejected.add('completed_on');
   else if (isMissingColumnError(error, 'project_manager')) rejected.add('project_manager');
   else return -1;
   for (let i = current + 1; i < attempts.length; i++) {

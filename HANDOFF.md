@@ -10,7 +10,7 @@ Employee field-ops app for DC Solar LLC (solar installation, Kansas City). One E
 ## Repo layout
 
 - `app/` — the Expo app (SDK 57, TypeScript, expo-router, src/ layout). All app work happens here.
-- `supabase/migrations/` — 9 SQL files, run **manually** by Devon in the Supabase dashboard SQL Editor (no CLI access). Status: **1–9 all confirmed applied (8 and 9 run 2026-07-24 night).**
+- `supabase/migrations/` — 10 SQL files, run **manually** by Devon in the Supabase dashboard SQL Editor (no CLI access). Status: **1–9 all confirmed applied (8 and 9 run 2026-07-24 night). #10 (2026-07-27, jobs.completed_on + contracts-bucket UPDATE/DELETE policies) PENDING — Devon must paste it.**
 - `PLAN.md` — original build plan + phases; still the roadmap.
 - `HANDOFF.md` — this file. Keep it updated at the end of every session.
 - NOT in git: `app/.env` (recreate — see below), `data/` (local business-data exports; the DB is the source of truth), `website/` (separate repo: github.com/durby48/dcsolarkc).
@@ -69,7 +69,9 @@ All 6 employees have Supabase auth logins; shared temp password `DCSolarKC2026` 
 - **Home-screen widget (session 2):** WidgetKit target in `app/targets/widget/` via @bacons/apple-targets; app pushes today's job + clock state through App Group `group.com.dcsolarkc.fieldapp` (`lib/widget.ts`, called from the Today screen). Widget shows a live timer while clocked in. Data refreshes only when the app runs — no background fetch.
 - **PDF view/share (session 2):** `lib/pdf.ts` — in-app browser sheet for viewing, expo-file-system download + share sheet (iMessage etc.) for sharing. Used by JobDocuments, JobInvoices, paystubs.
 - Historic data imported from Devon's P&L spreadsheet is tagged `pnl-import-2026-07-24` (finance_entries.extracted / employee_hours description).
-- **Pipeline stage filter (session 3):** chip row under the totals header — All + the 8 stages, each with a live count; filters the job list client-side. State is per-visit (resets to All).
+- **Pipeline stage filter (session 3):** chip row under the totals header — All + Active (= everything except Complete) + the 8 stages, each with a live count; filters the job list client-side. State is per-visit (resets to All).
+- **jobs.completed_on (migration 10):** date stamped automatically when a job's stage is set to Complete (editable in the job editor; cleared when the stage leaves Complete). Complete cards on the Pipeline show "Completed <date>" instead of the next-date line. Column-fallback machinery in `lib/jobs.ts::payloadAttempts` now generates subsets over three optional column groups (stage / PM / completed_on).
+- **contracts bucket fix (migration 10):** document PDF uploads use upsert — the bucket was missing UPDATE/DELETE policies, so re-generating an existing file failed with an RLS violation ("cloud copy failed to save"). Migration 10 adds admin UPDATE + DELETE.
 - **Estimate "Supplement" checkbox (session 3):** in the document builder (estimates only) — adds a prefilled line item: name "Supplement", $136/panel, qty 1 (Devon adjusts qty per estimate), with the racking-&-railing warranty paragraph as the item description (prints under the item name on the PDF; constants at the top of `document-builder.tsx`).
 - **Financials tab (session 3):** 4th tab between Pipeline and More (`(tabs)/financials.tsx`, data in `lib/financials.ts`). Admin-only (viewers/demo get a friendly placeholder). Overview tiles (Paid in / Expenses / Net / This month) + the full company expense ledger grouped by month with subtotals, each row editable/deletable via the existing `updateFinanceEntry`/`deleteFinanceEntry`. "+ Add expense" inserts a finance_entries row (type=expense, direction=out, status=recorded — same shape receipts approval writes) with optional job chip (job_id null = company overhead), so Pipeline profit math picks job-tied ones up automatically.
 

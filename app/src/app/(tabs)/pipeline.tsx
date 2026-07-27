@@ -90,10 +90,15 @@ function PipelineCard({
   myHours: number | undefined;
 }) {
   const router = useRouter();
+  const stage = jobStage(job);
+  const completedOn = (job as unknown as { completed_on?: string | null }).completed_on ?? null;
   const time = next ? formatTimeLabel(next.start_time) : null;
-  const nextLabel = next
-    ? `Next: ${formatShortDate(next.work_date)}${time ? ` — ${time}` : ''}`
-    : 'No upcoming date';
+  const nextLabel =
+    stage === 'Complete' && completedOn
+      ? `Completed ${formatShortDate(completedOn)}`
+      : next
+        ? `Next: ${formatShortDate(next.work_date)}${time ? ` — ${time}` : ''}`
+        : 'No upcoming date';
 
   return (
     <Pressable
@@ -105,12 +110,17 @@ function PipelineCard({
             <Text style={styles.chipText}>{job.job_number}</Text>
           </View>
         ) : null}
-        <StatusPill stage={jobStage(job)} />
+        <StatusPill stage={stage} />
       </View>
       <Text style={styles.name}>{job.name}</Text>
       {job.customer?.name ? <Text style={styles.customer}>{job.customer.name}</Text> : null}
       {job.address ? <Text style={styles.address}>{job.address}</Text> : null}
-      <Text style={next ? styles.nextDate : styles.noDate}>{nextLabel}</Text>
+      <Text
+        style={
+          (stage === 'Complete' && completedOn) || next ? styles.nextDate : styles.noDate
+        }>
+        {nextLabel}
+      </Text>
       {money ? (
         <Text style={styles.moneyRow}>
           {`Est ${money.estimate !== null ? formatCurrency(money.estimate) : '—'} · Inv ${formatCurrency(money.invoiced)} · Paid ${formatCurrency(money.paid)}`}
@@ -135,7 +145,7 @@ export default function PipelineScreen() {
   const [money, setMoney] = useState<Map<string, JobMoney> | null>(null);
   const [totals, setTotals] = useState<CompanyTotals | null>(null);
   const [myHours, setMyHours] = useState<Map<string, number>>(new Map());
-  const [stageFilter, setStageFilter] = useState<Stage | 'All'>('All');
+  const [stageFilter, setStageFilter] = useState<Stage | 'All' | 'Active'>('All');
 
   const load = useCallback(async () => {
     const { jobs: fetched, isMock: mock } = await fetchPipelineJobs();
@@ -191,12 +201,13 @@ export default function PipelineScreen() {
     return counts;
   }, [jobs]);
 
-  const filteredJobs = useMemo(
-    () => (stageFilter === 'All' ? jobs : jobs.filter((job) => jobStage(job) === stageFilter)),
-    [jobs, stageFilter],
-  );
+  const filteredJobs = useMemo(() => {
+    if (stageFilter === 'All') return jobs;
+    if (stageFilter === 'Active') return jobs.filter((job) => jobStage(job) !== 'Complete');
+    return jobs.filter((job) => jobStage(job) === stageFilter);
+  }, [jobs, stageFilter]);
 
-  const filterChips: (Stage | 'All')[] = ['All', ...STAGES];
+  const filterChips: (Stage | 'All' | 'Active')[] = ['All', 'Active', ...STAGES];
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -233,7 +244,12 @@ export default function PipelineScreen() {
               <View style={styles.filterRow}>
                 {filterChips.map((chip) => {
                   const active = stageFilter === chip;
-                  const count = chip === 'All' ? jobs.length : (stageCounts.get(chip) ?? 0);
+                  const count =
+                    chip === 'All'
+                      ? jobs.length
+                      : chip === 'Active'
+                        ? jobs.length - (stageCounts.get('Complete') ?? 0)
+                        : (stageCounts.get(chip) ?? 0);
                   return (
                     <Pressable
                       key={chip}
@@ -268,7 +284,9 @@ export default function PipelineScreen() {
             <Text style={styles.empty}>
               {stageFilter === 'All'
                 ? 'No projects yet.'
-                : `No projects in ${stageFilter}.`}
+                : stageFilter === 'Active'
+                  ? 'No active projects.'
+                  : `No projects in ${stageFilter}.`}
             </Text>
           ) : null
         }

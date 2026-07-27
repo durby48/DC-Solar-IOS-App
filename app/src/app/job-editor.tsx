@@ -22,9 +22,11 @@ import {
   type JobEditableFields,
   type JobWithPM,
 } from '@/lib/jobs';
+import { todayISO } from '@/lib/dates';
 import { type Customer } from '@/lib/mockData';
 import { getRole, type RoleInfo } from '@/lib/role';
 import { STAGES, stageOrDefault, statusForStage, type Stage } from '@/lib/stages';
+import { isValidISODate } from '@/lib/time';
 
 /**
  * Admin-only job editor. With a `jobId` param it edits that job; without
@@ -45,6 +47,7 @@ export default function JobEditorScreen() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [stage, setStage] = useState<Stage>('Pending Estimate');
+  const [completedOn, setCompletedOn] = useState('');
   const [address, setAddress] = useState('');
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [projectManager, setProjectManager] = useState('');
@@ -88,6 +91,7 @@ export default function JobEditorScreen() {
         setName(job.name);
         setDescription(job.description ?? '');
         setStage(stageOrDefault(job.stage, job.status));
+        setCompletedOn(job.completed_on ?? '');
         setAddress(job.address ?? '');
         setCustomerId(job.customer_id);
         setProjectManager(job.project_manager ?? '');
@@ -163,11 +167,21 @@ export default function JobEditorScreen() {
       return;
     }
 
+    const completedDate = completedOn.trim();
+    if (stage === 'Complete' && completedDate !== '' && !isValidISODate(completedDate)) {
+      setError('Enter the completed date as YYYY-MM-DD (e.g. 2026-07-27).');
+      return;
+    }
+
     const fields: JobEditableFields = {
       name: name.trim(),
       description: description.trim() || null,
       stage,
       status: statusForStage(stage),
+      // Auto-stamp today when marking Complete without a date; clear the
+      // date whenever the job moves back out of Complete.
+      completed_on:
+        stage === 'Complete' ? (completedDate !== '' ? completedDate : todayISO()) : null,
       address: address.trim() || null,
       customer_id: customerId,
       project_manager: projectManager.trim() || null,
@@ -289,6 +303,20 @@ export default function JobEditorScreen() {
               );
             })}
           </View>
+          {stage === 'Complete' ? (
+            <>
+              <Text style={styles.fieldLabel}>Completed date (YYYY-MM-DD)</Text>
+              <TextInput
+                style={styles.input}
+                value={completedOn}
+                onChangeText={setCompletedOn}
+                placeholder={`Leave blank for today (${todayISO()})`}
+                placeholderTextColor={colors.inkSoft}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </>
+          ) : null}
           <Text style={styles.fieldLabel}>Address</Text>
           <TextInput
             style={styles.input}
