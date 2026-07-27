@@ -1,6 +1,6 @@
 # DC Solar KC App — Session Handoff
 
-*Last updated 2026-07-24 (evening session 2, new Mac: pipeline metrics rework, Pending Install stage, PDF share, home-screen widget).*
+*Last updated 2026-07-27 (session 3, Windows PC: build #18 shipped to TestFlight — recovery of the failed #15–#17 attempts; repo lives at C:\Durbin Enterprises\DC-Solar-IOS-App; new GitHub deploy key `dc-solar-app-push-windows`).*
 *New Claude Code session? Read this file and [PLAN.md](PLAN.md) first — they replace all prior context.*
 
 ## What this is
@@ -20,7 +20,7 @@ Employee field-ops app for DC Solar LLC (solar installation, Kansas City). One E
 - Supabase: https://kjamxfezsathrsbztiln.supabase.co — publishable key `sb_publishable_rETJcVvcbKk79wOFSNIlTg_CEFCfbdF` (client-safe). The **secret key** is in Supabase dashboard → Settings → API keys — needed only for admin scripts, never in the app or git.
 - Expo/EAS: account `durby`, org `dc-solar`, project `dc-solar-kc` (id c1bf33f2-33a6-4730-9fb3-4b98405c2c82). `npx eas-cli login` once per machine.
 - Apple: ASC App ID 6794484032, bundle `com.dcsolarkc.fieldapp`, Apple ID devonsd311@gmail.com. TestFlight: https://appstoreconnect.apple.com/apps/6794484032/testflight/ios
-- Builds shipped: #2 (first TestFlight), #3 (Pipeline/PM/More), #4 (stages/totals), #5 (picker fix, stage refresh, finance editing, skyline icon), #14 (session 2: pipeline Contracted/Invoiced buckets + per-completed-job Avg Profit, Pending Install stage, in-app PDF view + share sheet, home-screen widget; #6–#13 were burned by failed attempts — autoIncrement bumps on every try).
+- Builds shipped: #2 (first TestFlight), #3 (Pipeline/PM/More), #4 (stages/totals), #5 (picker fix, stage refresh, finance editing, skyline icon), #14 (session 2: pipeline Contracted/Invoiced buckets + per-completed-job Avg Profit, Pending Install stage, in-app PDF view + share sheet, home-screen widget; #6–#13 were burned by failed attempts — autoIncrement bumps on every try), #18 (session 3, 2026-07-27: same code as #17's commit — verse of the day, job reminders, push-token registration, aps-environment entitlement. #15/#16 burned: provisioning profile lacked Push Notifications capability until Devon enabled it on the App ID; #17 burned: broken Node binary on the EAS builder, infra flake, retry fixed it).
 - Apple Team ID: E4B2Y6BWCH (in app.json ios.appleTeamId — needed by @bacons/apple-targets).
 - EAS env vars (production): EXPO_PUBLIC_SUPABASE_URL/KEY now live on EAS servers — needed because the repo-root .gitignore excludes `.env` from EAS uploads (day-one builds predated the git repo, so this only bit now).
 - **EAS build gotchas (learned the hard way on 2026-07-24):**
