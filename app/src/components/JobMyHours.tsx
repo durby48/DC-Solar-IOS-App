@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -14,8 +15,10 @@ import { formatShortDate, todayISO } from '@/lib/dates';
 import {
   addMyHours,
   deleteMyHours,
+  fetchEmployeeOptions,
   fetchMyHourEntries,
   updateMyHours,
+  type EmployeeOption,
   type MyHourEntry,
 } from '@/lib/myhours';
 import { isValidISODate } from '@/lib/time';
@@ -25,18 +28,21 @@ function formatHours(h: number): string {
 }
 
 /**
- * "My hours" — the signed-in member's own manual hour entries on a job:
- * total hours against a date, no clock times required. Everyone sees and
- * manages only their own entries; clocked time keeps flowing from the
- * clock in/out card separately.
+ * Manual hour entries on a job: total hours against a date, no clock times
+ * required. Crew see and manage only their own entries; admins (isAdmin)
+ * see every employee's entries, can edit/delete all of them, and can log
+ * hours on any employee's behalf via the picker. Clocked time keeps
+ * flowing from the clock in/out card separately.
  */
 export function JobMyHours({
   jobId,
   email,
+  isAdmin = false,
   onChanged,
 }: {
   jobId: string;
   email: string;
+  isAdmin?: boolean;
   /** Called after a save/delete so parent hour totals can refresh. */
   onChanged?: () => void;
 }) {
@@ -54,9 +60,12 @@ export function JobMyHours({
   const [saving, setSaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Admin: who the new entry is for (defaults to the admin themself).
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [targetEmail, setTargetEmail] = useState(email);
 
   const load = useCallback(async () => {
-    const result = await fetchMyHourEntries({ jobId, email });
+    const result = await fetchMyHourEntries({ jobId, email, allEmployees: isAdmin });
     if (result.status === 'ok') {
       setEntries(result.entries);
       setState('ok');
@@ -64,11 +73,16 @@ export function JobMyHours({
       setEntries([]);
       setState('unavailable');
     }
-  }, [jobId, email]);
+  }, [jobId, email, isAdmin]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetchEmployeeOptions().then(setEmployees);
+  }, [isAdmin]);
 
   const total = entries.reduce((sum, e) => sum + e.hours, 0);
 
@@ -78,6 +92,7 @@ export function JobMyHours({
     setHoursText('');
     setDateText(todayISO());
     setNoteText('');
+    setTargetEmail(email);
     setFormOpen(true);
   };
 
@@ -107,7 +122,13 @@ export function JobMyHours({
     const note = noteText.trim() || null;
     const result = editingId
       ? await updateMyHours(editingId, { hours, occurred_on: day, description: note })
-      : await addMyHours({ jobId, email, hours, occurredOn: day, note });
+      : await addMyHours({
+          jobId,
+          email: isAdmin ? targetEmail : email,
+          hours,
+          occurredOn: day,
+          note,
+        });
     setSaving(false);
     if (result.ok) {
       setFormOpen(false);
@@ -150,7 +171,7 @@ export function JobMyHours({
 
   return (
     <>
-      <Text style={styles.sectionTitle}>My hours</Text>
+      <Text style={styles.sectionTitle}>{isAdmin ? 'Hours' : 'My hours'}</Text>
       <View style={styles.card}>
         {state === 'loading' ? (
           <View style={styles.centerPad}>
@@ -160,8 +181,9 @@ export function JobMyHours({
           <>
             {entries.length === 0 ? (
               <Text style={styles.emptyText}>
-                No hours logged yet. Clocked time counts automatically — add hours here when
-                you worked without clocking in.
+                {isAdmin
+                  ? 'No hour entries on this job yet. Log hours for yourself or any employee below.'
+                  : 'No hours logged yet. Clocked time counts automatically — add hours here when you worked without clocking in.'}
               </Text>
             ) : (
               entries.map((entry, index) => {
@@ -174,7 +196,11 @@ export function JobMyHours({
                         <Text style={styles.hoursChipText}>{formatHours(entry.hours)}</Text>
                       </View>
                       <View style={styles.rowBody}>
-                        <Text style={styles.rowDate}>{formatShortDate(entry.occurred_on)}</Text>
+                        <Text style={styles.rowDate}>
+                          {isAdmin && entry.employee
+                            ? `${entry.employee} · ${formatShortDate(entry.occurred_on)}`
+                            : formatShortDate(entry.occurred_on)}
+                        </Text>
                         {entry.description ? (
                           <Text style={styles.rowNote} numberOfLines={1}>
                             {entry.description}
@@ -224,6 +250,32 @@ export function JobMyHours({
 
             {formOpen ? (
               <View style={styles.formArea}>
+                {isAdmin && !editingId && employees.length > 0 ? (
+                  <>
+                    <Text style={styles.fieldLabel}>For</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <View style={styles.pickRow}>
+                        {employees.map((option) => {
+                          const active = targetEmail === option.email;
+                          return (
+                            <Pressable
+                              key={option.email}
+                              onPress={() => setTargetEmail(option.email)}
+                              style={[styles.pickChip, active && styles.pickChipActive]}>
+                              <Text
+                                style={[
+                                  styles.pickChipText,
+                                  active && styles.pickChipTextActive,
+                                ]}>
+                                {option.name}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </ScrollView>
+                  </>
+                ) : null}
                 <Text style={styles.fieldLabel}>Hours (e.g. 2 or 2.5)</Text>
                 <TextInput
                   style={styles.input}
@@ -467,6 +519,28 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.7,
+  },
+  pickRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
+  pickChip: {
+    backgroundColor: colors.skySoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs,
+  },
+  pickChipActive: {
+    backgroundColor: colors.ocean,
+  },
+  pickChipText: {
+    color: colors.ocean,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  pickChipTextActive: {
+    color: colors.white,
   },
   statusText: {
     fontSize: 13,

@@ -16,25 +16,34 @@ export interface MyHourEntry {
   occurred_on: string | null; // YYYY-MM-DD
   hours: number;
   description: string | null;
+  /** Roster display name (admin view; null on some legacy rows). */
+  employee: string | null;
+  /** Owning email; null on P&L-import / console rows (admin-editable only). */
+  email: string | null;
 }
 
 export type MyHoursResult =
   | { status: 'ok'; entries: MyHourEntry[] }
   | { status: 'unavailable' };
 
-/** The signed-in user's own manual hour entries for one job, newest first. */
+/**
+ * Manual hour entries for one job, newest first: the caller's own rows, or
+ * EVERY employee's rows when allEmployees (admins — RLS enforces).
+ */
 export async function fetchMyHourEntries(params: {
   jobId: string;
   email: string;
+  allEmployees?: boolean;
 }): Promise<MyHoursResult> {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('employee_hours')
-      .select('id, occurred_on, hours, description')
+      .select('id, occurred_on, hours, description, employee, email')
       .eq('company', COMPANY)
       .eq('job_id', params.jobId)
-      .eq('email', params.email)
       .order('occurred_on', { ascending: false });
+    if (!params.allEmployees) query = query.eq('email', params.email);
+    const { data, error } = await query;
     if (error) return { status: 'unavailable' };
     const entries = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
       ...row,
@@ -43,6 +52,27 @@ export async function fetchMyHourEntries(params: {
     return { status: 'ok', entries };
   } catch {
     return { status: 'unavailable' };
+  }
+}
+
+export interface EmployeeOption {
+  email: string;
+  name: string;
+}
+
+/** Roster options for the admin "log hours for…" picker. */
+export async function fetchEmployeeOptions(): Promise<EmployeeOption[]> {
+  try {
+    const { data, error } = await supabase
+      .from('employees')
+      .select('email, display_name')
+      .order('display_name', { ascending: true });
+    if (error || !data) return [];
+    return (data as { email: string | null; display_name: string | null }[])
+      .filter((row) => row.email)
+      .map((row) => ({ email: row.email as string, name: row.display_name ?? (row.email as string) }));
+  } catch {
+    return [];
   }
 }
 

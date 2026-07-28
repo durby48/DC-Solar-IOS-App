@@ -210,6 +210,7 @@ export default function JobDetailScreen() {
               <JobMyHours
                 jobId={job.id}
                 email={role.email}
+                isAdmin={role.isAdmin}
                 onChanged={() => setHoursRefresh((n) => n + 1)}
               />
             ) : null}
