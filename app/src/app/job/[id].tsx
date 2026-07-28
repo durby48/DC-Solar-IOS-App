@@ -16,6 +16,7 @@ import { JobDocuments } from '@/components/JobDocuments';
 import { JobFinanceHeader } from '@/components/JobFinanceHeader';
 import { JobInvoices } from '@/components/JobInvoices';
 import { JobMaterials } from '@/components/JobMaterials';
+import { JobMyHours } from '@/components/JobMyHours';
 import { JobPhotos } from '@/components/JobPhotos';
 import { JobScheduleDates } from '@/components/JobScheduleDates';
 import { StatusPill } from '@/components/StatusPill';
@@ -34,6 +35,8 @@ export default function JobDetailScreen() {
   // Bumped when JobInvoices edits/deletes an entry so the finance header
   // (which fetches independently) refreshes its totals too.
   const [financeRefresh, setFinanceRefresh] = useState(0);
+  // Bumped when the user logs/edits own hours so the hours card refreshes.
+  const [hoursRefresh, setHoursRefresh] = useState(0);
   const role = useRole();
 
   // Refetch on every focus so edits made in the job editor show immediately.
@@ -65,6 +68,8 @@ export default function JobDetailScreen() {
       setMyHours(0);
       return;
     }
+    // hoursRefresh re-runs this after the user logs/edits hours below.
+    void hoursRefresh;
     fetchMyJobHours({ jobId: id, displayName: crewDisplayName, email: crewEmail }).then(
       (hours) => {
         if (!cancelled) setMyHours(hours);
@@ -73,7 +78,7 @@ export default function JobDetailScreen() {
     return () => {
       cancelled = true;
     };
-  }, [id, crewDisplayName, crewEmail]);
+  }, [id, crewDisplayName, crewEmail, hoursRefresh]);
 
   const openMaps = (address: string) => {
     Linking.openURL('https://maps.apple.com/?daddr=' + encodeURIComponent(address)).catch(
@@ -200,6 +205,14 @@ export default function JobDetailScreen() {
             {job.customer ? <CustomerCard customer={job.customer} /> : null}
 
             <JobScheduleDates jobId={job.id} isAdmin={role?.isAdmin ?? false} />
+
+            {role && !isMockJob ? (
+              <JobMyHours
+                jobId={job.id}
+                email={role.email}
+                onChanged={() => setHoursRefresh((n) => n + 1)}
+              />
+            ) : null}
 
             <JobDocuments jobId={job.id} />
 
