@@ -12,8 +12,9 @@
 // Accepted POST bodies (all JSON):
 //   { title, body, emails? , audience? }   direct push (emails wins over audience)
 //   { from, subject, snippet }             email-triggered (Gmail Apps Script)
-//   { type: "INSERT", record: {...} }      Supabase database webhook on
-//                                          finance_entries (payment inserts)
+//   { type: "INSERT", record: {...} }      Supabase database webhooks:
+//     - finance_entries payment inserts  → 💰 push to admins
+//     - job_assignments inserts          → 🔧 push to the assigned member
 //
 // audience: "admins" (default — owner/operator only; bank alerts are
 // admin business) or "all" (whole crew).
@@ -127,7 +128,36 @@ Deno.serve(async (req) => {
     return json(400, { error: 'invalid JSON' });
   }
 
-  const message = normalize(payload);
+  // Job-assignment webhook: push to the one member who was assigned.
+  let message = normalize(payload);
+  if (
+    !message &&
+    payload.type === 'INSERT' &&
+    (payload.table === 'job_assignments' ||
+      (payload.record as Record<string, unknown> | undefined)?.job_id !== undefined) &&
+    typeof (payload.record as Record<string, unknown> | undefined)?.email === 'string'
+  ) {
+    const record = payload.record as { job_id?: string; email: string };
+    let jobLabel = 'a job';
+    if (record.job_id) {
+      const jobs = await rest(
+        `jobs?id=eq.${record.job_id}&select=job_number,name,address&limit=1`,
+      );
+      const job = jobs?.[0] as
+        | { job_number?: string | null; name?: string; address?: string | null }
+        | undefined;
+      if (job) {
+        jobLabel = [job.job_number, job.name].filter(Boolean).join(' — ') || 'a job';
+        if (job.address) jobLabel += ` (${job.address})`;
+      }
+    }
+    message = {
+      title: '🔧 New job assignment',
+      body: truncate(`You've been assigned to ${jobLabel}.`, 200),
+      emails: [record.email],
+      audience: 'admins',
+    };
+  }
   if (!message) return json(200, { sent: 0, skipped: 'nothing to push for this payload' });
 
   // Resolve recipient emails: explicit list, or admins, or everyone.
