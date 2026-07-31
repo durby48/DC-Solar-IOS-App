@@ -128,36 +128,92 @@ Deno.serve(async (req) => {
     return json(400, { error: 'invalid JSON' });
   }
 
-  // Job-assignment webhook: push to the one member who was assigned.
+  // --- Database webhook payloads (assignments + schedule changes) -------
   let message = normalize(payload);
-  if (
-    !message &&
-    payload.type === 'INSERT' &&
-    (payload.table === 'job_assignments' ||
-      (payload.record as Record<string, unknown> | undefined)?.job_id !== undefined) &&
-    typeof (payload.record as Record<string, unknown> | undefined)?.email === 'string'
-  ) {
-    const record = payload.record as { job_id?: string; email: string };
-    let jobLabel = 'a job';
-    if (record.job_id) {
-      const jobs = await rest(
-        `jobs?id=eq.${record.job_id}&select=job_number,name,address&limit=1`,
-      );
-      const job = jobs?.[0] as
-        | { job_number?: string | null; name?: string; address?: string | null }
-        | undefined;
-      if (job) {
-        jobLabel = [job.job_number, job.name].filter(Boolean).join(' — ') || 'a job';
-        if (job.address) jobLabel += ` (${job.address})`;
-      }
+  const table = payload.table as string | undefined;
+  const op = payload.type as string | undefined;
+  const record = payload.record as Record<string, unknown> | undefined;
+  const oldRecord = payload.old_record as Record<string, unknown> | undefined;
+
+  const jobLabel = async (jobId: unknown): Promise<string> => {
+    if (typeof jobId !== 'string') return 'a job';
+    const jobs = await rest(`jobs?id=eq.${jobId}&select=job_number,name,address&limit=1`);
+    const job = jobs?.[0] as
+      | { job_number?: string | null; name?: string; address?: string | null }
+      | undefined;
+    if (!job) return 'a job';
+    let label = [job.job_number, job.name].filter(Boolean).join(' — ') || 'a job';
+    if (job.address) label += ` (${job.address})`;
+    return label;
+  };
+  const assignedEmails = async (jobId: unknown): Promise<string[]> => {
+    if (typeof jobId !== 'string') return [];
+    const rows = await rest(`job_assignments?job_id=eq.${jobId}&select=email`);
+    return (rows ?? []).map((r) => String(r.email)).filter(Boolean);
+  };
+  const prettyDate = (iso: unknown): string => {
+    if (typeof iso !== 'string') return 'a new date';
+    const d = new Date(`${iso}T12:00:00`);
+    return Number.isNaN(d.getTime())
+      ? String(iso)
+      : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+  const prettyTime = (hms: unknown): string => {
+    if (typeof hms !== 'string') return '';
+    const [h, m] = hms.split(':').map(Number);
+    if (!Number.isFinite(h)) return '';
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const hour12 = h % 12 === 0 ? 12 : h % 12;
+    return ` · ${hour12}:${`${m || 0}`.padStart(2, '0')} ${ampm}`;
+  };
+
+  if (!message && table === 'job_assignments' && record?.email) {
+    const label = await jobLabel(record.job_id);
+    if (op === 'INSERT') {
+      message = {
+        title: '🔧 New job assignment',
+        body: truncate(`You've been assigned to ${label}.`, 200),
+        emails: [String(record.email)],
+        audience: 'admins',
+      };
+    } else if (op === 'DELETE') {
+      message = {
+        title: '🔧 Removed from job',
+        body: truncate(`You've been taken off ${label}.`, 200),
+        emails: [String(record.email)],
+        audience: 'admins',
+      };
     }
-    message = {
-      title: '🔧 New job assignment',
-      body: truncate(`You've been assigned to ${jobLabel}.`, 200),
-      emails: [record.email],
-      audience: 'admins',
-    };
   }
+
+  if (!message && table === 'job_schedule_dates' && record?.job_id) {
+    // Only ping when the date or start time actually changed.
+    const changed =
+      op !== 'UPDATE' ||
+      record.work_date !== oldRecord?.work_date ||
+      record.start_time !== oldRecord?.start_time;
+    if (changed && (op === 'INSERT' || op === 'UPDATE' || op === 'DELETE')) {
+      const emails = await assignedEmails(record.job_id);
+      if (emails.length === 0) {
+        return json(200, { sent: 0, skipped: 'no crew assigned to this job' });
+      }
+      const label = await jobLabel(record.job_id);
+      const when = `${prettyDate(record.work_date)}${prettyTime(record.start_time)}`;
+      const body =
+        op === 'INSERT'
+          ? `${label} scheduled for ${when}.`
+          : op === 'UPDATE'
+            ? `${label} moved to ${when}.`
+            : `${label}: the ${prettyDate(record.work_date)} work day was removed.`;
+      message = {
+        title: op === 'DELETE' ? '📅 Schedule change' : '📅 Job scheduled',
+        body: truncate(body, 200),
+        emails,
+        audience: 'admins',
+      };
+    }
+  }
+
   if (!message) return json(200, { sent: 0, skipped: 'nothing to push for this payload' });
 
   // Resolve recipient emails: explicit list, or admins, or everyone.
