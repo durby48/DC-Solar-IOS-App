@@ -59,6 +59,7 @@ function OverviewCard({ data }: { data: FinancialsData }) {
       data.net >= 0 ? styles.netPositive : styles.netNegative,
     ],
     ['This month', formatRounded(data.expensesThisMonth)],
+    ['Contracted YTD', formatRounded(data.contractedYtd)],
   ];
   return (
     <View style={styles.overviewCard}>

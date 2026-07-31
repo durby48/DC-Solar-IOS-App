@@ -33,6 +33,9 @@ export interface FinancialsData {
   net: number;
   /** Expense total for the current calendar month. */
   expensesThisMonth: number;
+  /** Contract value signed this calendar year: invoice-type entries
+   *  (documents + contract-value rows) dated Jan 1 → today, any stage. */
+  contractedYtd: number;
   /** Every expense entry, newest first (null dates last). */
   expenseEntries: LedgerEntry[];
   /** EVERY finance entry (all types), newest first — feeds the pipeline
@@ -70,12 +73,17 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
     })) as LedgerEntry[];
 
     const thisMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const thisYear = thisMonth.slice(0, 4);
     let paid = 0;
     let expenses = 0;
     let expensesThisMonth = 0;
+    let contractedYtd = 0;
     const expenseEntries: LedgerEntry[] = [];
     for (const row of rows) {
       if (row.type === 'payment') paid += row.amount;
+      if (row.type === 'invoice' && (row.occurred_on ?? '').startsWith(thisYear)) {
+        contractedYtd += row.amount;
+      }
       if (row.type === 'expense') {
         expenses += row.amount;
         if ((row.occurred_on ?? '').startsWith(thisMonth)) expensesThisMonth += row.amount;
@@ -85,7 +93,15 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
     expenseEntries.sort(byDateDesc);
     const allEntries = [...rows].sort(byDateDesc);
 
-    return { paid, expenses, net: paid - expenses, expensesThisMonth, expenseEntries, allEntries };
+    return {
+      paid,
+      expenses,
+      net: paid - expenses,
+      expensesThisMonth,
+      contractedYtd,
+      expenseEntries,
+      allEntries,
+    };
   } catch {
     return null;
   }
