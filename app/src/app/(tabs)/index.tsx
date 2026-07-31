@@ -14,10 +14,17 @@ import {
   getSessionEmail,
   type TimeEntry,
 } from '@/lib/clock';
-import { fetchJobs, fetchScheduleEntries, type ScheduleEntry } from '@/lib/data';
+import { fetchAssignmentsByJob, type Assignment } from '@/lib/assignments';
+import {
+  fetchJobs,
+  fetchScheduleEntries,
+  fetchScheduleRange,
+  type ScheduleEntry,
+} from '@/lib/data';
 import { formatElapsed, formatFullDate, todayISO } from '@/lib/dates';
 import { type Job } from '@/lib/mockData';
 import { registerPushToken, scheduleJobReminders } from '@/lib/notifications';
+import { useRole } from '@/lib/role';
 import { formatTimeLabel } from '@/lib/time';
 import { updateWidgetState } from '@/lib/widget';
 
@@ -70,12 +77,20 @@ function buildWeekRows(entries: ScheduleEntry[]): WeekRow[] {
 
 export default function CalendarScreen() {
   const router = useRouter();
+  const role = useRole();
   const [clockedInAt, setClockedInAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isMock, setIsMock] = useState(false);
   const [scheduleEntries, setScheduleEntries] = useState<ScheduleEntry[]>([]);
   const [scheduleIsMock, setScheduleIsMock] = useState(false);
+  // Crew assignments per job (names shown on every calendar entry).
+  const [assignments, setAssignments] = useState<Map<string, Assignment[]> | null>(null);
+  // Admin view toggle + month navigation (0 = current month).
+  const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [monthEntries, setMonthEntries] = useState<ScheduleEntry[]>([]);
+  const [monthLoading, setMonthLoading] = useState(false);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [openEntry, setOpenEntry] = useState<TimeEntry | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -155,10 +170,43 @@ export default function CalendarScreen() {
         setScheduleEntries(entries);
         setScheduleIsMock(mock);
       });
+      fetchAssignmentsByJob().then((map) => {
+        if (!cancelled) setAssignments(map);
+      });
       return () => {
         cancelled = true;
       };
     }, []),
+  );
+
+  // Month view data: the selected month's schedule (admins).
+  useEffect(() => {
+    if (viewMode !== 'month') return;
+    let cancelled = false;
+    const base = new Date();
+    const first = new Date(base.getFullYear(), base.getMonth() + monthOffset, 1);
+    const last = new Date(base.getFullYear(), base.getMonth() + monthOffset + 1, 0);
+    const iso = (d: Date) =>
+      `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+    setMonthLoading(true);
+    fetchScheduleRange(iso(first), iso(last)).then((entries) => {
+      if (cancelled) return;
+      setMonthEntries(entries);
+      setMonthLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMode, monthOffset]);
+
+  /** "Devon, Isaiah" — first names of the crew assigned to a job. */
+  const crewLine = useCallback(
+    (jobId: string): string | null => {
+      const crew = assignments?.get(jobId);
+      if (!crew || crew.length === 0) return null;
+      return crew.map((a) => a.name.split(' ')[0]).join(', ');
+    },
+    [assignments],
   );
 
   const setLocalPunch = useCallback((value: number | null) => {
@@ -341,52 +389,168 @@ export default function CalendarScreen() {
           </Text>
         </View>
 
-        <Text style={styles.sectionTitle}>Today&apos;s jobs</Text>
-        {todaysJobs.length > 0 ? (
-          <View style={styles.jobList}>
-            {todaysJobs.map((job) => (
-              <JobCard key={job.id} job={job} subtitle="Today" />
-            ))}
+        {role?.isAdmin ? (
+          <View style={styles.viewToggleRow}>
+            {(['week', 'month'] as const).map((mode) => {
+              const active = viewMode === mode;
+              return (
+                <Pressable
+                  key={mode}
+                  onPress={() => setViewMode(mode)}
+                  style={[styles.viewToggleChip, active && styles.viewToggleChipActive]}>
+                  <Text
+                    style={[
+                      styles.viewToggleText,
+                      active && styles.viewToggleTextActive,
+                    ]}>
+                    {mode === 'week' ? 'Week' : 'Month'}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
-        ) : (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>No jobs scheduled for today.</Text>
-          </View>
-        )}
+        ) : null}
 
-        <Text style={styles.sectionTitle}>This week</Text>
-        <View style={styles.weekCard}>
-          {weekRows.map((row, index) => (
-            <View
-              key={row.dateISO}
-              style={[styles.weekRow, index > 0 && styles.weekRowBorder]}>
-              <Text style={styles.weekDay}>{row.label}</Text>
-              <View style={styles.weekJobs}>
-                {row.entries.length > 0 ? (
-                  row.entries.map((entry) => {
-                    const time = formatTimeLabel(entry.start_time);
-                    return (
-                      <Pressable
-                        key={entry.id}
-                        onPress={() =>
-                          router.push({ pathname: '/job/[id]', params: { id: entry.job.id } })
-                        }
-                        style={({ pressed }) => pressed && styles.pressed}>
-                        <Text style={styles.weekJobText} numberOfLines={2}>
-                          {entry.job.name}
-                          {entry.job.address ? ` — ${entry.job.address}` : ''}
-                          {time ? ` · ${time}` : ''}
-                        </Text>
-                      </Pressable>
-                    );
-                  })
-                ) : row.isTomorrow ? (
-                  <Text style={styles.weekEmptyText}>No work for tomorrow</Text>
-                ) : null}
-              </View>
+        {viewMode === 'month' && role?.isAdmin ? (
+          <>
+            <View style={styles.monthNav}>
+              <Pressable
+                onPress={() => setMonthOffset((n) => n - 1)}
+                hitSlop={8}
+                style={({ pressed }) => [styles.monthArrow, pressed && styles.pressed]}>
+                <Text style={styles.monthArrowText}>‹</Text>
+              </Pressable>
+              <Text style={styles.monthTitle}>
+                {new Date(
+                  new Date().getFullYear(),
+                  new Date().getMonth() + monthOffset,
+                  1,
+                ).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+              </Text>
+              <Pressable
+                onPress={() => setMonthOffset((n) => n + 1)}
+                hitSlop={8}
+                style={({ pressed }) => [styles.monthArrow, pressed && styles.pressed]}>
+                <Text style={styles.monthArrowText}>›</Text>
+              </Pressable>
             </View>
-          ))}
-        </View>
+            {monthLoading ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyText}>Loading…</Text>
+              </View>
+            ) : monthEntries.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyText}>Nothing scheduled this month.</Text>
+              </View>
+            ) : (
+              <View style={styles.weekCard}>
+                {[...new Set(monthEntries.map((e) => e.work_date))].map((day, index) => {
+                  const dayEntries = monthEntries.filter((e) => e.work_date === day);
+                  const d = new Date(`${day}T12:00:00`);
+                  const isToday = day === today;
+                  return (
+                    <View
+                      key={day}
+                      style={[styles.weekRow, index > 0 && styles.weekRowBorder]}>
+                      <Text style={[styles.weekDay, isToday && styles.weekDayToday]}>
+                        {isToday
+                          ? 'Today'
+                          : d.toLocaleDateString('en-US', {
+                              weekday: 'short',
+                              month: 'short',
+                              day: 'numeric',
+                            })}
+                      </Text>
+                      <View style={styles.weekJobs}>
+                        {dayEntries.map((entry) => {
+                          const time = formatTimeLabel(entry.start_time);
+                          const crew = crewLine(entry.job.id);
+                          return (
+                            <Pressable
+                              key={entry.id}
+                              onPress={() =>
+                                router.push({
+                                  pathname: '/job/[id]',
+                                  params: { id: entry.job.id },
+                                })
+                              }
+                              style={({ pressed }) => pressed && styles.pressed}>
+                              <Text style={styles.weekJobText} numberOfLines={2}>
+                                {entry.job.name}
+                                {entry.job.address ? ` — ${entry.job.address}` : ''}
+                                {time ? ` · ${time}` : ''}
+                              </Text>
+                              {crew ? <Text style={styles.crewText}>{crew}</Text> : null}
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </>
+        ) : (
+          <>
+            <Text style={styles.sectionTitle}>Today&apos;s jobs</Text>
+            {todaysJobs.length > 0 ? (
+              <View style={styles.jobList}>
+                {todaysJobs.map((job) => (
+                  <View key={job.id}>
+                    <JobCard job={job} subtitle="Today" />
+                    {crewLine(job.id) ? (
+                      <Text style={styles.crewUnderCard}>Crew: {crewLine(job.id)}</Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyText}>No jobs scheduled for today.</Text>
+              </View>
+            )}
+
+            <Text style={styles.sectionTitle}>This week</Text>
+            <View style={styles.weekCard}>
+              {weekRows.map((row, index) => (
+                <View
+                  key={row.dateISO}
+                  style={[styles.weekRow, index > 0 && styles.weekRowBorder]}>
+                  <Text style={styles.weekDay}>{row.label}</Text>
+                  <View style={styles.weekJobs}>
+                    {row.entries.length > 0 ? (
+                      row.entries.map((entry) => {
+                        const time = formatTimeLabel(entry.start_time);
+                        const crew = crewLine(entry.job.id);
+                        return (
+                          <Pressable
+                            key={entry.id}
+                            onPress={() =>
+                              router.push({
+                                pathname: '/job/[id]',
+                                params: { id: entry.job.id },
+                              })
+                            }
+                            style={({ pressed }) => pressed && styles.pressed}>
+                            <Text style={styles.weekJobText} numberOfLines={2}>
+                              {entry.job.name}
+                              {entry.job.address ? ` — ${entry.job.address}` : ''}
+                              {time ? ` · ${time}` : ''}
+                            </Text>
+                            {crew ? <Text style={styles.crewText}>{crew}</Text> : null}
+                          </Pressable>
+                        );
+                      })
+                    ) : row.isTomorrow ? (
+                      <Text style={styles.weekEmptyText}>No work for tomorrow</Text>
+                    ) : null}
+                  </View>
+                </View>
+              ))}
+            </View>
+          </>
+        )}
 
         {isMock ? <Text style={styles.mockNote}>Showing demo data</Text> : null}
       </ScrollView>
@@ -539,6 +703,71 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     fontStyle: 'italic',
+  },
+  crewText: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  crewUnderCard: {
+    color: colors.inkSoft,
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.xs,
+  },
+  viewToggleRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  viewToggleChip: {
+    backgroundColor: colors.skySoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+  },
+  viewToggleChipActive: {
+    backgroundColor: colors.ocean,
+  },
+  viewToggleText: {
+    color: colors.ocean,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  viewToggleTextActive: {
+    color: colors.white,
+  },
+  monthNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  monthArrow: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.sm,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.tan,
+  },
+  monthArrowText: {
+    color: colors.ocean,
+    fontSize: 22,
+    fontWeight: '800',
+    lineHeight: 24,
+  },
+  monthTitle: {
+    color: colors.ink,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  weekDayToday: {
+    color: colors.ocean,
   },
   emptyCard: {
     backgroundColor: colors.skySoft,

@@ -507,6 +507,46 @@ export async function fetchScheduleEntries(): Promise<{
   }
 }
 
+/**
+ * Schedule days in an explicit date range joined with their jobs — feeds
+ * the Calendar month view. No mock fallback: empty array when there is
+ * nothing scheduled (or on error).
+ */
+export async function fetchScheduleRange(
+  fromISO: string,
+  toISO: string,
+): Promise<ScheduleEntry[]> {
+  try {
+    const { data, error } = await supabase
+      .from('job_schedule_dates')
+      .select(`id, job_id, company, work_date, start_time, note, jobs(*, customers(${CUSTOMER_FIELDS}))`)
+      .eq('company', COMPANY)
+      .gte('work_date', fromISO)
+      .lte('work_date', toISO)
+      .order('work_date', { ascending: true })
+      .order('start_time', { ascending: true });
+    if (error || !data) return [];
+    const entries: ScheduleEntry[] = [];
+    for (const row of data as Record<string, unknown>[]) {
+      const jobs = row.jobs;
+      const jobRow = Array.isArray(jobs) ? jobs[0] : jobs;
+      if (!jobRow) continue;
+      entries.push({
+        id: row.id as string,
+        job_id: row.job_id as string,
+        company: row.company as string,
+        work_date: row.work_date as string,
+        start_time: (row.start_time as string | null) ?? null,
+        note: (row.note as string | null) ?? null,
+        job: normalize(jobRow as Record<string, unknown>),
+      });
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Job finance summary (admin-only tables)
 // ---------------------------------------------------------------------------

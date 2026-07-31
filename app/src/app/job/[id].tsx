@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { CustomerCard } from '@/components/CustomerCard';
+import { JobAssignedCrew } from '@/components/JobAssignedCrew';
 import { JobDocuments } from '@/components/JobDocuments';
 import { JobFinanceHeader } from '@/components/JobFinanceHeader';
 import { JobInvoices } from '@/components/JobInvoices';
@@ -205,6 +206,10 @@ export default function JobDetailScreen() {
             {job.customer ? <CustomerCard customer={job.customer} /> : null}
 
             <JobScheduleDates jobId={job.id} isAdmin={role?.isAdmin ?? false} />
+
+            {role && !isMockJob ? (
+              <JobAssignedCrew jobId={job.id} isAdmin={role.isAdmin} />
+            ) : null}
 
             {role && !isMockJob ? (
               <JobMyHours
