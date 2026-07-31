@@ -1,0 +1,5 @@
+# Vercel's uploader skips node_modules by default — but Expo's static export
+# legitimately puts the @expo/vector-icons font files under
+# assets/node_modules/…, and without them every icon renders as tofu on web.
+!assets/node_modules
+!assets/node_modules/**
