@@ -258,7 +258,10 @@ export default function FinancialsScreen() {
       const expensesJob = expByJob.get(job.id) ?? 0;
       const labor = laborMap?.get(job.id)?.labor ?? 0;
       const hours = laborMap?.get(job.id)?.hours ?? 0;
-      const pct = revenue > 0 ? ((revenue - expensesJob - labor) / revenue) * 100 : null;
+      const profit = revenue - expensesJob - labor;
+      const pct = revenue > 0 ? (profit / revenue) * 100 : null;
+      // Honest per-hour profit: only meaningful once revenue AND hours exist.
+      const perHour = revenue > 0 && hours > 0 ? profit / hours : null;
       return {
         id: job.id,
         label: job.job_number ?? job.name,
@@ -267,10 +270,29 @@ export default function FinancialsScreen() {
         expenses: expensesJob,
         hours,
         labor,
+        profit,
         pct,
+        perHour,
       };
     });
   }, [data, jobsFull, laborMap]);
+
+  // Company-wide totals across every job (top row of the P&L sheet).
+  const pnlTotals = useMemo(() => {
+    const t = { revenue: 0, expenses: 0, hours: 0, labor: 0, profit: 0 };
+    for (const row of pnlRows) {
+      t.revenue += row.revenue;
+      t.expenses += row.expenses;
+      t.hours += row.hours;
+      t.labor += row.labor;
+      t.profit += row.profit;
+    }
+    return {
+      ...t,
+      pct: t.revenue > 0 ? (t.profit / t.revenue) * 100 : null,
+      perHour: t.revenue > 0 && t.hours > 0 ? t.profit / t.hours : null,
+    };
+  }, [pnlRows]);
 
   const resetForm = () => {
     setAmount('');
@@ -540,7 +562,36 @@ export default function FinancialsScreen() {
               </Pressable>
               {pnlOpen ? (
                 <View style={styles.pnlCard}>
-                  {pnlRows.map((row, index) => (
+                  <View style={[styles.pnlRow, styles.pnlTotalRow]}>
+                    <View style={styles.pnlTopRow}>
+                      <Text style={styles.pnlTotalLabel}>All jobs</Text>
+                      <Text
+                        style={[
+                          styles.pnlPct,
+                          pnlTotals.pct !== null &&
+                            (pnlTotals.pct >= 0 ? styles.netPositive : styles.netNegative),
+                        ]}>
+                        {pnlTotals.pct !== null
+                          ? `${pnlTotals.pct >= 0 ? '+' : ''}${pnlTotals.pct.toFixed(1)}%`
+                          : '—'}
+                      </Text>
+                    </View>
+                    <Text style={styles.pnlDetail} numberOfLines={1}>
+                      {`Rev ${formatRounded(pnlTotals.revenue)} · Exp ${formatRounded(pnlTotals.expenses)} · ${
+                        Number.isInteger(pnlTotals.hours)
+                          ? pnlTotals.hours
+                          : pnlTotals.hours.toFixed(1)
+                      } h · Labor ${formatRounded(pnlTotals.labor)}`}
+                    </Text>
+                    <Text style={styles.pnlProfitLine} numberOfLines={1}>
+                      {`Profit ${pnlTotals.profit < 0 ? '−' : ''}${formatRounded(Math.abs(pnlTotals.profit))}${
+                        pnlTotals.perHour !== null
+                          ? ` · ${pnlTotals.perHour < 0 ? '−' : ''}${formatRounded(Math.abs(pnlTotals.perHour))}/h worked`
+                          : ''
+                      }`}
+                    </Text>
+                  </View>
+                  {pnlRows.map((row) => (
                     <Pressable
                       key={row.id}
                       onPress={() =>
@@ -548,7 +599,7 @@ export default function FinancialsScreen() {
                       }
                       style={({ pressed }) => [
                         styles.pnlRow,
-                        index > 0 && styles.pnlRowBorder,
+                        styles.pnlRowBorder,
                         pressed && styles.buttonPressed,
                       ]}>
                       <View style={styles.pnlTopRow}>
@@ -571,6 +622,15 @@ export default function FinancialsScreen() {
                           Number.isInteger(row.hours) ? row.hours : row.hours.toFixed(1)
                         } h · Labor ${formatRounded(row.labor)}`}
                       </Text>
+                      {row.revenue > 0 ? (
+                        <Text style={styles.pnlProfitLine} numberOfLines={1}>
+                          {`Profit ${row.profit < 0 ? '−' : ''}${formatRounded(Math.abs(row.profit))}${
+                            row.perHour !== null
+                              ? ` · ${row.perHour < 0 ? '−' : ''}${formatRounded(Math.abs(row.perHour))}/h worked`
+                              : ''
+                          }`}
+                        </Text>
+                      ) : null}
                     </Pressable>
                   ))}
                 </View>
@@ -1007,6 +1067,22 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     fontSize: 13,
     fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  pnlTotalRow: {
+    backgroundColor: colors.sunLight,
+  },
+  pnlTotalLabel: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  pnlProfitLine: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: '800',
     fontVariant: ['tabular-nums'],
   },
   monthLabel: {
