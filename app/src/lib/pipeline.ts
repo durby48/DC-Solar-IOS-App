@@ -266,6 +266,45 @@ export async function fetchCompanyTotals(
       else if (stage && CONTRACTED_STAGES.includes(stage)) contracted += amount;
     }
 
+    const laborMap = await fetchLaborHoursByJob();
+    if (!laborMap) return null;
+    const laborByJob = new Map<string, number>();
+    for (const [jobId, v] of laborMap) laborByJob.set(jobId, v.labor);
+
+    // Avg Profit: mean of per-job profit % over Complete jobs that have
+    // payments — (paid − expenses − labor) / paid per job.
+    let pctSum = 0;
+    let pctCount = 0;
+    for (const [jobId, stage] of stageById) {
+      if (stage !== 'Complete') continue;
+      const jobPaid = paidByJob.get(jobId) ?? 0;
+      if (jobPaid <= 0) continue;
+      const jobCosts = (expensesByJob.get(jobId) ?? 0) + (laborByJob.get(jobId) ?? 0);
+      pctSum += ((jobPaid - jobCosts) / jobPaid) * 100;
+      pctCount += 1;
+    }
+    const avgProfitPct = pctCount > 0 ? pctSum / pctCount : null;
+
+    return { estimates, contracted, invoiced, paid, avgProfitPct };
+  } catch {
+    return null;
+  }
+}
+
+/** Per-job worked hours + labor cost (hours × roster rates). */
+export interface JobLaborHours {
+  hours: number;
+  labor: number;
+}
+
+/**
+ * Hours + labor dollars per job from employee_hours rows (hours × their
+ * stored rate) plus completed time_entries (duration × the employee's
+ * roster pay_rate; unknown rates count toward hours but not labor).
+ * Null on any fetch failure (non-admin / offline). Three queries.
+ */
+export async function fetchLaborHoursByJob(): Promise<Map<string, JobLaborHours> | null> {
+  try {
     const [hoursRes, timeRes, employeesRes] = await Promise.all([
       supabase.from('employee_hours').select('job_id, hours, rate').eq('company', COMPANY),
       supabase
@@ -276,13 +315,20 @@ export async function fetchCompanyTotals(
     ]);
     if (hoursRes.error || timeRes.error || employeesRes.error) return null;
 
-    const laborByJob = new Map<string, number>();
+    const map = new Map<string, JobLaborHours>();
+    const bumpJob = (jobId: string, hours: number, labor: number) => {
+      const entry = map.get(jobId) ?? { hours: 0, labor: 0 };
+      entry.hours += hours;
+      entry.labor += labor;
+      map.set(jobId, entry);
+    };
+
     for (const row of (hoursRes.data ?? []) as {
       job_id: string | null;
       hours: unknown;
       rate: unknown;
     }[]) {
-      if (row.job_id) bump(laborByJob, row.job_id, num(row.hours) * num(row.rate));
+      if (row.job_id) bumpJob(row.job_id, num(row.hours), num(row.hours) * num(row.rate));
     }
 
     const rateByEmail = new Map<string, number>();
@@ -300,25 +346,11 @@ export async function fetchCompanyTotals(
       if (!row.job_id || !row.clock_in || !row.clock_out) continue; // only completed entries
       const ms = new Date(row.clock_out).getTime() - new Date(row.clock_in).getTime();
       if (!Number.isFinite(ms) || ms <= 0) continue;
+      const hours = ms / 3_600_000;
       const rate = row.employee ? rateByEmail.get(row.employee.toLowerCase()) : undefined;
-      if (rate != null) bump(laborByJob, row.job_id, (ms / 3_600_000) * rate); // skip unknown rates
+      bumpJob(row.job_id, hours, rate != null ? hours * rate : 0);
     }
-
-    // Avg Profit: mean of per-job profit % over Complete jobs that have
-    // payments — (paid − expenses − labor) / paid per job.
-    let pctSum = 0;
-    let pctCount = 0;
-    for (const [jobId, stage] of stageById) {
-      if (stage !== 'Complete') continue;
-      const jobPaid = paidByJob.get(jobId) ?? 0;
-      if (jobPaid <= 0) continue;
-      const jobCosts = (expensesByJob.get(jobId) ?? 0) + (laborByJob.get(jobId) ?? 0);
-      pctSum += ((jobPaid - jobCosts) / jobPaid) * 100;
-      pctCount += 1;
-    }
-    const avgProfitPct = pctCount > 0 ? pctSum / pctCount : null;
-
-    return { estimates, contracted, invoiced, paid, avgProfitPct };
+    return map;
   } catch {
     return null;
   }

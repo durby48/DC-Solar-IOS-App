@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -24,10 +24,13 @@ import {
   type FinancialsData,
   type LedgerEntry,
 } from '@/lib/financials';
+import { type Job } from '@/lib/mockData';
 import {
   fetchCompanyTotals,
+  fetchLaborHoursByJob,
   fetchPipelineJobs,
   type CompanyTotals,
+  type JobLaborHours,
 } from '@/lib/pipeline';
 import { useRole } from '@/lib/role';
 import { isValidISODate } from '@/lib/time';
@@ -128,9 +131,16 @@ function PipelineTotalsCard({ totals }: { totals: CompanyTotals }) {
 
 export default function FinancialsScreen() {
   const role = useRole();
+  const router = useRouter();
 
   const [data, setData] = useState<FinancialsData | null>(null);
   const [totals, setTotals] = useState<CompanyTotals | null>(null);
+  const [jobsFull, setJobsFull] = useState<Job[]>([]);
+  const [laborMap, setLaborMap] = useState<Map<string, JobLaborHours> | null>(null);
+  // Collapsible sections: the per-job P&L sheet and each expense month.
+  const [pnlOpen, setPnlOpen] = useState(false);
+  const [openMonths, setOpenMonths] = useState<Set<string>>(new Set());
+  const [monthsInitialized, setMonthsInitialized] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [jobOptions, setJobOptions] = useState<JobOption[]>([]);
@@ -159,22 +169,27 @@ export default function FinancialsScreen() {
 
   const load = useCallback(async () => {
     if (role?.isAdmin) {
-      const [financials, { jobs, isMock }] = await Promise.all([
+      const [financials, { jobs, isMock }, labor] = await Promise.all([
         fetchFinancials(),
         fetchPipelineJobs(),
+        fetchLaborHoursByJob(),
       ]);
       setData(financials);
+      setLaborMap(labor);
       // Same math as the Pipeline header, fed by the same rows we just got.
       setTotals(
         financials && !isMock ? await fetchCompanyTotals(jobs, financials.allEntries) : null,
       );
       if (!isMock) {
+        setJobsFull(jobs);
         setJobOptions(jobs.map((j) => ({ id: j.id, label: j.job_number ?? j.name })));
         setJobLabels(new Map(jobs.map((j) => [j.id, j.job_number ?? j.name])));
       }
     } else {
       setData(null);
       setTotals(null);
+      setJobsFull([]);
+      setLaborMap(null);
     }
     setLoaded(true);
   }, [role]);
@@ -194,16 +209,68 @@ export default function FinancialsScreen() {
     }
   }, [load]);
 
-  const sections = useMemo(
-    () =>
-      data
-        ? groupExpensesByMonth(data.expenseEntries).map((month) => ({
-            ...month,
-            data: month.entries,
-          }))
-        : [],
+  // Expense months are collapsible: a closed month contributes no rows.
+  const monthGroups = useMemo(
+    () => (data ? groupExpensesByMonth(data.expenseEntries) : []),
     [data],
   );
+
+  // Open the newest month by default, once, on first load.
+  useEffect(() => {
+    if (monthsInitialized || monthGroups.length === 0) return;
+    setOpenMonths(new Set([monthGroups[0].key]));
+    setMonthsInitialized(true);
+  }, [monthGroups, monthsInitialized]);
+
+  const sections = useMemo(
+    () =>
+      monthGroups.map((month) => ({
+        ...month,
+        data: openMonths.has(month.key) ? month.entries : [],
+      })),
+    [monthGroups, openMonths],
+  );
+
+  const toggleMonth = (key: string) => {
+    setOpenMonths((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // Per-job P&L rows: revenue = payments received; profit % of revenue.
+  const pnlRows = useMemo(() => {
+    if (!data) return [];
+    const paidByJob = new Map<string, number>();
+    const expByJob = new Map<string, number>();
+    for (const entry of data.allEntries) {
+      if (!entry.job_id) continue;
+      if (entry.type === 'payment') {
+        paidByJob.set(entry.job_id, (paidByJob.get(entry.job_id) ?? 0) + entry.amount);
+      } else if (entry.type === 'expense') {
+        expByJob.set(entry.job_id, (expByJob.get(entry.job_id) ?? 0) + entry.amount);
+      }
+    }
+    return jobsFull.map((job) => {
+      const revenue = paidByJob.get(job.id) ?? 0;
+      const expensesJob = expByJob.get(job.id) ?? 0;
+      const labor = laborMap?.get(job.id)?.labor ?? 0;
+      const hours = laborMap?.get(job.id)?.hours ?? 0;
+      const pct = revenue > 0 ? ((revenue - expensesJob - labor) / revenue) * 100 : null;
+      return {
+        id: job.id,
+        label: job.job_number ?? job.name,
+        name: job.name,
+        revenue,
+        expenses: expensesJob,
+        hours,
+        labor,
+        pct,
+      };
+    });
+  }, [data, jobsFull, laborMap]);
 
   const resetForm = () => {
     setAmount('');
@@ -443,16 +510,6 @@ export default function FinancialsScreen() {
     <View>
       <View style={styles.headerRow}>
         <Text style={styles.title}>Financials</Text>
-        {role?.isAdmin && data ? (
-          <Pressable
-            onPress={() => {
-              setStatus(null);
-              setFormOpen((open) => !open);
-            }}
-            style={({ pressed }) => [styles.newButton, pressed && styles.buttonPressed]}>
-            <Text style={styles.newButtonText}>{formOpen ? 'Close' : '+ Add expense'}</Text>
-          </Pressable>
-        ) : null}
       </View>
 
       {!loaded ? null : !role ? (
@@ -465,8 +522,77 @@ export default function FinancialsScreen() {
         <>
           <OverviewCard data={data} />
           {totals ? <PipelineTotalsCard totals={totals} /> : null}
+
+          {pnlRows.length > 0 ? (
+            <>
+              <Pressable
+                onPress={() => setPnlOpen((open) => !open)}
+                style={({ pressed }) => [styles.sectionToggle, pressed && styles.buttonPressed]}>
+                <Ionicons
+                  name={pnlOpen ? 'chevron-down' : 'chevron-forward'}
+                  size={18}
+                  color={colors.ocean}
+                />
+                <Text style={styles.sectionTitleInline}>Per-job P&amp;L</Text>
+                <Text style={styles.sectionToggleHint}>
+                  {pnlOpen ? 'Hide' : `${pnlRows.length} jobs`}
+                </Text>
+              </Pressable>
+              {pnlOpen ? (
+                <View style={styles.pnlCard}>
+                  {pnlRows.map((row, index) => (
+                    <Pressable
+                      key={row.id}
+                      onPress={() =>
+                        router.push({ pathname: '/job/[id]', params: { id: row.id } })
+                      }
+                      style={({ pressed }) => [
+                        styles.pnlRow,
+                        index > 0 && styles.pnlRowBorder,
+                        pressed && styles.buttonPressed,
+                      ]}>
+                      <View style={styles.pnlTopRow}>
+                        <View style={styles.jobChip}>
+                          <Text style={styles.jobChipText}>{row.label}</Text>
+                        </View>
+                        <Text
+                          style={[
+                            styles.pnlPct,
+                            row.pct !== null &&
+                              (row.pct >= 0 ? styles.netPositive : styles.netNegative),
+                          ]}>
+                          {row.pct !== null
+                            ? `${row.pct >= 0 ? '+' : ''}${row.pct.toFixed(1)}%`
+                            : '—'}
+                        </Text>
+                      </View>
+                      <Text style={styles.pnlDetail} numberOfLines={1}>
+                        {`Rev ${formatRounded(row.revenue)} · Exp ${formatRounded(row.expenses)} · ${
+                          Number.isInteger(row.hours) ? row.hours : row.hours.toFixed(1)
+                        } h · Labor ${formatRounded(row.labor)}`}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+            </>
+          ) : null}
         </>
       )}
+
+      {role?.isAdmin && data ? (
+        <View style={styles.expensesHeaderRow}>
+          <Text style={styles.sectionTitle}>Expenses</Text>
+          <Pressable
+            onPress={() => {
+              setStatus(null);
+              setFormOpen((open) => !open);
+            }}
+            style={({ pressed }) => [styles.newButton, pressed && styles.buttonPressed]}>
+            <Text style={styles.newButtonText}>{formOpen ? 'Close' : '+ Add expense'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {formOpen && role?.isAdmin && data ? (
         <View style={styles.formCard}>
@@ -568,7 +694,6 @@ export default function FinancialsScreen() {
         </Text>
       ) : null}
 
-      {role?.isAdmin && data ? <Text style={styles.sectionTitle}>Expenses</Text> : null}
     </View>
   );
 
@@ -587,12 +712,27 @@ export default function FinancialsScreen() {
           />
         }
         ListHeaderComponent={header}
-        renderSectionHeader={({ section }) => (
-          <View style={styles.monthHeader}>
-            <Text style={styles.monthLabel}>{section.label}</Text>
-            <Text style={styles.monthTotal}>{formatMoney(section.total)}</Text>
-          </View>
-        )}
+        renderSectionHeader={({ section }) => {
+          const open = openMonths.has(section.key);
+          return (
+            <Pressable
+              onPress={() => toggleMonth(section.key)}
+              style={({ pressed }) => [styles.monthHeader, pressed && styles.buttonPressed]}>
+              <View style={styles.monthLabelRow}>
+                <Ionicons
+                  name={open ? 'chevron-down' : 'chevron-forward'}
+                  size={15}
+                  color={colors.inkSoft}
+                />
+                <Text style={styles.monthLabel}>{section.label}</Text>
+                <Text style={styles.monthCount}>
+                  ({section.entries.length})
+                </Text>
+              </View>
+              <Text style={styles.monthTotal}>{formatMoney(section.total)}</Text>
+            </Pressable>
+          );
+        }}
         renderItem={renderRow}
         ListEmptyComponent={
           loaded && role?.isAdmin && data ? (
@@ -801,6 +941,73 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.xs,
     paddingHorizontal: spacing.xs,
+  },
+  monthLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  monthCount: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  expensesHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    marginBottom: spacing.xs,
+  },
+  sectionToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
+  sectionTitleInline: {
+    color: colors.ink,
+    fontSize: 18,
+    fontWeight: '700',
+    flex: 1,
+  },
+  sectionToggleHint: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  pnlCard: {
+    backgroundColor: colors.white,
+    borderRadius: radii.md,
+    overflow: 'hidden',
+    marginBottom: spacing.sm,
+    ...shadows.card,
+  },
+  pnlRow: {
+    padding: spacing.md,
+    gap: 4,
+  },
+  pnlRowBorder: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.tan,
+  },
+  pnlTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  pnlPct: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  pnlDetail: {
+    color: colors.inkSoft,
+    fontSize: 13,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   monthLabel: {
     color: colors.inkSoft,
