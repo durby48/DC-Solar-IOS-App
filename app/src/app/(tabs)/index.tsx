@@ -37,6 +37,38 @@ function greeting(): string {
   return 'Good evening';
 }
 
+/** One cell of the month grid. */
+interface GridDay {
+  dateISO: string;
+  dayNum: number;
+  inMonth: boolean;
+}
+
+/**
+ * Sunday-start month grid (like Google/Apple Calendar): full weeks covering
+ * the given month, padded with the neighbors' trailing/leading days.
+ */
+function buildMonthGrid(year: number, month: number): GridDay[][] {
+  const first = new Date(year, month, 1);
+  const start = new Date(first);
+  start.setDate(first.getDate() - first.getDay()); // back to Sunday
+  const weeks: GridDay[][] = [];
+  const cursor = new Date(start);
+  do {
+    const week: GridDay[] = [];
+    for (let i = 0; i < 7; i++) {
+      week.push({
+        dateISO: `${cursor.getFullYear()}-${`${cursor.getMonth() + 1}`.padStart(2, '0')}-${`${cursor.getDate()}`.padStart(2, '0')}`,
+        dayNum: cursor.getDate(),
+        inMonth: cursor.getMonth() === month,
+      });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    weeks.push(week);
+  } while (cursor.getMonth() === month);
+  return weeks;
+}
+
 /** One row of the week list: a day label plus that day's schedule entries. */
 interface WeekRow {
   dateISO: string;
@@ -91,6 +123,7 @@ export default function CalendarScreen() {
   const [monthOffset, setMonthOffset] = useState(0);
   const [monthEntries, setMonthEntries] = useState<ScheduleEntry[]>([]);
   const [monthLoading, setMonthLoading] = useState(false);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [openEntry, setOpenEntry] = useState<TimeEntry | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -179,21 +212,26 @@ export default function CalendarScreen() {
     }, []),
   );
 
-  // Month view data: the selected month's schedule (admins).
+  // Month view data: the whole visible GRID range (padded weeks include a
+  // few days of the neighbor months, so fetch those too).
   useEffect(() => {
     if (viewMode !== 'month') return;
     let cancelled = false;
     const base = new Date();
-    const first = new Date(base.getFullYear(), base.getMonth() + monthOffset, 1);
-    const last = new Date(base.getFullYear(), base.getMonth() + monthOffset + 1, 0);
-    const iso = (d: Date) =>
-      `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+    const year = base.getFullYear();
+    const month = base.getMonth() + monthOffset;
+    const grid = buildMonthGrid(year, month);
+    const from = grid[0][0].dateISO;
+    const to = grid[grid.length - 1][6].dateISO;
     setMonthLoading(true);
-    fetchScheduleRange(iso(first), iso(last)).then((entries) => {
+    fetchScheduleRange(from, to).then((entries) => {
       if (cancelled) return;
       setMonthEntries(entries);
       setMonthLoading(false);
     });
+    // Default the selected day to today when it's inside this month.
+    const todayStr = todayISO();
+    setSelectedDay(grid.some((w) => w.some((d) => d.dateISO === todayStr && d.inMonth)) ? todayStr : null);
     return () => {
       cancelled = true;
     };
@@ -434,62 +472,125 @@ export default function CalendarScreen() {
                 <Text style={styles.monthArrowText}>›</Text>
               </Pressable>
             </View>
-            {monthLoading ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyText}>Loading…</Text>
-              </View>
-            ) : monthEntries.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyText}>Nothing scheduled this month.</Text>
-              </View>
-            ) : (
-              <View style={styles.weekCard}>
-                {[...new Set(monthEntries.map((e) => e.work_date))].map((day, index) => {
-                  const dayEntries = monthEntries.filter((e) => e.work_date === day);
-                  const d = new Date(`${day}T12:00:00`);
-                  const isToday = day === today;
-                  return (
-                    <View
-                      key={day}
-                      style={[styles.weekRow, index > 0 && styles.weekRowBorder]}>
-                      <Text style={[styles.weekDay, isToday && styles.weekDayToday]}>
-                        {isToday
-                          ? 'Today'
-                          : d.toLocaleDateString('en-US', {
-                              weekday: 'short',
-                              month: 'short',
-                              day: 'numeric',
-                            })}
-                      </Text>
-                      <View style={styles.weekJobs}>
-                        {dayEntries.map((entry) => {
-                          const time = formatTimeLabel(entry.start_time);
-                          const crew = crewLine(entry.job.id);
+            {(() => {
+              const base = new Date();
+              const grid = buildMonthGrid(base.getFullYear(), base.getMonth() + monthOffset);
+              const entriesFor = (day: string) => monthEntries.filter((e) => e.work_date === day);
+              const selectedEntries = selectedDay ? entriesFor(selectedDay) : [];
+              return (
+                <>
+                  <View style={styles.gridCard}>
+                    <View style={styles.gridHeaderRow}>
+                      {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                        <Text key={`${d}${i}`} style={styles.gridHeaderText}>
+                          {d}
+                        </Text>
+                      ))}
+                    </View>
+                    {grid.map((week, wi) => (
+                      <View key={wi} style={styles.gridWeekRow}>
+                        {week.map((day) => {
+                          const dayEntries = entriesFor(day.dateISO);
+                          const isToday = day.dateISO === today;
+                          const isSelected = day.dateISO === selectedDay;
                           return (
                             <Pressable
-                              key={entry.id}
-                              onPress={() =>
-                                router.push({
-                                  pathname: '/job/[id]',
-                                  params: { id: entry.job.id },
-                                })
-                              }
-                              style={({ pressed }) => pressed && styles.pressed}>
-                              <Text style={styles.weekJobText} numberOfLines={2}>
-                                {entry.job.name}
-                                {entry.job.address ? ` — ${entry.job.address}` : ''}
-                                {time ? ` · ${time}` : ''}
-                              </Text>
-                              {crew ? <Text style={styles.crewText}>{crew}</Text> : null}
+                              key={day.dateISO}
+                              onPress={() => setSelectedDay(day.dateISO)}
+                              style={[
+                                styles.gridCell,
+                                isSelected && styles.gridCellSelected,
+                              ]}>
+                              <View
+                                style={[
+                                  styles.gridDayNumWrap,
+                                  isToday && styles.gridDayNumToday,
+                                ]}>
+                                <Text
+                                  style={[
+                                    styles.gridDayNum,
+                                    !day.inMonth && styles.gridDayNumOutside,
+                                    isToday && styles.gridDayNumTodayText,
+                                  ]}>
+                                  {day.dayNum}
+                                </Text>
+                              </View>
+                              {dayEntries.slice(0, 2).map((entry) => (
+                                <View key={entry.id} style={styles.gridChip}>
+                                  <Text style={styles.gridChipText} numberOfLines={1}>
+                                    {entry.job.job_number ?? entry.job.name}
+                                  </Text>
+                                </View>
+                              ))}
+                              {dayEntries.length > 2 ? (
+                                <Text style={styles.gridMore}>+{dayEntries.length - 2}</Text>
+                              ) : null}
                             </Pressable>
                           );
                         })}
                       </View>
+                    ))}
+                  </View>
+                  {monthLoading ? (
+                    <View style={styles.emptyCard}>
+                      <Text style={styles.emptyText}>Loading…</Text>
                     </View>
-                  );
-                })}
-              </View>
-            )}
+                  ) : selectedDay ? (
+                    <>
+                      <Text style={styles.sectionTitle}>
+                        {selectedDay === today
+                          ? 'Today'
+                          : new Date(`${selectedDay}T12:00:00`).toLocaleDateString('en-US', {
+                              weekday: 'long',
+                              month: 'long',
+                              day: 'numeric',
+                            })}
+                      </Text>
+                      {selectedEntries.length === 0 ? (
+                        <View style={styles.emptyCard}>
+                          <Text style={styles.emptyText}>Nothing scheduled.</Text>
+                        </View>
+                      ) : (
+                        <View style={styles.weekCard}>
+                          {selectedEntries.map((entry, index) => {
+                            const time = formatTimeLabel(entry.start_time);
+                            const crew = crewLine(entry.job.id);
+                            return (
+                              <Pressable
+                                key={entry.id}
+                                onPress={() =>
+                                  router.push({
+                                    pathname: '/job/[id]',
+                                    params: { id: entry.job.id },
+                                  })
+                                }
+                                style={({ pressed }) => [
+                                  styles.weekRow,
+                                  index > 0 && styles.weekRowBorder,
+                                  pressed && styles.pressed,
+                                ]}>
+                                <View style={styles.weekJobs}>
+                                  <Text style={styles.weekJobText} numberOfLines={2}>
+                                    {entry.job.name}
+                                    {entry.job.address ? ` — ${entry.job.address}` : ''}
+                                    {time ? ` · ${time}` : ''}
+                                  </Text>
+                                  {crew ? <Text style={styles.crewText}>{crew}</Text> : null}
+                                </View>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      )}
+                    </>
+                  ) : (
+                    <View style={styles.emptyCard}>
+                      <Text style={styles.emptyText}>Tap a day to see its jobs.</Text>
+                    </View>
+                  )}
+                </>
+              );
+            })()}
           </>
         ) : (
           <>
@@ -768,6 +869,79 @@ const styles = StyleSheet.create({
   },
   weekDayToday: {
     color: colors.ocean,
+  },
+  gridCard: {
+    backgroundColor: colors.white,
+    borderRadius: radii.md,
+    padding: spacing.xs,
+    ...shadows.card,
+  },
+  gridHeaderRow: {
+    flexDirection: 'row',
+    paddingBottom: spacing.xs,
+  },
+  gridHeaderText: {
+    flex: 1,
+    textAlign: 'center',
+    color: colors.inkSoft,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  gridWeekRow: {
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.tan,
+  },
+  gridCell: {
+    flex: 1,
+    minHeight: 64,
+    padding: 2,
+    alignItems: 'center',
+    gap: 2,
+    borderRadius: radii.sm,
+  },
+  gridCellSelected: {
+    backgroundColor: colors.skySoft,
+  },
+  gridDayNumWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gridDayNumToday: {
+    backgroundColor: colors.ocean,
+  },
+  gridDayNum: {
+    color: colors.ink,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  gridDayNumOutside: {
+    color: colors.tan,
+  },
+  gridDayNumTodayText: {
+    color: colors.white,
+    fontWeight: '800',
+  },
+  gridChip: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.sun,
+    borderRadius: 3,
+    paddingHorizontal: 2,
+    paddingVertical: 1,
+  },
+  gridChipText: {
+    color: colors.ink,
+    fontSize: 8,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  gridMore: {
+    color: colors.ocean,
+    fontSize: 9,
+    fontWeight: '800',
   },
   emptyCard: {
     backgroundColor: colors.skySoft,
