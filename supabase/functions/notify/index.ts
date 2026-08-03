@@ -205,6 +205,20 @@ async function logEmailTransaction(params: {
   const occurredOn =
     date && /^\d{4}-\d{2}-\d{2}/.test(date) ? date.slice(0, 10) : new Date().toISOString().slice(0, 10);
 
+  // A payment of the same amount within ±3 days is the same money — e.g.
+  // Devon logged it manually before the bank email arrived. Skip the insert.
+  // Expenses are exempt: two identical purchases days apart can be real.
+  if (parsed.type === 'payment') {
+    const day = new Date(`${occurredOn}T12:00:00Z`).getTime();
+    const lo = new Date(day - 3 * 86400000).toISOString().slice(0, 10);
+    const hi = new Date(day + 3 * 86400000).toISOString().slice(0, 10);
+    const similar = await rest(
+      `finance_entries?company=eq.${COMPANY}&type=eq.payment&amount=eq.${parsed.amount}&occurred_on=gte.${lo}&occurred_on=lte.${hi}&select=id&limit=1`,
+    );
+    if (similar === null) return 'error';
+    if (similar.length > 0) return 'duplicate';
+  }
+
   const inserted = await restPost('finance_entries', {
     company: COMPANY,
     type: parsed.type,
