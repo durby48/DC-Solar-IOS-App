@@ -93,6 +93,8 @@ export interface FinanceEntryEdit {
   status?: string | null;
   document_number?: string | null;
   document_path?: string | null;
+  /** null = company-level (no job). */
+  job_id?: string | null;
 }
 
 /**

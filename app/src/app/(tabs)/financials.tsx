@@ -164,6 +164,7 @@ export default function FinancialsScreen() {
   const [editAmount, setEditAmount] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editJobId, setEditJobId] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -347,6 +348,7 @@ export default function FinancialsScreen() {
     setEditAmount(entry.amount > 0 ? String(entry.amount) : '');
     setEditDate(entry.occurred_on ?? '');
     setEditDescription(entry.description ?? '');
+    setEditJobId(entry.job_id);
   };
 
   const saveEdit = async (entry: LedgerEntry) => {
@@ -367,6 +369,7 @@ export default function FinancialsScreen() {
       amount: value,
       occurred_on: day === '' ? null : day,
       description: desc === '' ? null : desc,
+      job_id: editJobId,
     });
     setSavingEdit(false);
     if (result.ok) {
@@ -497,6 +500,43 @@ export default function FinancialsScreen() {
               placeholder="Description"
               placeholderTextColor={colors.inkSoft}
             />
+            {jobOptions.length > 0 ? (
+              <>
+                <Text style={styles.fieldLabel}>Job</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={styles.jobPickerRow}>
+                    <Pressable
+                      onPress={() => setEditJobId(null)}
+                      style={[styles.pickChip, editJobId === null && styles.pickChipActive]}>
+                      <Text
+                        style={[
+                          styles.pickChipText,
+                          editJobId === null && styles.pickChipTextActive,
+                        ]}>
+                        Company
+                      </Text>
+                    </Pressable>
+                    {jobOptions.map((option) => (
+                      <Pressable
+                        key={option.id}
+                        onPress={() => setEditJobId(option.id)}
+                        style={[
+                          styles.pickChip,
+                          editJobId === option.id && styles.pickChipActive,
+                        ]}>
+                        <Text
+                          style={[
+                            styles.pickChipText,
+                            editJobId === option.id && styles.pickChipTextActive,
+                          ]}>
+                          {option.label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </ScrollView>
+              </>
+            ) : null}
             <View style={styles.editButtons}>
               <Pressable onPress={() => setEditingId(null)} disabled={savingEdit} hitSlop={8}>
                 <Text style={styles.cancelText}>Cancel</Text>
