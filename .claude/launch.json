@@ -6,9 +6,18 @@
       "runtimeExecutable": "/bin/sh",
       "runtimeArgs": [
         "-c",
-        "cd '/Users/areesasteele/Desktop/DC Solar KC App/app' && export PATH=\"$HOME/.nvm/versions/node/v24.18.0/bin:$PATH\" && npx expo start --port 8081"
+        "cd '/Users/ravendurbin/Desktop/DC Solar LLC/DC-Solar-IOS-App/app' && export PATH=\"$HOME/.nvm/versions/node/v24.12.0/bin:$PATH\" && npx expo start --port 8081"
       ],
       "port": 8081
+    },
+    {
+      "name": "expo-web",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "cd '/Users/ravendurbin/Desktop/DC Solar LLC/DC-Solar-IOS-App/app' && export PATH=\"$HOME/.nvm/versions/node/v24.12.0/bin:$PATH\" && npx expo start --web --port 8082"
+      ],
+      "port": 8082
     }
   ]
 }
