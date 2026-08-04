@@ -120,6 +120,12 @@ Street View or a photo he takes, then cartoonified.
 - A white scrim (`rgba(255,255,255,0.80)` + a denser top band behind the chips)
   sits between art and text so contrast never suffers.
 
+**Gotcha worth remembering:** `supabase-js` collapses every non-2xx edge-function
+response into the string "Edge Function returned a non-2xx status code" and hides
+the real body on `error.context`. `lib/artwork.ts::readFunctionError` unwraps it —
+without that, a missing key, a Street View coverage miss and a Gemini rejection
+all look identical to the user. Reuse it for any future edge function.
+
 **Blocked on Devon:** the pipeline produces real cartoons only once a
 `GOOGLE_API_KEY` secret (Street View Static API + Generative Language API both
 enabled) is set on the function. Until then every card shows the drawn

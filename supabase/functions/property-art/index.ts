@@ -79,8 +79,14 @@ Deno.serve(async (req) => {
   const googleKey = Deno.env.get('GOOGLE_API_KEY');
   if (!googleKey) {
     return json(
-      { error: 'GOOGLE_API_KEY is not set on this function. See OVERHAUL.md step 3.' },
-      500,
+      {
+        error:
+          'Artwork is not set up yet. This needs a Google API key (with Street View ' +
+          'Static API and Generative Language API enabled) saved as the GOOGLE_API_KEY ' +
+          'secret on the property-art function. Until then, cards show the placeholder ' +
+          'illustration.',
+      },
+      503,
     );
   }
 

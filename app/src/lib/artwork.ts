@@ -95,6 +95,37 @@ export type GenerateResult =
   | { ok: false; message: string };
 
 /**
+ * Pull the real message out of a failed functions.invoke().
+ *
+ * supabase-js collapses every non-2xx response into the useless string
+ * "Edge Function returned a non-2xx status code" and hides the actual body on
+ * `error.context` (a Response). Without this, a missing API key, a Street View
+ * coverage miss and a Gemini rejection all look identical to the user.
+ */
+async function readFunctionError(error: unknown): Promise<string | null> {
+  const context = (error as { context?: unknown })?.context;
+  if (!context || typeof context !== 'object') return null;
+  const response = context as Response;
+  try {
+    if (typeof response.clone === 'function') {
+      const body = (await response.clone().json()) as { error?: unknown };
+      if (typeof body?.error === 'string' && body.error.length > 0) return body.error;
+    }
+  } catch {
+    // not JSON — fall through to text
+  }
+  try {
+    if (typeof response.text === 'function') {
+      const text = await response.text();
+      if (text.trim().length > 0) return text.trim().slice(0, 300);
+    }
+  } catch {
+    // give up; caller falls back to the generic message
+  }
+  return null;
+}
+
+/**
  * Ask the edge function to build (or rebuild) one job's artwork. Admin-only
  * server-side. `photoPath` overrides Street View with a photo already in
  * storage; `force` regenerates even when ready artwork exists.
@@ -108,7 +139,8 @@ export async function generateArtwork(
       body: { jobId, ...options },
     });
     if (error) {
-      return { ok: false, message: error.message ?? 'Artwork generation failed.' };
+      const detail = await readFunctionError(error);
+      return { ok: false, message: detail ?? error.message ?? 'Artwork generation failed.' };
     }
     const result = data as { ok?: boolean; cached?: boolean; error?: string } | null;
     if (!result?.ok) {
