@@ -69,42 +69,86 @@ function buildMonthGrid(year: number, month: number): GridDay[][] {
   return weeks;
 }
 
-/** One row of the week list: a day label plus that day's schedule entries. */
+function isoOf(d: Date): string {
+  return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+}
+
+/**
+ * Monday of the week containing today, shifted by `offset` weeks.
+ * Sunday counts as belonging to the week that just ENDED — the crew never
+ * works Sunday, so on a Sunday you want to still be looking at Mon–Sat.
+ */
+function mondayOf(offset: number): Date {
+  const d = new Date();
+  d.setHours(12, 0, 0, 0);
+  const dow = d.getDay(); // 0 = Sun … 6 = Sat
+  const toMonday = dow === 0 ? -6 : 1 - dow;
+  d.setDate(d.getDate() + toMonday + offset * 7);
+  return d;
+}
+
+/** One row of the week list: a day plus that day's schedule entries. */
 interface WeekRow {
   dateISO: string;
-  label: string;
+  /** "Mon" — short weekday. */
+  weekday: string;
+  /** "8/3" — the actual date, so a week is never ambiguous. */
+  dayLabel: string;
+  isToday: boolean;
   isTomorrow: boolean;
   entries: ScheduleEntry[];
 }
 
 /**
- * The rest of the working week, starting tomorrow through Saturday
- * (Mon–Sat week; a Saturday "tomorrow" is Sunday, then the loop stops at
- * the following Saturday so weekends still show what's coming).
+ * Monday→Saturday rows for the week at `offset`. Sundays are omitted
+ * entirely (nobody works Sunday), so this is always exactly 6 rows.
  */
-function buildWeekRows(entries: ScheduleEntry[]): WeekRow[] {
+function buildWeekRows(entries: ScheduleEntry[], offset: number): WeekRow[] {
   const byDate = new Map<string, ScheduleEntry[]>();
   for (const entry of entries) {
     const list = byDate.get(entry.work_date) ?? [];
     list.push(entry);
     byDate.set(entry.work_date, list);
   }
+  const today = todayISO();
+  const tomorrowDate = new Date();
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = isoOf(tomorrowDate);
+
+  const monday = mondayOf(offset);
   const rows: WeekRow[] = [];
-  for (let i = 1; i <= 7; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    const dow = d.getDay();
-    if (i > 1 && dow === 0) break; // ran past Saturday — week over
-    const dateISO = `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const dateISO = isoOf(d);
     rows.push({
       dateISO,
-      label: i === 1 ? 'Tomorrow' : d.toLocaleDateString('en-US', { weekday: 'long' }),
-      isTomorrow: i === 1,
+      weekday: d.toLocaleDateString('en-US', { weekday: 'short' }),
+      dayLabel: `${d.getMonth() + 1}/${d.getDate()}`,
+      isToday: dateISO === today,
+      isTomorrow: dateISO === tomorrow,
       entries: byDate.get(dateISO) ?? [],
     });
-    if (i > 1 && dow === 6) break; // Saturday included — stop
   }
   return rows;
+}
+
+/** "Aug 3 – Aug 8" for the Mon–Sat span at `offset`. */
+function weekRangeLabel(offset: number): string {
+  const monday = mondayOf(offset);
+  const saturday = new Date(monday);
+  saturday.setDate(monday.getDate() + 5);
+  const fmt = (d: Date) =>
+    d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `${fmt(monday)} – ${fmt(saturday)}`;
+}
+
+/** "This week" / "Last week" / "Next week" / "Week of …". */
+function weekTitle(offset: number): string {
+  if (offset === 0) return 'This week';
+  if (offset === -1) return 'Last week';
+  if (offset === 1) return 'Next week';
+  return offset < 0 ? `${Math.abs(offset)} weeks ago` : `In ${offset} weeks`;
 }
 
 export default function CalendarScreen() {
@@ -121,6 +165,9 @@ export default function CalendarScreen() {
   // Admin view toggle + month navigation (0 = current month).
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
   const [monthOffset, setMonthOffset] = useState(0);
+  // Week pager (0 = current Mon–Sat week; negative = past weeks).
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [weekEntries, setWeekEntries] = useState<ScheduleEntry[] | null>(null);
   const [monthEntries, setMonthEntries] = useState<ScheduleEntry[]>([]);
   const [monthLoading, setMonthLoading] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -236,6 +283,21 @@ export default function CalendarScreen() {
       cancelled = true;
     };
   }, [viewMode, monthOffset]);
+
+  // Week view data. The default schedule fetch only reaches 7 days back, so
+  // paging into older weeks needs its own range query.
+  useEffect(() => {
+    let cancelled = false;
+    const monday = mondayOf(weekOffset);
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+    fetchScheduleRange(isoOf(monday), isoOf(saturday)).then((entries) => {
+      if (!cancelled) setWeekEntries(entries);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [weekOffset, scheduleEntries]);
 
   /** "Devon, Isaiah" — first names of the crew assigned to a job. */
   const crewLine = useCallback(
@@ -354,7 +416,10 @@ export default function CalendarScreen() {
           .map((e) => e.job)
           .filter((job, index, arr) => arr.findIndex((j) => j.id === job.id) === index)
       : jobs.filter((j) => j.scheduled_for === today);
-  const weekRows = buildWeekRows(realEntries);
+  // Signed-in devices use the week range query; demo/mock mode falls back to
+  // the bundled entries so the signed-out preview still shows something.
+  const weekSource = scheduleIsMock ? realEntries : (weekEntries ?? realEntries);
+  const weekRows = buildWeekRows(weekSource, weekOffset);
 
   const showJobChips = sessionEmail !== null && !clockedIn && todaysJobs.length > 0;
 
@@ -515,12 +580,27 @@ export default function CalendarScreen() {
                                   {day.dayNum}
                                 </Text>
                               </View>
+                              {/* Chips route straight to the job, matching the
+                                  week view; tapping elsewhere in the cell still
+                                  just selects the day. */}
                               {dayEntries.slice(0, 2).map((entry) => (
-                                <View key={entry.id} style={styles.gridChip}>
+                                <Pressable
+                                  key={entry.id}
+                                  onPress={() =>
+                                    router.push({
+                                      pathname: '/job/[id]',
+                                      params: { id: entry.job.id },
+                                    })
+                                  }
+                                  hitSlop={2}
+                                  style={({ pressed }) => [
+                                    styles.gridChip,
+                                    pressed && styles.pressed,
+                                  ]}>
                                   <Text style={styles.gridChipText} numberOfLines={1}>
                                     {entry.job.job_number ?? entry.job.name}
                                   </Text>
-                                </View>
+                                </Pressable>
                               ))}
                               {dayEntries.length > 2 ? (
                                 <Text style={styles.gridMore}>+{dayEntries.length - 2}</Text>
@@ -612,13 +692,50 @@ export default function CalendarScreen() {
               </View>
             )}
 
-            <Text style={styles.sectionTitle}>This week</Text>
+            <View style={styles.weekHeaderRow}>
+              <Pressable
+                onPress={() => setWeekOffset((n) => n - 1)}
+                hitSlop={8}
+                style={({ pressed }) => [styles.weekArrow, pressed && styles.pressed]}>
+                <Text style={styles.weekArrowText}>‹</Text>
+              </Pressable>
+              <View style={styles.weekHeaderLabel}>
+                <Text style={styles.sectionTitleTight}>{weekTitle(weekOffset)}</Text>
+                <Text style={styles.weekRangeText}>{weekRangeLabel(weekOffset)}</Text>
+              </View>
+              <Pressable
+                onPress={() => setWeekOffset((n) => n + 1)}
+                hitSlop={8}
+                style={({ pressed }) => [styles.weekArrow, pressed && styles.pressed]}>
+                <Text style={styles.weekArrowText}>›</Text>
+              </Pressable>
+            </View>
+            {weekOffset !== 0 ? (
+              <Pressable
+                onPress={() => setWeekOffset(0)}
+                style={({ pressed }) => [styles.backToWeek, pressed && styles.pressed]}>
+                <Text style={styles.backToWeekText}>Back to this week</Text>
+              </Pressable>
+            ) : null}
             <View style={styles.weekCard}>
               {weekRows.map((row, index) => (
                 <View
                   key={row.dateISO}
-                  style={[styles.weekRow, index > 0 && styles.weekRowBorder]}>
-                  <Text style={styles.weekDay}>{row.label}</Text>
+                  style={[
+                    styles.weekRow,
+                    index > 0 && styles.weekRowBorder,
+                    row.isToday && styles.weekRowToday,
+                  ]}>
+                  <View style={styles.weekDayCol}>
+                    <Text style={[styles.weekDay, row.isToday && styles.weekDayToday]}>
+                      {row.weekday} {row.dayLabel}
+                    </Text>
+                    {row.isToday ? (
+                      <Text style={styles.weekDayBadge}>Today</Text>
+                    ) : row.isTomorrow ? (
+                      <Text style={styles.weekDayBadgeSoft}>Tomorrow</Text>
+                    ) : null}
+                  </View>
                   <View style={styles.weekJobs}>
                     {row.entries.length > 0 ? (
                       row.entries.map((entry) => {
@@ -783,11 +900,78 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.tan,
   },
-  weekDay: {
+  sectionTitleTight: {
+    color: colors.ink,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  weekHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  weekHeaderLabel: {
+    alignItems: 'center',
+  },
+  weekRangeText: {
+    color: colors.ocean,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  weekArrow: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.sm,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  weekArrowText: {
+    color: colors.ocean,
+    fontSize: 22,
+    fontWeight: '800',
+    lineHeight: 24,
+  },
+  backToWeek: {
+    alignSelf: 'center',
+    backgroundColor: colors.skySoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  backToWeekText: {
+    color: colors.ocean,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  weekDayCol: {
     width: 92,
+    gap: 2,
+  },
+  weekDay: {
     color: colors.ink,
     fontSize: 14,
     fontWeight: '800',
+  },
+  weekRowToday: {
+    backgroundColor: colors.skySoft,
+  },
+  weekDayBadge: {
+    color: colors.ocean,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  weekDayBadgeSoft: {
+    color: colors.inkSoft,
+    fontSize: 11,
+    fontWeight: '700',
   },
   weekJobs: {
     flex: 1,

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { PropertyArt } from '@/components/PropertyArt';
 import { StatusPill } from '@/components/StatusPill';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
@@ -26,6 +27,7 @@ import {
   type JobMoney,
   type NextDate,
 } from '@/lib/pipeline';
+import { fetchArtworkUrls } from '@/lib/artwork';
 import { useRole } from '@/lib/role';
 import { STAGES, stageOrDefault, type Stage } from '@/lib/stages';
 import { formatTimeLabel } from '@/lib/time';
@@ -83,11 +85,14 @@ function PipelineCard({
   next,
   money,
   myHours,
+  artUrl,
 }: {
   job: Job;
   next: NextDate | undefined;
   money: JobMoney | undefined;
   myHours: number | undefined;
+  /** Cartoon artwork of this property, once it has been generated. */
+  artUrl: string | undefined;
 }) {
   const router = useRouter();
   const stage = jobStage(job);
@@ -104,6 +109,7 @@ function PipelineCard({
     <Pressable
       onPress={() => router.push({ pathname: '/job/[id]', params: { id: job.id } })}
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
+      <PropertyArt seed={job.id} imageUrl={artUrl} radius={radii.md} />
       <View style={styles.topRow}>
         {job.job_number ? (
           <View style={styles.chip}>
@@ -146,12 +152,14 @@ export default function PipelineScreen() {
   const [totals, setTotals] = useState<CompanyTotals | null>(null);
   const [myHours, setMyHours] = useState<Map<string, number>>(new Map());
   const [stageFilter, setStageFilter] = useState<Stage | 'All' | 'Active'>('All');
+  const [artUrls, setArtUrls] = useState<Map<string, string>>(new Map());
 
   const load = useCallback(async () => {
     const { jobs: fetched, isMock: mock } = await fetchPipelineJobs();
     setJobs(fetched);
     setIsMock(mock);
     setNextDates(await fetchNextDates(mock));
+    setArtUrls(mock ? new Map() : await fetchArtworkUrls());
 
     if (!mock && role?.isAdmin) {
       // One finance fetch feeds both the per-card money rows and the
@@ -276,6 +284,7 @@ export default function PipelineScreen() {
               next={nextDates.get(item.id)}
               money={money?.get(item.id)}
               myHours={myHours.get(item.id)}
+              artUrl={artUrls.get(item.id)}
             />
           </View>
         )}
@@ -420,6 +429,10 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     padding: spacing.md,
     gap: spacing.xs,
+    // The property artwork is an absolutely-positioned sibling underneath;
+    // `overflow: hidden` keeps it inside the rounded corners.
+    overflow: 'hidden',
+    minHeight: 150,
     ...shadows.card,
   },
   cardPressed: {

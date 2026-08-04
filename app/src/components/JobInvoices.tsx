@@ -37,6 +37,13 @@ function entryIcon(entry: FinanceEntry): keyof typeof Ionicons.glyphMap {
   return 'pricetag';
 }
 
+/** Money in is green, money out is coral, paperwork stays ink. */
+function amountStyle(entry: FinanceEntry) {
+  if (entry.type === 'payment') return { color: colors.mintDeep };
+  if (entry.type === 'expense') return { color: colors.coralDeep };
+  return undefined;
+}
+
 function entryTitle(entry: FinanceEntry): string {
   if (entry.type === 'invoice') return entry.document_number ?? 'Invoice';
   if (entry.type === 'estimate') return entry.document_number ?? 'Estimate';
@@ -266,48 +273,59 @@ export function JobInvoices({
                   <Text style={styles.statusChipText}>{entry.status}</Text>
                 </View>
               ) : null}
-              <Text style={styles.metaText}>{formatShortDate(entry.occurred_on)}</Text>
+              <Text style={styles.metaText} numberOfLines={1}>
+                {formatShortDate(entry.occurred_on)}
+              </Text>
             </View>
           </View>
-          <Text style={styles.amountText}>{formatMoney(entry.amount)}</Text>
-          {entry.document_path ? (
-            <Pressable
-              onPress={() => void shareEntry(entry)}
-              disabled={sharingId !== null}
-              hitSlop={6}
-              style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
-              {sharingId === entry.id ? (
-                <ActivityIndicator size="small" color={colors.ocean} />
-              ) : (
-                <Ionicons name="share-outline" size={15} color={colors.ocean} />
-              )}
-            </Pressable>
-          ) : null}
-          <Pressable
-            onPress={() => (editing ? cancelEdit() : startEdit(entry))}
-            hitSlop={6}
-            style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
-            <Ionicons name="pencil" size={15} color={colors.ocean} />
-          </Pressable>
-          <Pressable
-            onPress={() => void pressDelete(entry)}
-            disabled={busyDelete}
-            hitSlop={6}
-            style={({ pressed }) => [
-              styles.iconButton,
-              confirming && styles.iconButtonDanger,
-              pressed && styles.buttonPressed,
-            ]}>
-            {busyDelete ? (
-              <ActivityIndicator size="small" color={colors.danger} />
-            ) : (
-              <Ionicons
-                name="trash"
-                size={15}
-                color={confirming ? colors.white : colors.inkSoft}
-              />
-            )}
-          </Pressable>
+          {/* Amount and the action buttons share a right-hand column, stacked.
+              They used to sit inline with the date, which let five-figure
+              amounts collide with the recorded date on narrow phones. */}
+          <View style={styles.rowRight}>
+            <Text style={[styles.amountText, amountStyle(entry)]} numberOfLines={1}>
+              {formatMoney(entry.amount)}
+            </Text>
+            <View style={styles.actionRow}>
+              {entry.document_path ? (
+                <Pressable
+                  onPress={() => void shareEntry(entry)}
+                  disabled={sharingId !== null}
+                  hitSlop={6}
+                  style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
+                  {sharingId === entry.id ? (
+                    <ActivityIndicator size="small" color={colors.ocean} />
+                  ) : (
+                    <Ionicons name="share-outline" size={15} color={colors.ocean} />
+                  )}
+                </Pressable>
+              ) : null}
+              <Pressable
+                onPress={() => (editing ? cancelEdit() : startEdit(entry))}
+                hitSlop={6}
+                style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
+                <Ionicons name="pencil" size={15} color={colors.ocean} />
+              </Pressable>
+              <Pressable
+                onPress={() => void pressDelete(entry)}
+                disabled={busyDelete}
+                hitSlop={6}
+                style={({ pressed }) => [
+                  styles.iconButton,
+                  confirming && styles.iconButtonDanger,
+                  pressed && styles.buttonPressed,
+                ]}>
+                {busyDelete ? (
+                  <ActivityIndicator size="small" color={colors.danger} />
+                ) : (
+                  <Ionicons
+                    name="trash"
+                    size={15}
+                    color={confirming ? colors.white : colors.inkSoft}
+                  />
+                )}
+              </Pressable>
+            </View>
+          </View>
         </Pressable>
         {confirming ? (
           <Text style={styles.confirmHint}>Tap the trash again to delete this entry.</Text>
@@ -368,7 +386,7 @@ export function JobInvoices({
 
   return (
     <>
-      <Text style={styles.sectionTitle}>Invoices &amp; estimates</Text>
+      <Text style={styles.sectionTitle}>Invoices, Estimates, &amp; Payments</Text>
       {state === 'loading' ? (
         <View style={styles.placeholderCard}>
           <ActivityIndicator color={colors.ocean} />
@@ -541,7 +559,18 @@ const styles = StyleSheet.create({
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: spacing.sm,
+  },
+  rowRight: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+    gap: spacing.xs + 2,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   statusChip: {
     backgroundColor: colors.sunLight,

@@ -14,9 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import {
   fetchHoursData,
+  formatPayrollDate,
   listPayrollPeriods,
+  payrollState,
   summarizePeriod,
   type HoursData,
+  type PayrollState,
 } from '@/lib/payroll';
 import { useRole } from '@/lib/role';
 
@@ -27,6 +30,34 @@ function formatHours(hours: number): string {
 
 function formatMoney(amount: number): string {
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** Headline under the period dates, driven by where we are in the cycle. */
+function stateLabel(state: PayrollState, pre: boolean): string {
+  if (pre) return 'Paid before tracking';
+  switch (state) {
+    case 'current':
+      return 'Current payroll — still accruing';
+    case 'awaiting-submit':
+      return 'Closed — not submitted yet';
+    case 'submitted':
+      return 'Submitted — awaiting payday';
+    case 'paid':
+      return 'Paid';
+  }
+}
+
+function stateChipStyle(state: PayrollState) {
+  switch (state) {
+    case 'current':
+      return { bg: colors.skySoft, fg: colors.ocean };
+    case 'awaiting-submit':
+      return { bg: colors.amberSoft, fg: colors.amberDeep };
+    case 'submitted':
+      return { bg: colors.indigoSoft, fg: colors.indigoDeep };
+    case 'paid':
+      return { bg: colors.mintSoft, fg: colors.mintDeep };
+  }
 }
 
 export default function HoursScreen() {
@@ -40,6 +71,8 @@ export default function HoursScreen() {
   // Default to the current (last) period.
   const [periodIndex, setPeriodIndex] = useState(periods.length - 1);
   const period = periods[periodIndex];
+  const state = payrollState(period);
+  const isPaid = state === 'paid';
 
   const load = useCallback(async () => {
     setData(role?.isAdmin ? await fetchHoursData() : null);
@@ -118,13 +151,15 @@ export default function HoursScreen() {
                 </Pressable>
                 <View style={styles.periodLabelWrap}>
                   <Text style={styles.periodDates}>{period.label}</Text>
-                  <Text style={styles.periodSub}>
-                    {period.current
-                      ? 'Current payroll'
-                      : period.pre
-                        ? 'Paid before tracking'
-                        : 'Paid payroll'}
-                  </Text>
+                  <View
+                    style={[
+                      styles.stateChip,
+                      { backgroundColor: stateChipStyle(state).bg },
+                    ]}>
+                    <Text style={[styles.stateChipText, { color: stateChipStyle(state).fg }]}>
+                      {stateLabel(state, period.pre)}
+                    </Text>
+                  </View>
                 </View>
                 <Pressable
                   onPress={() => setPeriodIndex((i) => Math.min(periods.length - 1, i + 1))}
@@ -146,16 +181,34 @@ export default function HoursScreen() {
                   </Text>
                 </View>
                 <View style={styles.overviewTile}>
-                  <Text style={styles.tileLabel}>
-                    {period.current ? 'Payroll due' : 'Payroll paid'}
-                  </Text>
+                  <Text style={styles.tileLabel}>{isPaid ? 'Payroll paid' : 'Payroll due'}</Text>
                   <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
                     {formatMoney(overview.totalPeriodPay)}
                   </Text>
                 </View>
               </View>
+              {period.pre ? (
+                <Text style={styles.periodHint}>
+                  Paid through the old spreadsheet, before the app tracked hours.
+                </Text>
+              ) : (
+                <View style={styles.cycleRow}>
+                  <View style={styles.cycleItem}>
+                    <Text style={styles.cycleLabel}>Submit</Text>
+                    <Text style={styles.cycleValue}>{formatPayrollDate(period.submitOn)}</Text>
+                  </View>
+                  <View style={styles.cycleDivider} />
+                  <View style={styles.cycleItem}>
+                    <Text style={styles.cycleLabel}>Payday</Text>
+                    <Text style={[styles.cycleValue, styles.cyclePayday]}>
+                      {formatPayrollDate(period.payOn)}
+                    </Text>
+                  </View>
+                </View>
+              )}
               <Text style={styles.periodHint}>
-                Periods run every two weeks. Swipe with the arrows to review past payrolls.
+                Two-week periods. Payroll is submitted the Wednesday after a period closes and
+                paid the Friday after. Use the arrows to review past payrolls.
               </Text>
             </View>
 
@@ -187,7 +240,7 @@ export default function HoursScreen() {
                           </View>
                           <View style={styles.employeeTile}>
                             <Text style={styles.tileLabel}>
-                              {period.current ? 'Pay due' : 'Paid'}
+                              {isPaid ? 'Paid' : 'Pay due'}
                             </Text>
                             <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
                               {formatMoney(emp.periodPay)}
@@ -313,6 +366,50 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     fontSize: 12,
     fontWeight: '600',
+  },
+  stateChip: {
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 3,
+    marginTop: 2,
+  },
+  stateChipText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  cycleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.canvas,
+    borderRadius: radii.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
+  },
+  cycleItem: {
+    flex: 1,
+    gap: 2,
+  },
+  cycleDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: colors.line,
+    marginHorizontal: spacing.sm,
+  },
+  cycleLabel: {
+    color: colors.inkSoft,
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  cycleValue: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  cyclePayday: {
+    color: colors.mintDeep,
   },
   overviewGrid: {
     flexDirection: 'row',

@@ -5,6 +5,10 @@
  *   - employee_hours rows (manual logs; hours × their stamped rate)
  *   - completed time_entries (clock in/out; duration × roster pay_rate)
  *
+ * Pay cycle (confirmed by Devon 2026-08-04): a period is SUBMITTED the
+ * Wednesday after it closes and PAID the Friday after it closes. The period
+ * that ended Mon 2026-08-03 is submitted Wed 08-05 and paid Fri 08-07.
+ *
  * Payroll periods: everything before 2026-07-18 was paid out and
  * reconciled before this tab existed — it appears as one "Before Jul 18"
  * bucket. The first tracked period is the catch-up 2026-07-18 →
@@ -36,6 +40,53 @@ export interface PayrollPeriod {
   current: boolean;
   /** True for the paid-before-tracking bucket. */
   pre: boolean;
+  /**
+   * The Wednesday after the period ends — the day Devon submits payroll.
+   * Null for the pre-tracking bucket (paid via the old spreadsheet).
+   */
+  submitOn: string | null;
+  /** The Friday after the period ends — the day the crew is actually paid. */
+  payOn: string | null;
+}
+
+/**
+ * Where a period sits in the payroll cycle:
+ *   current         — still accruing hours
+ *   awaiting-submit — period closed, Devon hasn't submitted it yet
+ *   submitted       — submitted, payday hasn't arrived
+ *   paid            — payday has passed (or it predates tracking)
+ */
+export type PayrollState = 'current' | 'awaiting-submit' | 'submitted' | 'paid';
+
+const WEDNESDAY = 3;
+const FRIDAY = 5;
+
+/** First date strictly AFTER `afterIso` that falls on `targetDow` (0=Sun). */
+function nextDayOfWeek(afterIso: string, targetDow: number): string {
+  const ms = dayMs(afterIso);
+  const dow = new Date(ms).getUTCDay();
+  const delta = ((targetDow - dow + 7) % 7) || 7;
+  return isoFromMs(ms + delta * DAY_MS);
+}
+
+export function payrollState(period: PayrollPeriod, todayIso?: string): PayrollState {
+  const today = todayIso ?? new Date().toISOString().slice(0, 10);
+  if (period.pre) return 'paid';
+  if (today <= period.end) return 'current';
+  if (period.submitOn && today < period.submitOn) return 'awaiting-submit';
+  if (period.payOn && today < period.payOn) return 'submitted';
+  return 'paid';
+}
+
+/** "Fri, Aug 7" — the format used on the payroll card. */
+export function formatPayrollDate(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
 }
 
 /** Noon-UTC epoch for a YYYY-MM-DD (avoids timezone off-by-one). */
@@ -74,6 +125,8 @@ export function listPayrollPeriods(todayIso?: string): PayrollPeriod[] {
       label: `Before ${monthDay(FIRST_PERIOD_START)}`,
       current: false,
       pre: true,
+      submitOn: null,
+      payOn: null,
     },
     {
       start: FIRST_PERIOD_START,
@@ -81,6 +134,8 @@ export function listPayrollPeriods(todayIso?: string): PayrollPeriod[] {
       label: rangeLabel(FIRST_PERIOD_START, FIRST_PERIOD_END),
       current: today <= FIRST_PERIOD_END,
       pre: false,
+      submitOn: nextDayOfWeek(FIRST_PERIOD_END, WEDNESDAY),
+      payOn: nextDayOfWeek(FIRST_PERIOD_END, FRIDAY),
     },
   ];
   let startMs = dayMs(BIWEEKLY_ANCHOR);
@@ -93,6 +148,8 @@ export function listPayrollPeriods(todayIso?: string): PayrollPeriod[] {
       label: rangeLabel(start, end),
       current: today >= start && today <= end,
       pre: false,
+      submitOn: nextDayOfWeek(end, WEDNESDAY),
+      payOn: nextDayOfWeek(end, FRIDAY),
     });
     startMs += 14 * DAY_MS;
   }

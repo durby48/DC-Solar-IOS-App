@@ -16,6 +16,7 @@ import { JobAssignedCrew } from '@/components/JobAssignedCrew';
 import { JobDocuments } from '@/components/JobDocuments';
 import { JobFinanceHeader } from '@/components/JobFinanceHeader';
 import { JobInvoices } from '@/components/JobInvoices';
+import { JobArtwork } from '@/components/JobArtwork';
 import { JobMaterials } from '@/components/JobMaterials';
 import { JobMyHours } from '@/components/JobMyHours';
 import { JobPhotos } from '@/components/JobPhotos';
@@ -229,6 +230,8 @@ export default function JobDetailScreen() {
               isAdmin={role?.isAdmin ?? false}
               isMock={isMockJob}
             />
+
+            {role?.isAdmin && !isMockJob ? <JobArtwork job={job} /> : null}
           </>
         )}
       </ScrollView>
