@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Pressable,
   RefreshControl,
@@ -12,8 +12,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
-import { formatShortDate } from '@/lib/dates';
-import { fetchHoursOverview, type HoursOverview } from '@/lib/payroll';
+import {
+  fetchHoursData,
+  listPayrollPeriods,
+  summarizePeriod,
+  type HoursData,
+} from '@/lib/payroll';
 import { useRole } from '@/lib/role';
 
 function formatHours(hours: number): string {
@@ -27,13 +31,18 @@ function formatMoney(amount: number): string {
 
 export default function HoursScreen() {
   const role = useRole();
-  const [data, setData] = useState<HoursOverview | null>(null);
+  const [data, setData] = useState<HoursData | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [openNames, setOpenNames] = useState<Set<string>>(new Set());
 
+  const periods = useMemo(() => listPayrollPeriods(), []);
+  // Default to the current (last) period.
+  const [periodIndex, setPeriodIndex] = useState(periods.length - 1);
+  const period = periods[periodIndex];
+
   const load = useCallback(async () => {
-    setData(role?.isAdmin ? await fetchHoursOverview() : null);
+    setData(role?.isAdmin ? await fetchHoursData() : null);
     setLoaded(true);
   }, [role]);
 
@@ -51,6 +60,11 @@ export default function HoursScreen() {
       setRefreshing(false);
     }
   }, [load]);
+
+  const overview = useMemo(
+    () => (data ? summarizePeriod(data, period) : null),
+    [data, period],
+  );
 
   const toggle = (name: string) => {
     setOpenNames((prev) => {
@@ -85,40 +99,69 @@ export default function HoursScreen() {
           placeholder('Sign in to see crew hours.')
         ) : !role.isAdmin ? (
           placeholder('Hours are available to owners and operators.')
-        ) : !data ? (
+        ) : !overview ? (
           placeholder('Hours are not available right now.')
         ) : (
           <>
             <View style={styles.periodCard}>
-              <View style={styles.periodHeaderRow}>
-                <Text style={styles.periodLabel}>This payroll</Text>
-                <Text style={styles.periodDates}>
-                  {formatShortDate(data.period.start)} – {formatShortDate(data.period.end)}
-                </Text>
+              <View style={styles.periodPagerRow}>
+                <Pressable
+                  onPress={() => setPeriodIndex((i) => Math.max(0, i - 1))}
+                  disabled={periodIndex === 0}
+                  hitSlop={8}
+                  style={({ pressed }) => [
+                    styles.pagerButton,
+                    periodIndex === 0 && styles.pagerButtonDisabled,
+                    pressed && styles.buttonPressed,
+                  ]}>
+                  <Ionicons name="chevron-back" size={18} color={colors.ink} />
+                </Pressable>
+                <View style={styles.periodLabelWrap}>
+                  <Text style={styles.periodDates}>{period.label}</Text>
+                  <Text style={styles.periodSub}>
+                    {period.current
+                      ? 'Current payroll'
+                      : period.pre
+                        ? 'Paid before tracking'
+                        : 'Paid payroll'}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => setPeriodIndex((i) => Math.min(periods.length - 1, i + 1))}
+                  disabled={periodIndex === periods.length - 1}
+                  hitSlop={8}
+                  style={({ pressed }) => [
+                    styles.pagerButton,
+                    periodIndex === periods.length - 1 && styles.pagerButtonDisabled,
+                    pressed && styles.buttonPressed,
+                  ]}>
+                  <Ionicons name="chevron-forward" size={18} color={colors.ink} />
+                </Pressable>
               </View>
               <View style={styles.overviewGrid}>
                 <View style={styles.overviewTile}>
                   <Text style={styles.tileLabel}>Crew hours</Text>
                   <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-                    {formatHours(data.totalPeriodHours)}
+                    {formatHours(overview.totalPeriodHours)}
                   </Text>
                 </View>
                 <View style={styles.overviewTile}>
-                  <Text style={styles.tileLabel}>Payroll</Text>
+                  <Text style={styles.tileLabel}>
+                    {period.current ? 'Payroll due' : 'Payroll paid'}
+                  </Text>
                   <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-                    {formatMoney(data.totalPeriodPay)}
+                    {formatMoney(overview.totalPeriodPay)}
                   </Text>
                 </View>
               </View>
               <Text style={styles.periodHint}>
-                Hours before {formatShortDate(data.period.start)} are paid out. Periods run every
-                two weeks.
+                Periods run every two weeks. Swipe with the arrows to review past payrolls.
               </Text>
             </View>
 
-            {data.employees.length === 0
-              ? placeholder('No hours logged yet this year.')
-              : data.employees.map((emp) => {
+            {overview.employees.length === 0
+              ? placeholder('No hours in this period.')
+              : overview.employees.map((emp) => {
                   const open = openNames.has(emp.name);
                   return (
                     <View key={emp.name} style={styles.employeeCard}>
@@ -135,13 +178,17 @@ export default function HoursScreen() {
                         </View>
                         <View style={styles.overviewGrid}>
                           <View style={styles.employeeTile}>
-                            <Text style={styles.tileLabel}>This payroll</Text>
+                            <Text style={styles.tileLabel}>
+                              {period.current ? 'This payroll' : 'Period'}
+                            </Text>
                             <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
                               {formatHours(emp.periodHours)}
                             </Text>
                           </View>
                           <View style={styles.employeeTile}>
-                            <Text style={styles.tileLabel}>Pay</Text>
+                            <Text style={styles.tileLabel}>
+                              {period.current ? 'Pay due' : 'Paid'}
+                            </Text>
                             <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
                               {formatMoney(emp.periodPay)}
                               {emp.periodPayIncomplete ? '*' : ''}
@@ -162,15 +209,36 @@ export default function HoursScreen() {
                       </Pressable>
                       {open ? (
                         <View style={styles.jobList}>
+                          <View style={styles.jobHeaderRow}>
+                            <Text style={styles.jobColLabel}>Job</Text>
+                            <View style={styles.jobNumbers}>
+                              <Text style={[styles.jobColLabel, styles.jobColPaid]}>
+                                Paid before
+                              </Text>
+                              <Text style={[styles.jobColLabel, styles.jobColPeriod]}>
+                                {period.current ? 'This payroll' : 'This period'}
+                              </Text>
+                            </View>
+                          </View>
                           {emp.jobs.map((job) => (
                             <View key={job.jobId ?? 'none'} style={styles.jobRow}>
                               <View style={styles.jobChip}>
                                 <Text style={styles.jobChipText}>{job.label}</Text>
                               </View>
-                              <Text style={styles.jobHours}>{formatHours(job.hours)}</Text>
+                              <View style={styles.jobNumbers}>
+                                <Text style={[styles.jobPaidHours, styles.jobColPaid]}>
+                                  {job.paidHours > 0 ? formatHours(job.paidHours) : '—'}
+                                </Text>
+                                <Text style={[styles.jobHours, styles.jobColPeriod]}>
+                                  {job.periodHours > 0 ? formatHours(job.periodHours) : '—'}
+                                </Text>
+                              </View>
                             </View>
                           ))}
-                          <Text style={styles.jobListHint}>Hours per job, year to date.</Text>
+                          <Text style={styles.jobListHint}>
+                            "Paid before" = hours on the job from earlier, already-paid periods —
+                            carry-over jobs show both sides.
+                          </Text>
                         </View>
                       ) : null}
                     </View>
@@ -206,22 +274,40 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     ...shadows.card,
   },
-  periodHeaderRow: {
+  periodPagerRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
   },
-  periodLabel: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+  pagerButton: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.sm,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadows.card,
+  },
+  pagerButtonDisabled: {
+    opacity: 0.35,
+  },
+  periodLabelWrap: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 1,
   },
   periodDates: {
     color: colors.ink,
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  periodSub: {
+    color: colors.inkSoft,
+    fontSize: 11,
     fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   periodHint: {
     color: colors.inkSoft,
@@ -287,6 +373,30 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     gap: spacing.xs,
   },
+  jobHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  jobColLabel: {
+    color: colors.inkSoft,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  jobNumbers: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  jobColPaid: {
+    width: 84,
+    textAlign: 'right',
+  },
+  jobColPeriod: {
+    width: 92,
+    textAlign: 'right',
+  },
   jobRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -297,16 +407,23 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
+    flexShrink: 1,
   },
   jobChipText: {
     color: colors.ocean,
     fontSize: 12,
     fontWeight: '800',
   },
+  jobPaidHours: {
+    color: colors.inkSoft,
+    fontSize: 14,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
   jobHours: {
     color: colors.ink,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
     fontVariant: ['tabular-nums'],
   },
   jobListHint: {

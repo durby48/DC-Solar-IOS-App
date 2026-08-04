@@ -4,20 +4,21 @@
  * Combines BOTH hour sources the app already uses for labor math:
  *   - employee_hours rows (manual logs; hours × their stamped rate)
  *   - completed time_entries (clock in/out; duration × roster pay_rate)
- * and folds them into per-employee totals: YTD, per-job, and the current
- * payroll period (for running payroll in Chase/Gusto).
  *
  * Payroll periods: everything before 2026-07-18 was paid out and
- * reconciled before this tab existed. The first period is the catch-up
- * 2026-07-18 → 2026-08-03; after that, clean 14-day periods start
- * 2026-08-04 (Aug 4–17, Aug 18–31, …).
+ * reconciled before this tab existed — it appears as one "Before Jul 18"
+ * bucket. The first tracked period is the catch-up 2026-07-18 →
+ * 2026-08-03; after that, clean 14-day periods start 2026-08-04
+ * (Aug 4–17, Aug 18–31, …). The tab can page through every period; jobs
+ * that span periods (e.g. DC-26011 removal paid before 7/18, reinstall
+ * after) show a per-job split of hours already paid vs. this period.
  */
 
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
 
-/** First (catch-up) payroll period. */
+/** Everything before this date was paid/reconciled outside the app. */
 const FIRST_PERIOD_START = '2026-07-18';
 const FIRST_PERIOD_END = '2026-08-03';
 /** Biweekly periods begin the day after the catch-up period ends. */
@@ -25,10 +26,16 @@ const BIWEEKLY_ANCHOR = '2026-08-04';
 const DAY_MS = 86_400_000;
 
 export interface PayrollPeriod {
-  /** YYYY-MM-DD, inclusive. */
+  /** YYYY-MM-DD inclusive ('' for the pre-tracking bucket's open start). */
   start: string;
   /** YYYY-MM-DD, inclusive. */
   end: string;
+  /** Compact display label, e.g. "Jul 18 – Aug 3" or "Before Jul 18". */
+  label: string;
+  /** True for the period containing today. */
+  current: boolean;
+  /** True for the paid-before-tracking bucket. */
+  pre: boolean;
 }
 
 /** Noon-UTC epoch for a YYYY-MM-DD (avoids timezone off-by-one). */
@@ -40,44 +47,71 @@ function isoFromMs(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-/** The payroll period containing `todayIso` (default: today). */
-export function currentPayrollPeriod(todayIso?: string): PayrollPeriod {
+/** "2026-07-18" → "Jul 18". */
+function monthDay(iso: string): string {
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+function rangeLabel(start: string, end: string): string {
+  return `${monthDay(start)} – ${monthDay(end)}`;
+}
+
+/**
+ * Every payroll period from the pre-tracking bucket through the period
+ * containing today, oldest first (the current period is always last).
+ */
+export function listPayrollPeriods(todayIso?: string): PayrollPeriod[] {
   const today = todayIso ?? new Date().toISOString().slice(0, 10);
-  if (today <= FIRST_PERIOD_END) {
-    return { start: FIRST_PERIOD_START, end: FIRST_PERIOD_END };
+  const preEnd = isoFromMs(dayMs(FIRST_PERIOD_START) - DAY_MS);
+  const periods: PayrollPeriod[] = [
+    {
+      start: '',
+      end: preEnd,
+      label: `Before ${monthDay(FIRST_PERIOD_START)}`,
+      current: false,
+      pre: true,
+    },
+    {
+      start: FIRST_PERIOD_START,
+      end: FIRST_PERIOD_END,
+      label: rangeLabel(FIRST_PERIOD_START, FIRST_PERIOD_END),
+      current: today <= FIRST_PERIOD_END,
+      pre: false,
+    },
+  ];
+  let startMs = dayMs(BIWEEKLY_ANCHOR);
+  while (isoFromMs(startMs) <= today) {
+    const start = isoFromMs(startMs);
+    const end = isoFromMs(startMs + 13 * DAY_MS);
+    periods.push({
+      start,
+      end,
+      label: rangeLabel(start, end),
+      current: today >= start && today <= end,
+      pre: false,
+    });
+    startMs += 14 * DAY_MS;
   }
-  const sinceAnchor = Math.floor((dayMs(today) - dayMs(BIWEEKLY_ANCHOR)) / DAY_MS);
-  const periodIndex = Math.floor(sinceAnchor / 14);
-  const startMs = dayMs(BIWEEKLY_ANCHOR) + periodIndex * 14 * DAY_MS;
-  return { start: isoFromMs(startMs), end: isoFromMs(startMs + 13 * DAY_MS) };
+  return periods;
 }
 
-export interface EmployeeJobHours {
-  jobId: string | null;
-  /** DC-26### when known, else job name, else "No job". */
-  label: string;
-  hours: number;
-}
-
-export interface EmployeeHoursSummary {
-  /** Roster display name (or email when the roster has no name). */
+/** One normalized hour entry from either source. */
+export interface RawHourEntry {
   name: string;
-  ytdHours: number;
-  /** Hours worked inside the current payroll period. */
-  periodHours: number;
-  /** Dollars owed for the period: hours × rate per entry. */
-  periodPay: number;
-  /** True when some period hours had no known rate (pay is understated). */
-  periodPayIncomplete: boolean;
-  /** YTD hours per job, biggest first. */
-  jobs: EmployeeJobHours[];
+  date: string; // YYYY-MM-DD
+  hours: number;
+  rate: number | null;
+  jobId: string | null;
 }
 
-export interface HoursOverview {
-  period: PayrollPeriod;
-  employees: EmployeeHoursSummary[];
-  totalPeriodHours: number;
-  totalPeriodPay: number;
+export interface HoursData {
+  entries: RawHourEntry[];
+  /** job id → DC-26### (or name) label. */
+  jobLabels: Map<string, string>;
 }
 
 function num(v: unknown): number {
@@ -86,10 +120,11 @@ function num(v: unknown): number {
 }
 
 /**
- * Fetch and aggregate everything the Hours tab shows. Null on any fetch
- * failure (non-admin RLS / offline) so the screen degrades to a placeholder.
+ * Fetch every hour entry once, normalized. The screen aggregates per
+ * selected period client-side (instant period switching). Null on any
+ * fetch failure (non-admin RLS / offline).
  */
-export async function fetchHoursOverview(): Promise<HoursOverview | null> {
+export async function fetchHoursData(): Promise<HoursData | null> {
   try {
     const [hoursRes, timeRes, employeesRes, jobsRes] = await Promise.all([
       supabase
@@ -105,74 +140,29 @@ export async function fetchHoursOverview(): Promise<HoursOverview | null> {
     ]);
     if (hoursRes.error || timeRes.error || employeesRes.error || jobsRes.error) return null;
 
-    const period = currentPayrollPeriod();
-    const year = period.end.slice(0, 4);
-
-    const roster = (employeesRes.data ?? []) as {
+    const nameByEmail = new Map<string, string>();
+    const rateByEmail = new Map<string, number>();
+    for (const row of (employeesRes.data ?? []) as {
       email: string | null;
       display_name: string | null;
       pay_rate: unknown;
-    }[];
-    const nameByEmail = new Map<string, string>();
-    const rateByEmail = new Map<string, number>();
-    for (const row of roster) {
+    }[]) {
       const email = row.email?.toLowerCase();
       if (!email) continue;
       if (row.display_name) nameByEmail.set(email, row.display_name);
       if (row.pay_rate != null) rateByEmail.set(email, num(row.pay_rate));
     }
 
-    const jobLabel = new Map<string, string>();
+    const jobLabels = new Map<string, string>();
     for (const job of (jobsRes.data ?? []) as {
       id: string;
       job_number: string | null;
       name: string | null;
     }[]) {
-      jobLabel.set(job.id, job.job_number ?? job.name ?? 'Job');
+      jobLabels.set(job.id, job.job_number ?? job.name ?? 'Job');
     }
 
-    interface Bucket {
-      ytdHours: number;
-      periodHours: number;
-      periodPay: number;
-      periodPayIncomplete: boolean;
-      jobs: Map<string, number>; // job key ('' = none) → YTD hours
-    }
-    const people = new Map<string, Bucket>();
-    const bucket = (name: string): Bucket => {
-      const existing = people.get(name);
-      if (existing) return existing;
-      const fresh: Bucket = {
-        ytdHours: 0,
-        periodHours: 0,
-        periodPay: 0,
-        periodPayIncomplete: false,
-        jobs: new Map(),
-      };
-      people.set(name, fresh);
-      return fresh;
-    };
-
-    const add = (params: {
-      name: string;
-      date: string | null; // YYYY-MM-DD
-      hours: number;
-      rate: number | null;
-      jobId: string | null;
-    }) => {
-      if (!(params.hours > 0) || !params.date) return;
-      const b = bucket(params.name);
-      if (params.date.startsWith(year)) {
-        b.ytdHours += params.hours;
-        const key = params.jobId ?? '';
-        b.jobs.set(key, (b.jobs.get(key) ?? 0) + params.hours);
-      }
-      if (params.date >= period.start && params.date <= period.end) {
-        b.periodHours += params.hours;
-        if (params.rate != null && params.rate > 0) b.periodPay += params.hours * params.rate;
-        else b.periodPayIncomplete = true;
-      }
-    };
+    const entries: RawHourEntry[] = [];
 
     for (const row of (hoursRes.data ?? []) as {
       employee: string | null;
@@ -182,14 +172,16 @@ export async function fetchHoursOverview(): Promise<HoursOverview | null> {
       occurred_on: string | null;
       job_id: string | null;
     }[]) {
+      const hours = num(row.hours);
+      if (!(hours > 0) || !row.occurred_on) continue;
       const email = row.email?.toLowerCase();
       const name =
         row.employee ?? (email ? (nameByEmail.get(email) ?? row.email) : null) ?? 'Unassigned';
       const rate = num(row.rate) > 0 ? num(row.rate) : (email ? rateByEmail.get(email) : undefined);
-      add({
+      entries.push({
         name,
         date: row.occurred_on,
-        hours: num(row.hours),
+        hours,
         rate: rate ?? null,
         jobId: row.job_id,
       });
@@ -205,9 +197,8 @@ export async function fetchHoursOverview(): Promise<HoursOverview | null> {
       const ms = new Date(row.clock_out).getTime() - new Date(row.clock_in).getTime();
       if (!Number.isFinite(ms) || ms <= 0) continue;
       const email = row.employee?.toLowerCase() ?? null;
-      const name = (email ? nameByEmail.get(email) : null) ?? row.employee ?? 'Unassigned';
-      add({
-        name,
+      entries.push({
+        name: (email ? nameByEmail.get(email) : null) ?? row.employee ?? 'Unassigned',
         date: row.clock_in.slice(0, 10),
         hours: ms / 3_600_000,
         rate: email ? (rateByEmail.get(email) ?? null) : null,
@@ -215,33 +206,108 @@ export async function fetchHoursOverview(): Promise<HoursOverview | null> {
       });
     }
 
-    const employees: EmployeeHoursSummary[] = [...people.entries()]
-      .map(([name, b]) => ({
-        name,
-        ytdHours: b.ytdHours,
-        periodHours: b.periodHours,
-        periodPay: b.periodPay,
-        periodPayIncomplete: b.periodPayIncomplete,
-        jobs: [...b.jobs.entries()]
-          .map(([key, hours]) => ({
-            jobId: key === '' ? null : key,
-            label: key === '' ? 'No job' : (jobLabel.get(key) ?? 'Job'),
-            hours,
-          }))
-          .sort((a, b2) => b2.hours - a.hours),
-      }))
-      .filter((e) => e.ytdHours > 0 || e.periodHours > 0)
-      .sort((a, b2) => b2.periodHours - a.periodHours || b2.ytdHours - a.ytdHours);
-
-    let totalPeriodHours = 0;
-    let totalPeriodPay = 0;
-    for (const e of employees) {
-      totalPeriodHours += e.periodHours;
-      totalPeriodPay += e.periodPay;
-    }
-
-    return { period, employees, totalPeriodHours, totalPeriodPay };
+    return { entries, jobLabels };
   } catch {
     return null;
   }
+}
+
+export interface EmployeeJobHours {
+  jobId: string | null;
+  /** DC-26### when known, else job name, else "No job". */
+  label: string;
+  /** Hours inside the viewed period. */
+  periodHours: number;
+  /** Hours dated before the viewed period started (already paid). */
+  paidHours: number;
+}
+
+export interface EmployeeHoursSummary {
+  name: string;
+  ytdHours: number;
+  periodHours: number;
+  /** Dollars for the period: hours × rate per entry. */
+  periodPay: number;
+  /** True when some period hours had no known rate (pay is understated). */
+  periodPayIncomplete: boolean;
+  /** Jobs touched in or before the period, biggest period share first. */
+  jobs: EmployeeJobHours[];
+}
+
+export interface HoursOverview {
+  period: PayrollPeriod;
+  employees: EmployeeHoursSummary[];
+  totalPeriodHours: number;
+  totalPeriodPay: number;
+}
+
+/** Aggregate the raw entries for one payroll period (pure, instant). */
+export function summarizePeriod(data: HoursData, period: PayrollPeriod): HoursOverview {
+  const year = period.end.slice(0, 4);
+
+  interface JobBucket {
+    periodHours: number;
+    paidHours: number;
+  }
+  interface Bucket {
+    ytdHours: number;
+    periodHours: number;
+    periodPay: number;
+    periodPayIncomplete: boolean;
+    jobs: Map<string, JobBucket>; // '' = no job
+  }
+  const people = new Map<string, Bucket>();
+
+  for (const entry of data.entries) {
+    let b = people.get(entry.name);
+    if (!b) {
+      b = { ytdHours: 0, periodHours: 0, periodPay: 0, periodPayIncomplete: false, jobs: new Map() };
+      people.set(entry.name, b);
+    }
+    if (entry.date.startsWith(year)) b.ytdHours += entry.hours;
+
+    const inPeriod = entry.date >= period.start && entry.date <= period.end;
+    const beforePeriod = period.start !== '' && entry.date < period.start;
+    if (inPeriod) {
+      b.periodHours += entry.hours;
+      if (entry.rate != null && entry.rate > 0) b.periodPay += entry.hours * entry.rate;
+      else b.periodPayIncomplete = true;
+    }
+    if (inPeriod || beforePeriod) {
+      const key = entry.jobId ?? '';
+      const jb = b.jobs.get(key) ?? { periodHours: 0, paidHours: 0 };
+      if (inPeriod) jb.periodHours += entry.hours;
+      else jb.paidHours += entry.hours;
+      b.jobs.set(key, jb);
+    }
+  }
+
+  const employees: EmployeeHoursSummary[] = [...people.entries()]
+    .map(([name, b]) => ({
+      name,
+      ytdHours: b.ytdHours,
+      periodHours: b.periodHours,
+      periodPay: b.periodPay,
+      periodPayIncomplete: b.periodPayIncomplete,
+      jobs: [...b.jobs.entries()]
+        .filter(([, jb]) => jb.periodHours > 0 || jb.paidHours > 0)
+        .map(([key, jb]) => ({
+          jobId: key === '' ? null : key,
+          label: key === '' ? 'No job' : (data.jobLabels.get(key) ?? 'Job'),
+          periodHours: jb.periodHours,
+          paidHours: jb.paidHours,
+        }))
+        .sort((a, b2) => b2.periodHours - a.periodHours || b2.paidHours - a.paidHours),
+    }))
+    .filter((e) => e.periodHours > 0 || e.ytdHours > 0)
+    .sort((a, b2) => b2.periodHours - a.periodHours || b2.ytdHours - a.ytdHours);
+
+  let totalPeriodHours = 0;
+  let totalPeriodPay = 0;
+  for (const e of employees) {
+    totalPeriodHours += e.periodHours;
+    totalPeriodPay += e.periodPay;
+  }
+
+  return { period, employees, totalPeriodHours, totalPeriodPay };
 }
