@@ -53,6 +53,7 @@ All 6 employees have Supabase auth logins; shared temp password `DCSolarKC2026` 
 |---|---|---|---|
 | Devon Durbin | devonsd311@gmail.com | owner (admin) | $35 |
 | Isaiah Nettleton | inettleton18@gmail.com | operator (admin) | $33 |
+| Clark Lynch | clarklynch30@gmail.com | operator (admin) | — (not set; added 2026-08-03, temp pw DCSolarKC26 + forced change) |
 | Ben Nettleton | bnettleton403@gmail.com | viewer | $35 |
 | Simon Nettleton | snettleton2005@gmail.com | viewer | $30 |
 | Garrett Nimsgern | gnimsgern.2022@gmail.com | viewer | $30 |
