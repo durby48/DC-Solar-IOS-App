@@ -11,9 +11,16 @@ import { fetchCompanyMetrics, type CompanyMetrics } from '@/lib/metrics';
  * scrolling band of company milestone numbers.
  *
  * The animation is three illustrated frames (generated once, checked by eye,
- * committed as assets) cycled in a 0→1→2→1 loop — the driver strokes down and
- * lifts. All three are rendered stacked and cross-faded by opacity rather than
- * swapping one `source`, which avoids a decode flicker on the first cycle.
+ * committed as assets) cycled in a small 1→0→2→0 bob — he's screwing the panel
+ * down to the rail, not swinging his arm. All three are rendered stacked and
+ * cross-faded by opacity rather than swapping one `source`, which avoids a
+ * decode flicker on the first cycle.
+ *
+ * Art notes, learned by regenerating: the frames must show BOTH boots flat on
+ * the shingles clear of the panel (the first attempt clipped a foot through
+ * it) and the driver angled DOWN at the bracket throughout. They're also
+ * pre-cropped to ~2.3 aspect so `contentFit="cover"` doesn't shave the hard
+ * hat off at phone width.
  *
  * No video library: playing real video would need a native dependency and
  * therefore a full App Store build. This ships over the air.
@@ -24,9 +31,13 @@ const FRAMES = [
   require('@/assets/images/installer-1.jpg'),
   require('@/assets/images/installer-2.jpg'),
 ];
-/** Frame indices in playback order — down stroke, then lift. */
-const SEQUENCE = [0, 1, 2, 1];
-const FRAME_MS = 190;
+/**
+ * Playback order: driver bobs slightly up, mid, seated, mid — a small
+ * screwing motion rather than a swinging arm. Frame 1 sits highest, frame 2
+ * lowest, frame 0 in between.
+ */
+const SEQUENCE = [1, 0, 2, 0];
+const FRAME_MS = 170;
 
 function formatNumber(value: number): string {
   return Math.round(value).toLocaleString('en-US');
@@ -122,7 +133,7 @@ export function PipelineHero() {
             style={[StyleSheet.absoluteFill, { opacity: i === activeFrame ? 1 : 0 }]}
             contentFit="cover"
             cachePolicy="memory-disk"
-            // No transition: these swap every 190ms and a fade would smear.
+            // No transition: these swap every 170ms and a fade would smear.
             transition={0}
           />
         ))}
