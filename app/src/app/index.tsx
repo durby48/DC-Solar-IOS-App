@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { SolarFlow } from '@/components/SolarFlow';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { verseOfTheDay } from '@/lib/verses';
@@ -54,7 +55,17 @@ export default function LoginScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <View style={styles.root}>
+      {/* Backdrop, then the live particle grid on top of it. Both sit behind
+          the form and never take touches. */}
+      <Image
+        source={require('@/assets/images/login-solarflow.jpg')}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+      />
+      <SolarFlow />
+      <View style={styles.vignette} pointerEvents="none" />
+      <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -108,14 +119,28 @@ export default function LoginScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: '#0B1220',
+  },
   safe: {
     flex: 1,
-    backgroundColor: colors.cream,
+  },
+  // Darkens the outer edges so the form keeps contrast wherever the mesh is
+  // bright, without dulling the centre bloom.
+  vignette: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(6,12,24,0.28)',
   },
   flex: {
     flex: 1,
@@ -124,7 +149,8 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xl,
     gap: spacing.md,
   },
   logo: {
@@ -138,7 +164,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   verseText: {
-    color: colors.inkSoft,
+    color: '#241C13',
+    textShadowColor: 'rgba(255,248,234,0.95)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 7,
     fontSize: 15,
     fontWeight: '600',
     fontStyle: 'italic',
@@ -146,7 +175,10 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   verseReference: {
-    color: colors.ocean,
+    color: '#134C70',
+    textShadowColor: 'rgba(255,248,234,0.95)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 7,
     fontSize: 13,
     fontWeight: '800',
   },
@@ -156,23 +188,25 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   input: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
+    // Frosted panel over the artwork — opaque enough to type against, light
+    // enough that the mesh still shows through at the edges.
+    backgroundColor: 'rgba(255,255,255,0.86)',
+    borderRadius: radii.pill,
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: 'rgba(255,255,255,0.55)',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md - 2,
     fontSize: 16,
     color: colors.ink,
   },
   error: {
-    color: colors.danger,
+    color: '#FFB4A8',
     fontSize: 14,
     textAlign: 'center',
   },
   button: {
     backgroundColor: colors.sun,
-    borderRadius: radii.md,
+    borderRadius: radii.pill,
     paddingVertical: spacing.md,
     alignItems: 'center',
     ...shadows.card,
