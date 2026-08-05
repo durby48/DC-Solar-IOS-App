@@ -33,9 +33,13 @@ export type CustomersResult =
 /** Fetch all customers, alphabetical by name. */
 export async function fetchCustomers(): Promise<CustomersResult> {
   try {
+    // NOTE: customer columns are listed explicitly in THREE places (here,
+    // lib/customers.ts and lib/data.ts::CUSTOMER_FIELDS). Adding a customer
+    // column means adding it to all three — omitting photo_path here is
+    // exactly why avatars rendered on the pipeline but not the Customers tab.
     const { data, error } = await supabase
       .from('customers')
-      .select('id, name, email, phone, address, notes')
+      .select('id, name, email, phone, address, notes, photo_path')
       .eq('company', COMPANY)
       .order('name', { ascending: true });
     if (error) return { status: 'unavailable' };

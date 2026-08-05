@@ -10,6 +10,10 @@ export type { ScheduleDate };
 
 const COMPANY = 'dc-solar';
 
+// NOTE: customer columns are listed explicitly in THREE places (here,
+// lib/customers.ts and lib/data.ts::CUSTOMER_FIELDS). Adding a customer
+// column means adding it to all three — omitting photo_path here is
+// exactly why avatars rendered on the pipeline but not the Customers tab.
 const CUSTOMER_FIELDS = 'id, name, phone, email, address, company, photo_path';
 
 function normalize(row: Record<string, unknown>): Job {

@@ -58,7 +58,7 @@ export async function fetchCustomers(): Promise<Customer[]> {
   try {
     const { data, error } = await supabase
       .from('customers')
-      .select('id, name, phone, email, address, company')
+      .select('id, name, phone, email, address, company, photo_path')
       .eq('company', COMPANY)
       .order('name', { ascending: true });
     if (error || !data) return [];
@@ -401,7 +401,7 @@ export async function createCustomer(input: {
         email: input.email,
         address: input.address,
       })
-      .select('id, name, phone, email, address, company')
+      .select('id, name, phone, email, address, company, photo_path')
       .single();
     if (error || !data) {
       const raw = error?.message ?? '';
