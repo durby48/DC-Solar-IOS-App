@@ -674,3 +674,130 @@ export async function recordPayment(params: {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not record the payment.' };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Splitting one payment across several jobs (2026-08-05)
+// ---------------------------------------------------------------------------
+
+export interface SplitAllocation {
+  jobId: string;
+  /** Job label, used in the description trail so the split is legible later. */
+  label: string;
+  amount: number;
+}
+
+export type SplitPaymentResult =
+  | { ok: true; legs: number; remainder: number }
+  | { ok: false; message: string };
+
+/**
+ * Split one payment entry across several jobs.
+ *
+ * A single ACH/direct deposit routinely covers several invoices at once — the
+ * 2026-08-05 deposit of $12,110 paid DC-26010, DC-26011 and DC-26012 in one
+ * hit. The email scanner can only ever tag such a deposit to one job (or to
+ * the company bucket when it matches none), so this lets an admin divide it up
+ * afterwards. Amounts are entered by hand precisely because a deposit does not
+ * always match an invoice to the penny.
+ *
+ * Mechanics: each allocation after the first is INSERTed as its own payment,
+ * and the ORIGINAL row is kept and reduced to the first allocation (or to the
+ * unallocated remainder). Keeping the original id matters — the email
+ * scanner's dedup is keyed on its `extracted.gmail_message_id`, so reusing the
+ * row means a re-sent bank alert still can't double-log the deposit.
+ *
+ * Not atomic: Supabase's REST API has no multi-statement transaction. Legs are
+ * inserted first and the original is only reduced once they all succeed, so a
+ * mid-way failure leaves the money over-counted (visible, fixable) rather than
+ * vanished.
+ */
+export async function splitPayment(
+  entryId: string,
+  allocations: SplitAllocation[],
+): Promise<SplitPaymentResult> {
+  const legs = allocations.filter((a) => a.amount > 0 && a.jobId);
+  if (legs.length === 0) return { ok: false, message: 'Assign an amount to at least one job.' };
+
+  try {
+    const { data: rows, error: readErr } = await supabase
+      .from('finance_entries')
+      .select('*')
+      .eq('id', entryId)
+      .limit(1);
+    if (readErr) return { ok: false, message: readErr.message };
+    const original = (rows ?? [])[0] as Record<string, unknown> | undefined;
+    if (!original) return { ok: false, message: 'That payment no longer exists.' };
+
+    const total = Number(original.amount) || 0;
+    const allocated = legs.reduce((sum, a) => sum + a.amount, 0);
+    // Guard against inventing money. Half a cent of float slop is fine.
+    if (allocated - total > 0.005) {
+      return {
+        ok: false,
+        message: `Allocated $${allocated.toFixed(2)} but the payment is only $${total.toFixed(2)}.`,
+      };
+    }
+    const remainder = Math.round((total - allocated) * 100) / 100;
+
+    const baseDescription = String(original.description ?? 'Payment').split(' — split to ')[0];
+    const extracted = (original.extracted as Record<string, unknown> | null) ?? {};
+
+    // Everything except the first leg becomes a new row.
+    const inserts = legs.slice(1).map((leg) => ({
+      company: original.company,
+      type: 'payment',
+      direction: 'in',
+      amount: leg.amount,
+      currency: original.currency ?? 'USD',
+      counterparty: original.counterparty,
+      description: `${baseDescription} — split to ${leg.label}`,
+      occurred_on: original.occurred_on,
+      status: original.status,
+      job_id: leg.jobId,
+      extracted: { ...extracted, split_of: entryId, split_leg: leg.label },
+    }));
+    if (inserts.length > 0) {
+      const { error } = await supabase.from('finance_entries').insert(inserts);
+      if (error) return { ok: false, message: error.message };
+    }
+
+    // Reduce the original to the first leg, or to the leftover when the split
+    // doesn't consume the whole deposit.
+    const first = legs[0];
+    const { error: updErr } = await supabase
+      .from('finance_entries')
+      .update({
+        amount: first.amount,
+        job_id: first.jobId,
+        description: `${baseDescription} — split to ${first.label}`,
+        extracted: { ...extracted, split_of: entryId, split_leg: first.label },
+      })
+      .eq('id', entryId);
+    if (updErr) return { ok: false, message: updErr.message };
+
+    // Anything unallocated stays visible as its own row on the original job.
+    if (remainder > 0.005) {
+      const { error } = await supabase.from('finance_entries').insert({
+        company: original.company,
+        type: 'payment',
+        direction: 'in',
+        amount: remainder,
+        currency: original.currency ?? 'USD',
+        counterparty: original.counterparty,
+        description: `${baseDescription} — unassigned remainder`,
+        occurred_on: original.occurred_on,
+        status: original.status,
+        job_id: original.job_id,
+        extracted: { ...extracted, split_of: entryId, split_leg: 'remainder' },
+      });
+      if (error) return { ok: false, message: error.message };
+    }
+
+    return { ok: true, legs: legs.length, remainder };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : 'Could not split that payment.',
+    };
+  }
+}

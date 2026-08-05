@@ -6,6 +6,7 @@ import {
   Alert,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -20,9 +21,12 @@ import {
   deleteFinanceEntry,
   fetchJobFinanceEntries,
   recordPayment,
+  splitPayment,
   updateFinanceEntry,
   type FinanceEntry,
+  type SplitAllocation,
 } from '@/lib/documents';
+import { fetchPipelineJobs } from '@/lib/pipeline';
 import { type Job } from '@/lib/mockData';
 import { isValidISODate } from '@/lib/time';
 
@@ -86,6 +90,11 @@ export function JobInvoices({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [sharingId, setSharingId] = useState<string | null>(null);
   const [expensesOpen, setExpensesOpen] = useState(false);
+  // Splitting one ACH deposit across several jobs.
+  const [splitId, setSplitId] = useState<string | null>(null);
+  const [splitRows, setSplitRows] = useState<{ jobId: string | null; amount: string }[]>([]);
+  const [splitJobs, setSplitJobs] = useState<{ id: string; label: string }[]>([]);
+  const [savingSplit, setSavingSplit] = useState(false);
 
   const load = useCallback(async () => {
     const result = await fetchJobFinanceEntries(job.id);
@@ -131,6 +140,53 @@ export function JobInvoices({
       }
     } finally {
       setSharingId(null);
+    }
+  };
+
+  const startSplit = async (entry: FinanceEntry) => {
+    setStatus(null);
+    setEditingId(null);
+    setConfirmDeleteId(null);
+    setSplitId(entry.id);
+    setSplitRows([
+      { jobId: null, amount: '' },
+      { jobId: null, amount: '' },
+    ]);
+    if (splitJobs.length === 0) {
+      const { jobs } = await fetchPipelineJobs();
+      setSplitJobs(jobs.map((j) => ({ id: j.id, label: j.job_number ?? j.name })));
+    }
+  };
+
+  const saveSplit = async (entry: FinanceEntry) => {
+    const allocations: SplitAllocation[] = splitRows
+      .filter((row) => row.jobId)
+      .map((row) => ({
+        jobId: row.jobId as string,
+        label: splitJobs.find((j) => j.id === row.jobId)?.label ?? 'Job',
+        amount: Number(row.amount.replace(/[^0-9.]/g, '')) || 0,
+      }))
+      .filter((a) => a.amount > 0);
+    if (allocations.length === 0) {
+      setStatus({ kind: 'error', message: 'Pick a job and enter an amount for at least one row.' });
+      return;
+    }
+    setSavingSplit(true);
+    const result = await splitPayment(entry.id, allocations);
+    setSavingSplit(false);
+    if (result.ok) {
+      setSplitId(null);
+      setStatus({
+        kind: 'success',
+        message:
+          result.remainder > 0
+            ? `Split across ${result.legs} jobs. ${formatMoney(result.remainder)} left unassigned on this job.`
+            : `Split across ${result.legs} jobs.`,
+      });
+      await load();
+      onEntriesChanged?.();
+    } else {
+      setStatus({ kind: 'error', message: result.message });
     }
   };
 
@@ -299,6 +355,14 @@ export function JobInvoices({
                   )}
                 </Pressable>
               ) : null}
+              {entry.type === 'payment' ? (
+                <Pressable
+                  onPress={() => (splitId === entry.id ? setSplitId(null) : void startSplit(entry))}
+                  hitSlop={6}
+                  style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
+                  <Ionicons name="git-branch" size={15} color={colors.ocean} />
+                </Pressable>
+              ) : null}
               <Pressable
                 onPress={() => (editing ? cancelEdit() : startEdit(entry))}
                 hitSlop={6}
@@ -329,6 +393,96 @@ export function JobInvoices({
         </Pressable>
         {confirming ? (
           <Text style={styles.confirmHint}>Tap the trash again to delete this entry.</Text>
+        ) : null}
+        {splitId === entry.id ? (
+          <View style={styles.editCard}>
+            <Text style={styles.splitTitle}>
+              Split {formatMoney(entry.amount)} across jobs
+            </Text>
+            <Text style={styles.splitHint}>
+              For an ACH deposit covering several invoices. Amounts are yours to set — they
+              don&apos;t have to match the invoiced figures.
+            </Text>
+            {splitRows.map((row, index) => (
+              <View key={index} style={styles.splitRow}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={styles.splitChips}>
+                    {splitJobs.map((option) => (
+                      <Pressable
+                        key={option.id}
+                        onPress={() =>
+                          setSplitRows((rows) =>
+                            rows.map((r, i) => (i === index ? { ...r, jobId: option.id } : r)),
+                          )
+                        }
+                        style={[
+                          styles.splitChip,
+                          row.jobId === option.id && styles.splitChipActive,
+                        ]}>
+                        <Text
+                          style={[
+                            styles.splitChipText,
+                            row.jobId === option.id && styles.splitChipTextActive,
+                          ]}>
+                          {option.label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </ScrollView>
+                <TextInput
+                  style={styles.splitAmount}
+                  value={row.amount}
+                  onChangeText={(text) =>
+                    setSplitRows((rows) =>
+                      rows.map((r, i) => (i === index ? { ...r, amount: text } : r)),
+                    )
+                  }
+                  placeholder="0.00"
+                  placeholderTextColor={colors.inkSoft}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            ))}
+            {(() => {
+              const allocated = splitRows.reduce(
+                (sum, r) => sum + (Number(r.amount.replace(/[^0-9.]/g, '')) || 0),
+                0,
+              );
+              const left = Math.round((entry.amount - allocated) * 100) / 100;
+              return (
+                <Text style={[styles.splitTotals, left < 0 && styles.statusError]}>
+                  {left < 0
+                    ? `Over by ${formatMoney(Math.abs(left))}`
+                    : `${formatMoney(allocated)} assigned · ${formatMoney(left)} left`}
+                </Text>
+              );
+            })()}
+            <View style={styles.editButtons}>
+              <Pressable
+                onPress={() => setSplitRows((rows) => [...rows, { jobId: null, amount: '' }])}
+                hitSlop={8}>
+                <Text style={styles.cancelText}>+ Add job</Text>
+              </Pressable>
+              <Pressable onPress={() => setSplitId(null)} disabled={savingSplit} hitSlop={8}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void saveSplit(entry)}
+                disabled={savingSplit}
+                style={({ pressed }) => [
+                  styles.sunButton,
+                  styles.saveEditButton,
+                  (pressed || savingSplit) && styles.buttonPressed,
+                ]}>
+                {savingSplit ? (
+                  <ActivityIndicator color={colors.ink} />
+                ) : (
+                  <Text style={styles.sunButtonText}>Split</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
         ) : null}
         {editing ? (
           <View style={styles.editCard}>
@@ -611,6 +765,62 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.sm,
+    textAlign: 'right',
+  },
+  splitTitle: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  splitHint: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: spacing.xs,
+  },
+  splitRow: {
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  splitChips: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  splitChip: {
+    backgroundColor: colors.white,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs,
+  },
+  splitChipActive: {
+    backgroundColor: colors.ocean,
+    borderColor: colors.ocean,
+  },
+  splitChipText: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  splitChipTextActive: {
+    color: colors.white,
+  },
+  splitAmount: {
+    backgroundColor: colors.white,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.tan,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm - 2,
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  splitTotals: {
+    color: colors.inkSoft,
+    fontSize: 13,
+    fontWeight: '800',
     textAlign: 'right',
   },
   editCard: {
