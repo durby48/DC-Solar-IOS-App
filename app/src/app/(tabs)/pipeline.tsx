@@ -87,6 +87,7 @@ function PipelineCard({
     completed_on?: string | null;
     module_count?: number | null;
     job_type?: string | null;
+    has_critter_guard?: boolean | null;
   };
   const completedOn = extra.completed_on ?? null;
   const time = next ? formatTimeLabel(next.start_time) : null;
@@ -164,11 +165,18 @@ function PipelineCard({
                 <Text style={styles.chipText}>{job.job_number}</Text>
               </View>
             ) : null}
-            {extra.job_type ? (
-              <View style={styles.typeChip}>
-                <Text style={styles.typeChipText}>{extra.job_type}</Text>
-              </View>
-            ) : null}
+            <View style={styles.typeChipRow}>
+              {extra.has_critter_guard ? (
+                <View style={styles.critterChip}>
+                  <Text style={styles.critterChipText}>Critter guard</Text>
+                </View>
+              ) : null}
+              {extra.job_type ? (
+                <View style={styles.typeChip}>
+                  <Text style={styles.typeChipText}>{extra.job_type}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
 
           <View style={styles.statRow}>
@@ -491,6 +499,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  typeChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  critterChip: {
+    backgroundColor: colors.limeSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs,
+  },
+  critterChipText: {
+    color: colors.limeDeep,
+    fontSize: 12,
+    fontWeight: '800',
   },
   typeChip: {
     backgroundColor: colors.violetSoft,

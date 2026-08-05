@@ -168,8 +168,13 @@ export interface JobEditableFields {
   module_count: number | null;
   /** R&R | Reinstall | Install | Critter Guard | Other (migration 20). */
   job_type: JobType | null;
-  /** Panels covered by critter guard (migration 20). */
+  /**
+   * Panels covered by critter guard. Null means "all of them" — resolution
+   * falls back to module_count (migration 20/21).
+   */
   critter_guard_panels: number | null;
+  /** Critter guard was installed on this job, whatever its type (migration 21). */
+  has_critter_guard: boolean;
 }
 
 export const JOB_TYPES = ['R&R', 'Reinstall', 'Install', 'Critter Guard', 'Other'] as const;
@@ -236,6 +241,7 @@ function payloadAttempts(fields: JobEditableFields): {
     module_count,
     job_type,
     critter_guard_panels,
+    has_critter_guard,
     ...rest
   } = fields;
   const groups = [
@@ -253,7 +259,7 @@ function payloadAttempts(fields: JobEditableFields): {
     {
       marker: 'module_count',
       warning: METRICS_MIGRATION_WARNING,
-      payload: { module_count, job_type, critter_guard_panels },
+      payload: { module_count, job_type, critter_guard_panels, has_critter_guard },
     },
   ];
   const attempts: { payload: Record<string, unknown>; warnings: string[]; droppedColumns: string[] }[] =

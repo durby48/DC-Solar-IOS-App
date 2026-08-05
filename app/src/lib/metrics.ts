@@ -39,7 +39,9 @@ export async function fetchCompanyMetrics(): Promise<CompanyMetrics | null> {
     const [jobsRes, hoursRes, timeRes] = await Promise.all([
       supabase
         .from('jobs')
-        .select('stage, status, job_type, module_count, critter_guard_panels, is_internal')
+        .select(
+          'stage, status, job_type, module_count, critter_guard_panels, has_critter_guard, is_internal',
+        )
         .eq('company', COMPANY),
       supabase.from('employee_hours').select('hours').eq('company', COMPANY),
       supabase
@@ -65,7 +67,14 @@ export async function fetchCompanyMetrics(): Promise<CompanyMetrics | null> {
       if (type === 'R&R' || type === 'Reinstall') {
         panelsReinstalled += num(row.module_count);
       }
-      critterGuardPanels += num(row.critter_guard_panels);
+      // Critter guard rides along with most R&R jobs, so it's a flag rather
+      // than a job type. Blank panel count means the whole array was covered,
+      // so fall back to the module count — that way correcting the module
+      // count later keeps this number right without re-editing it.
+      if (row.has_critter_guard === true) {
+        const covered = num(row.critter_guard_panels) || num(row.module_count);
+        critterGuardPanels += covered;
+      }
     }
 
     let totalHours = 0;

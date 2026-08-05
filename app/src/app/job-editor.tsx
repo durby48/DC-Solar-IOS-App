@@ -73,6 +73,7 @@ export default function JobEditorScreen() {
   const [moduleCount, setModuleCount] = useState('');
   const [jobType, setJobType] = useState<JobType>('R&R');
   const [critterPanels, setCritterPanels] = useState('');
+  const [hasCritterGuard, setHasCritterGuard] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
 
@@ -107,6 +108,7 @@ export default function JobEditorScreen() {
           module_count?: number | null;
           job_type?: JobType | null;
           critter_guard_panels?: number | null;
+          has_critter_guard?: boolean | null;
         };
         setModuleCount(
           metrics.module_count != null
@@ -116,6 +118,9 @@ export default function JobEditorScreen() {
         setJobType(metrics.job_type ?? parseJobType(job.name));
         setCritterPanels(
           metrics.critter_guard_panels != null ? String(metrics.critter_guard_panels) : '',
+        );
+        setHasCritterGuard(
+          metrics.has_critter_guard ?? (metrics.job_type ?? parseJobType(job.name)) === 'Critter Guard',
         );
         setLoading(false);
       });
@@ -214,8 +219,12 @@ export default function JobEditorScreen() {
           ? Number(moduleCount.replace(/[^0-9]/g, '')) || null
           : parseModuleCount(name, description),
       job_type: jobType,
+      has_critter_guard: hasCritterGuard,
+      // Blank means "the whole array" — metrics fall back to module_count.
       critter_guard_panels:
-        critterPanels.trim() !== '' ? Number(critterPanels.replace(/[^0-9]/g, '')) || null : null,
+        hasCritterGuard && critterPanels.trim() !== ''
+          ? Number(critterPanels.replace(/[^0-9]/g, '')) || null
+          : null,
     };
 
     setSaving(true);
@@ -352,35 +361,49 @@ export default function JobEditorScreen() {
             picks which finished jobs the hours forecast learns from.
           </Text>
 
-          {jobType === 'Critter Guard' ? (
+          <Text style={styles.fieldLabel}>Modules / panels</Text>
+          <TextInput
+            style={styles.input}
+            value={moduleCount}
+            onChangeText={setModuleCount}
+            placeholder="Leave blank to read it from the job name"
+            placeholderTextColor={colors.inkSoft}
+            keyboardType="number-pad"
+          />
+          <Text style={styles.fieldHint}>
+            Drives the panel totals on the pipeline header and the estimated hours on each
+            project card.
+          </Text>
+
+          {/* Critter guard is a FLAG, not a job type — most of it is installed
+              as part of an R&R, so any job can carry it. */}
+          <Pressable
+            onPress={() => setHasCritterGuard((on) => !on)}
+            style={({ pressed }) => [styles.checkRow, pressed && styles.checkRowPressed]}>
+            <Ionicons
+              name={hasCritterGuard ? 'checkbox' : 'square-outline'}
+              size={20}
+              color={colors.ocean}
+            />
+            <Text style={styles.checkRowText}>Critter guard installed on this job</Text>
+          </Pressable>
+          {hasCritterGuard ? (
             <>
-              <Text style={styles.fieldLabel}>Critter guard panels</Text>
+              <Text style={styles.fieldLabel}>Critter guard panels (optional)</Text>
               <TextInput
                 style={styles.input}
                 value={critterPanels}
                 onChangeText={setCritterPanels}
-                placeholder="e.g. 44"
-                placeholderTextColor={colors.inkSoft}
-                keyboardType="number-pad"
-              />
-            </>
-          ) : (
-            <>
-              <Text style={styles.fieldLabel}>Modules / panels</Text>
-              <TextInput
-                style={styles.input}
-                value={moduleCount}
-                onChangeText={setModuleCount}
-                placeholder="Leave blank to read it from the job name"
+                placeholder="Blank = every panel on the job"
                 placeholderTextColor={colors.inkSoft}
                 keyboardType="number-pad"
               />
               <Text style={styles.fieldHint}>
-                Drives the panel totals on the pipeline header and the estimated hours on each
-                project card.
+                Only counted once the job reaches Complete. Leave blank if the guard covers the
+                whole array — the total then follows the module count automatically.
               </Text>
             </>
-          )}
+          ) : null}
 
           {stage === 'Complete' ? (
             <>
@@ -656,6 +679,20 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     gap: spacing.sm,
     ...shadows.card,
+  },
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  checkRowPressed: {
+    opacity: 0.7,
+  },
+  checkRowText: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '700',
   },
   fieldHint: {
     color: colors.inkSoft,
