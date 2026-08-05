@@ -157,6 +157,19 @@ function parseTransaction(text: string): ParsedTransaction | null {
   };
 }
 
+/**
+ * The DC Solar Company container job (jobs.is_internal). Company overhead is
+ * tagged to it rather than left with a null job_id, so there is exactly ONE
+ * way to say "this is overhead" (2026-08-05). Null if it's ever removed, in
+ * which case we fall back to the old null-job behaviour.
+ */
+async function companyJobId(): Promise<string | null> {
+  const rows = (await rest(
+    `jobs?company=eq.${COMPANY}&is_internal=is.true&select=id&limit=1`,
+  )) as { id: string }[] | null;
+  return rows && rows.length > 0 ? rows[0].id : null;
+}
+
 /** Find the job this email is about: DC-26### number first, then job name. */
 async function matchJob(text: string): Promise<{ id: string; job_number: string | null } | null> {
   const numberMatch = text.match(/\bDC-\d{5}\b/i);
@@ -228,7 +241,8 @@ async function logEmailTransaction(params: {
     description: truncate(subject, 140),
     occurred_on: occurredOn,
     status: 'recorded',
-    job_id: job?.id ?? null,
+    // Unmatched email => company overhead => the container job.
+    job_id: job?.id ?? (await companyJobId()),
     counterparty: fromName(from),
     extracted: {
       source: 'email-scanner',

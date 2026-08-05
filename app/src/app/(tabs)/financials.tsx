@@ -145,6 +145,10 @@ export default function FinancialsScreen() {
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [jobOptions, setJobOptions] = useState<JobOption[]>([]);
+  // The DC Solar Company container job (flagged is_internal). "Company"
+  // expenses are tagged to it rather than left with a null job_id, so there is
+  // exactly ONE way to say "this is overhead" (2026-08-05).
+  const [companyJobId, setCompanyJobId] = useState<string | null>(null);
   const [jobLabels, setJobLabels] = useState<Map<string, string>>(new Map());
   const [status, setStatus] = useState<{ kind: 'success' | 'error'; message: string } | null>(
     null,
@@ -184,7 +188,15 @@ export default function FinancialsScreen() {
       );
       if (!isMock) {
         setJobsFull(jobs);
-        setJobOptions(jobs.map((j) => ({ id: j.id, label: j.job_number ?? j.name })));
+        const container =
+          jobs.find((j) => (j as unknown as { is_internal?: boolean }).is_internal) ?? null;
+        setCompanyJobId(container?.id ?? null);
+        // Keep the container out of the job list — it has its own chip.
+        setJobOptions(
+          jobs
+            .filter((j) => j.id !== container?.id)
+            .map((j) => ({ id: j.id, label: j.job_number ?? j.name })),
+        );
         setJobLabels(new Map(jobs.map((j) => [j.id, j.job_number ?? j.name])));
       }
     } else {
@@ -506,12 +518,15 @@ export default function FinancialsScreen() {
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   <View style={styles.jobPickerRow}>
                     <Pressable
-                      onPress={() => setEditJobId(null)}
-                      style={[styles.pickChip, editJobId === null && styles.pickChipActive]}>
+                      onPress={() => setEditJobId(companyJobId)}
+                      style={[
+                        styles.pickChip,
+                        editJobId === companyJobId && styles.pickChipActive,
+                      ]}>
                       <Text
                         style={[
                           styles.pickChipText,
-                          editJobId === null && styles.pickChipTextActive,
+                          editJobId === companyJobId && styles.pickChipTextActive,
                         ]}>
                         Company
                       </Text>
@@ -738,12 +753,12 @@ export default function FinancialsScreen() {
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 <View style={styles.jobPickerRow}>
                   <Pressable
-                    onPress={() => setJobId(null)}
-                    style={[styles.pickChip, jobId === null && styles.pickChipActive]}>
+                    onPress={() => setJobId(companyJobId)}
+                    style={[styles.pickChip, jobId === companyJobId && styles.pickChipActive]}>
                     <Text
                       style={[
                         styles.pickChipText,
-                        jobId === null && styles.pickChipTextActive,
+                        jobId === companyJobId && styles.pickChipTextActive,
                       ]}>
                       Company
                     </Text>
