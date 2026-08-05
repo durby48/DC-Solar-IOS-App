@@ -10,8 +10,12 @@ import { fetchCompanyMetrics, type CompanyMetrics } from '@/lib/metrics';
  * Pipeline header: an animated DC Solar installer fastening a panel, over a
  * scrolling band of company milestone numbers.
  *
- * The animation is three illustrated frames (generated once, checked by eye,
- * committed as assets) cycled in a small 1→0→2→0 bob — he's screwing the panel
+ * FOUR crew characters take turns — the one on screen changes every two hours,
+ * derived from the clock so everyone in the company sees the same one at the
+ * same time rather than a random pick per device.
+ *
+ * The animation is three illustrated frames per character (generated once,
+ * checked by eye, committed as assets) cycled in a small 1→0→2→0 bob — he's screwing the panel
  * down to the rail, not swinging his arm. All three are rendered stacked and
  * cross-faded by opacity rather than swapping one `source`, which avoids a
  * decode flicker on the first cycle.
@@ -26,11 +30,40 @@ import { fetchCompanyMetrics, type CompanyMetrics } from '@/lib/metrics';
  * therefore a full App Store build. This ships over the air.
  */
 
-const FRAMES = [
-  require('@/assets/images/installer-0.jpg'),
-  require('@/assets/images/installer-1.jpg'),
-  require('@/assets/images/installer-2.jpg'),
+/**
+ * Four crew characters, each drawn as three frames. The whole company sees the
+ * SAME character at the same time because the index comes from the clock, not
+ * from random — it rotates every two hours.
+ */
+const CHARACTERS = [
+  [
+    require('@/assets/images/installer-a-0.jpg'),
+    require('@/assets/images/installer-a-1.jpg'),
+    require('@/assets/images/installer-a-2.jpg'),
+  ],
+  [
+    require('@/assets/images/installer-b-0.jpg'),
+    require('@/assets/images/installer-b-1.jpg'),
+    require('@/assets/images/installer-b-2.jpg'),
+  ],
+  [
+    require('@/assets/images/installer-c-0.jpg'),
+    require('@/assets/images/installer-c-1.jpg'),
+    require('@/assets/images/installer-c-2.jpg'),
+  ],
+  [
+    require('@/assets/images/installer-d-0.jpg'),
+    require('@/assets/images/installer-d-1.jpg'),
+    require('@/assets/images/installer-d-2.jpg'),
+  ],
 ];
+
+const ROTATE_MS = 2 * 60 * 60 * 1000;
+
+/** Which character is on shift right now. Clock-derived, so it's shared. */
+function currentCharacter(now: number): number {
+  return Math.floor(now / ROTATE_MS) % CHARACTERS.length;
+}
 /**
  * Playback order: driver bobs slightly up, mid, seated, mid — a small
  * screwing motion rather than a swinging arm. Frame 1 sits highest, frame 2
@@ -93,6 +126,7 @@ function MetricTile({
 export function PipelineHero() {
   const [metrics, setMetrics] = useState<CompanyMetrics | null>(null);
   const [frame, setFrame] = useState(0);
+  const [character, setCharacter] = useState(() => currentCharacter(Date.now()));
 
   useEffect(() => {
     let cancelled = false;
@@ -112,6 +146,13 @@ export function PipelineHero() {
     return () => clearInterval(timer);
   }, []);
 
+  // Catch the changeover without needing the app relaunched. Checked once a
+  // minute; the value itself only moves every two hours.
+  useEffect(() => {
+    const timer = setInterval(() => setCharacter(currentCharacter(Date.now())), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const activeFrame = SEQUENCE[frame];
 
   const tiles = metrics
@@ -126,9 +167,9 @@ export function PipelineHero() {
   return (
     <View style={styles.card}>
       <View style={styles.stage}>
-        {FRAMES.map((source, i) => (
+        {CHARACTERS[character].map((source, i) => (
           <Image
-            key={i}
+            key={`${character}-${i}`}
             source={source}
             style={[StyleSheet.absoluteFill, { opacity: i === activeFrame ? 1 : 0 }]}
             contentFit="cover"

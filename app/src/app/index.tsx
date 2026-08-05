@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -19,8 +20,18 @@ import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { verseOfTheDay } from '@/lib/verses';
 
+/** Aspect ratio of the backdrop artwork (720 x 1150). */
+const ART_ASPECT = 720 / 1150;
+
 export default function LoginScreen() {
   const router = useRouter();
+  const { width, height } = useWindowDimensions();
+  // A phone is narrower than the artwork, so `cover` crops a sliver off the
+  // sides and looks right. A desktop browser is far WIDER than a portrait
+  // clip — `cover` there blows it up until only a magnified vertical strip is
+  // visible. Once the window is wider than the art, switch to `contain` so the
+  // whole composition shows, with the navy page colour filling the sides.
+  const fit = width / height > ART_ASPECT ? 'contain' : 'cover';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -60,15 +71,17 @@ export default function LoginScreen() {
           video would need a native player and therefore a full App Store
           build). The JPEG underneath is the first frame — it paints instantly
           and is what shows if the animation ever fails to decode. */}
-      <Image
-        source={require('@/assets/images/login-solarflow.jpg')}
-        style={StyleSheet.absoluteFill}
-        resizeMode="cover"
-      />
       <ExpoImage
         source={require('@/assets/images/login-solarflow.webp')}
+        // First frame as the placeholder: paints instantly while the animation
+        // decodes, and is what shows if it ever fails. It was previously a
+        // separate RN <Image>, which RN-Web laid out at the file's natural
+        // 768x1376 anchored top-left rather than filling the screen — invisible
+        // while the animation used `cover`, obvious the moment it didn't.
+        placeholder={require('@/assets/images/login-solarflow.jpg')}
+        placeholderContentFit={fit}
         style={StyleSheet.absoluteFill}
-        contentFit="cover"
+        contentFit={fit}
         cachePolicy="memory-disk"
         transition={220}
       />
