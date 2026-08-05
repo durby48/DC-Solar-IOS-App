@@ -17,9 +17,16 @@
  * Auth: verify_jwt ON. The caller must be a signed-in admin; we re-check the
  * role server-side rather than trusting the client.
  *
- * Required secrets:
- *   GOOGLE_API_KEY  — one key with BOTH "Street View Static API" and
- *                     "Generative Language API" enabled.
+ * Required secrets — TWO separate keys, and that is not optional:
+ *   GOOGLE_API_KEY  — Google Maps Platform key, "Street View Static API".
+ *   GEMINI_API_KEY  — Gemini key from Google AI Studio (aistudio.google.com).
+ *
+ * Why two: Google will not authorize a single key for both Maps APIs and
+ * generativelanguage.googleapis.com. Adding Gemini to a Maps key's API
+ * restrictions is greyed out in the Cloud Console ("cannot be selected with
+ * the currently selected API restrictions"), and calling Gemini with a Maps
+ * key returns 403 API_KEY_SERVICE_BLOCKED. Verified the hard way 2026-08-04.
+ * Gemini keys are minted in AI Studio, not the Maps credentials screen.
  *
  * Costs, so nobody is surprised: Street View Static is ~$7/1000 images and a
  * Gemini image generation is a few cents. Art is generated ONCE per job and
@@ -76,15 +83,17 @@ function fromBase64(b64: string): Uint8Array {
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
-  const googleKey = Deno.env.get('GOOGLE_API_KEY');
-  if (!googleKey) {
+  // Street View and Gemini need DIFFERENT keys — see the header comment.
+  const streetViewKey = Deno.env.get('GOOGLE_API_KEY');
+  const geminiKey = Deno.env.get('GEMINI_API_KEY');
+  if (!geminiKey) {
     return json(
       {
         error:
-          'Artwork is not set up yet. This needs a Google API key (with Street View ' +
-          'Static API and Generative Language API enabled) saved as the GOOGLE_API_KEY ' +
-          'secret on the property-art function. Until then, cards show the placeholder ' +
-          'illustration.',
+          'The cartoon step is not set up yet: this function needs a GEMINI_API_KEY ' +
+          'secret. Create it at aistudio.google.com/app/apikey — a Maps key will not ' +
+          'work for Gemini, Google keeps the two separate. Cards keep showing the ' +
+          'placeholder illustration until then.',
       },
       503,
     );
@@ -195,11 +204,19 @@ Deno.serve(async (req) => {
       sourceBytes = new Uint8Array(await file.arrayBuffer());
       sourceMime = file.type || 'image/jpeg';
     } else {
+      if (!streetViewKey) {
+        return await fail(
+          'Street View is not set up: this function needs a GOOGLE_API_KEY secret ' +
+            '(Maps Platform key with Street View Static API enabled). You can still ' +
+            'use "Use a photo" to supply the picture yourself.',
+          503,
+        );
+      }
       const address = jobRow.address!;
       // Metadata first — free, and tells us if there's coverage at all.
       const metaUrl =
         `https://maps.googleapis.com/maps/api/streetview/metadata` +
-        `?location=${encodeURIComponent(address)}&key=${googleKey}`;
+        `?location=${encodeURIComponent(address)}&key=${streetViewKey}`;
       const metaRes = await fetch(metaUrl);
       const meta = (await metaRes.json()) as { status?: string };
       if (meta.status !== 'OK') {
@@ -212,7 +229,7 @@ Deno.serve(async (req) => {
       const imgUrl =
         `https://maps.googleapis.com/maps/api/streetview` +
         `?size=${STREETVIEW_SIZE}&location=${encodeURIComponent(address)}` +
-        `&fov=80&pitch=8&return_error_code=true&key=${googleKey}`;
+        `&fov=80&pitch=8&return_error_code=true&key=${streetViewKey}`;
       const imgRes = await fetch(imgUrl);
       if (!imgRes.ok) return await fail(`Street View request failed (${imgRes.status}).`);
       sourceBytes = new Uint8Array(await imgRes.arrayBuffer());
@@ -220,7 +237,7 @@ Deno.serve(async (req) => {
 
     // --- 2. cartoonify with Gemini ----------------------------------------
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${googleKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
