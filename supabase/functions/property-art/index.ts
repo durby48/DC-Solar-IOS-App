@@ -35,17 +35,26 @@
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
-const GEMINI_MODEL = 'gemini-2.5-flash-image';
+// gemini-3.1-flash-image, chosen by side-by-side test on a real DC Solar
+// address (2026-08-04). gemini-2.5-flash-image invented a two-storey house
+// with a left-hand garage for a single-storey brick ranch — it drew *a*
+// house, not *the* house, which defeats the entire point. 3.1 kept the
+// storey count, brick colour, roofline and garage position.
+const GEMINI_MODEL = 'gemini-3.1-flash-image';
+/** Cards are wide, so ask for 16:9 rather than center-cropping a square. */
+const IMAGE_ASPECT_RATIO = '16:9';
 const STREETVIEW_SIZE = '640x400';
 
 const CARTOON_PROMPT = [
   'Redraw this house as a clean, friendly 2D cartoon illustration.',
   'Flat vector style with bold simple shapes, soft pastel colors, smooth',
   'outlines, a clear blue sky, green lawn and simple stylized trees.',
-  'Keep the building recognizable: same rooflines, same number of storeys,',
-  'same garage and window placement, same general proportions.',
+  'Keep the building recognizable and accurate: SAME number of storeys, same',
+  'rooflines, same siding/brick material and colour, same garage and window',
+  'placement. Do not add extra floors or wings that are not in the photo.',
+  'Frame the whole house across the middle of the image, foliage must not',
+  'hide it.',
   'No people, no cars, no text, no watermarks, no house numbers.',
-  'Bright, cheerful, daytime lighting. Square-ish framing of the whole house.',
 ].join(' ');
 
 interface Payload {
@@ -251,6 +260,7 @@ Deno.serve(async (req) => {
               ],
             },
           ],
+          generationConfig: { imageConfig: { aspectRatio: IMAGE_ASPECT_RATIO } },
         }),
       },
     );
