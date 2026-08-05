@@ -12,9 +12,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { SolarFlow } from '@/components/SolarFlow';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
 import { verseOfTheDay } from '@/lib/verses';
@@ -56,14 +56,22 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Backdrop, then the live particle grid on top of it. Both sit behind
-          the form and never take touches. */}
+      {/* Devon's own Gemini clip, converted to a looping animated WebP (real
+          video would need a native player and therefore a full App Store
+          build). The JPEG underneath is the first frame — it paints instantly
+          and is what shows if the animation ever fails to decode. */}
       <Image
         source={require('@/assets/images/login-solarflow.jpg')}
         style={StyleSheet.absoluteFill}
         resizeMode="cover"
       />
-      <SolarFlow />
+      <ExpoImage
+        source={require('@/assets/images/login-solarflow.webp')}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+        transition={220}
+      />
       <View style={styles.vignette} pointerEvents="none" />
       <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
