@@ -1,24 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
-import {
-  AccessibilityInfo,
-  Animated,
-  Easing,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { useEffect, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { Ticker } from '@/components/Ticker';
 import { accentCycle, colors, radii, shadows, spacing } from '@/constants/theme';
 import { fetchJobFinance, type JobFinanceSummary } from '@/lib/data';
 
 function formatCurrency(amount: number): string {
   return `$${Math.round(amount).toLocaleString('en-US')}`;
 }
-
-/** Pixels per second the ticker travels — slow enough to read comfortably. */
-const TICKER_SPEED = 38;
 
 interface Tile {
   label: string;
@@ -31,10 +20,8 @@ interface Tile {
  * — the parent should additionally gate on isAdmin. Bump `refreshKey` to
  * force a refetch (e.g. after a finance entry is edited or deleted).
  *
- * The strip is a continuously looping stock-style ticker (2026-08-04): the
- * tile track is rendered TWICE end-to-end and translated by exactly one
- * track width, so the loop is seamless with no visible jump. Falls back to a
- * plain horizontal scroller when the OS reports "reduce motion".
+ * The strip is a continuously looping stock-style ticker; the marquee itself
+ * lives in components/Ticker.tsx and is shared with the pipeline hero.
  */
 export function JobFinanceHeader({
   jobId,
@@ -44,9 +31,6 @@ export function JobFinanceHeader({
   refreshKey?: number;
 }) {
   const [summary, setSummary] = useState<JobFinanceSummary | null>(null);
-  const [trackWidth, setTrackWidth] = useState(0);
-  const [reduceMotion, setReduceMotion] = useState(false);
-  const translateX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     let cancelled = false;
@@ -57,36 +41,6 @@ export function JobFinanceHeader({
       cancelled = true;
     };
   }, [jobId, refreshKey]);
-
-  // Honor the accessibility setting — a permanently moving element is a real
-  // problem for some people. Silent no-op if the API is unavailable (web).
-  useEffect(() => {
-    let cancelled = false;
-    AccessibilityInfo.isReduceMotionEnabled?.()
-      .then((enabled) => {
-        if (!cancelled) setReduceMotion(Boolean(enabled));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (trackWidth <= 0 || reduceMotion) return;
-    translateX.setValue(0);
-    const animation = Animated.loop(
-      Animated.timing(translateX, {
-        toValue: -trackWidth,
-        duration: (trackWidth / TICKER_SPEED) * 1000,
-        easing: Easing.linear,
-        // RN-Web can't drive transforms off the JS thread.
-        useNativeDriver: Platform.OS !== 'web',
-      }),
-    );
-    animation.start();
-    return () => animation.stop();
-  }, [trackWidth, reduceMotion, translateX]);
 
   if (!summary) return null;
 
@@ -102,42 +56,23 @@ export function JobFinanceHeader({
     { label: 'Labor', value: formatCurrency(summary.labor) },
   ];
 
-  const renderTile = (tile: Tile, index: number, keyPrefix: string) => {
-    const accent = accentCycle[index % accentCycle.length];
-    return (
-      <View key={`${keyPrefix}-${tile.label}`} style={styles.tile}>
-        <View style={[styles.tileDot, { backgroundColor: accent.fg }]} />
-        <View style={styles.tileText}>
-          <Text style={[styles.tileLabel, { color: accent.fg }]}>{tile.label}</Text>
-          <Text style={styles.tileValue}>{tile.value}</Text>
-        </View>
-      </View>
-    );
-  };
-
   return (
     <View>
-      {reduceMotion ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.viewport}
-          contentContainerStyle={styles.staticRow}>
-          {tiles.map((tile, i) => renderTile(tile, i, 'static'))}
-        </ScrollView>
-      ) : (
-        <View style={styles.viewport} pointerEvents="none">
-          <Animated.View style={[styles.track, { transform: [{ translateX }] }]}>
-            <View
-              style={styles.group}
-              onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}>
-              {tiles.map((tile, i) => renderTile(tile, i, 'a'))}
+      <Ticker
+        style={styles.viewport}
+        items={tiles.map((tile, index) => {
+          const accent = accentCycle[index % accentCycle.length];
+          return (
+            <View style={styles.tile}>
+              <View style={[styles.tileDot, { backgroundColor: accent.fg }]} />
+              <View style={styles.tileText}>
+                <Text style={[styles.tileLabel, { color: accent.fg }]}>{tile.label}</Text>
+                <Text style={styles.tileValue}>{tile.value}</Text>
+              </View>
             </View>
-            {/* Second copy: what the eye sees once copy one scrolls off. */}
-            <View style={styles.group}>{tiles.map((tile, i) => renderTile(tile, i, 'b'))}</View>
-          </Animated.View>
-        </View>
-      )}
+          );
+        })}
+      />
 
       {summary.byEmployee.length > 0 ? (
         <View style={styles.breakdown}>
@@ -156,20 +91,9 @@ export function JobFinanceHeader({
 
 const styles = StyleSheet.create({
   viewport: {
+    // Full-bleed past the screen's horizontal padding.
     marginHorizontal: -spacing.lg,
-    flexGrow: 0,
-    overflow: 'hidden',
     paddingVertical: 2,
-  },
-  track: {
-    flexDirection: 'row',
-  },
-  group: {
-    flexDirection: 'row',
-  },
-  staticRow: {
-    flexDirection: 'row',
-    paddingHorizontal: spacing.lg,
   },
   tile: {
     flexDirection: 'row',
@@ -180,8 +104,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.md,
     minWidth: 132,
-    // Trailing margin (not `gap`) so each copy of the track measures the same
-    // width including its spacing — that's what keeps the loop seamless.
+    // Trailing margin (not `gap`) so both ticker copies measure identically.
     marginRight: spacing.sm,
     ...shadows.card,
   },

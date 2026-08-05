@@ -15,6 +15,8 @@ export interface Customer {
   address: string | null;
   notes?: string | null;
   company: string;
+  /** Contact photo in the job-photos bucket (migration 20). */
+  photo_path?: string | null;
 }
 
 /** A scheduled work day for a job (mirrors the job_schedule_dates table). */

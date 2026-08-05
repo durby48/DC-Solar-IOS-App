@@ -7,27 +7,31 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { CustomerAvatar } from '@/components/CustomerAvatar';
+import { PipelineHero } from '@/components/PipelineHero';
 import { PropertyArt } from '@/components/PropertyArt';
 import { StatusPill } from '@/components/StatusPill';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
 import { type Job } from '@/lib/mockData';
 import {
-  fetchCompanyTotals,
   fetchFinanceEntries,
   fetchMyHoursByJob,
   fetchNextDates,
   fetchPipelineJobs,
+  fetchLaborHoursByJob,
   moneyByJobFromEntries,
-  type CompanyTotals,
+  type JobLaborHours,
   type JobMoney,
   type NextDate,
 } from '@/lib/pipeline';
 import { fetchArtworkUrls } from '@/lib/artwork';
+import { fetchForecastModel, forecastJob, type ForecastModel } from '@/lib/forecast';
 import { useRole } from '@/lib/role';
 import { STAGES, stageOrDefault, type Stage } from '@/lib/stages';
 import { formatTimeLabel } from '@/lib/time';
@@ -41,62 +45,50 @@ function jobStage(job: Job) {
   return stageOrDefault((job as unknown as { stage?: unknown }).stage, job.status);
 }
 
-function TotalsHeader({ totals }: { totals: CompanyTotals }) {
-  const pnl = totals.avgProfitPct;
-  const moneyTiles: [string, number][] = [
-    ['Estimates', totals.estimates],
-    ['Contracted', totals.contracted],
-    ['Invoiced', totals.invoiced],
-    ['Paid', totals.paid],
-  ];
-  return (
-    <View style={styles.totalsCard}>
-      <View style={styles.totalsGrid}>
-        {moneyTiles.map(([label, amount]) => (
-          <View key={label} style={styles.totalsTile}>
-            <Text style={styles.totalsLabel}>{label}</Text>
-            <Text style={styles.totalsValue} numberOfLines={1} adjustsFontSizeToFit>
-              {formatCurrency(amount)}
-            </Text>
-          </View>
-        ))}
-      </View>
-      <View style={styles.profitRow}>
-        <View>
-          <Text style={styles.totalsLabel}>Avg Profit</Text>
-          <Text style={styles.totalsSublabel}>completed jobs</Text>
-        </View>
-        <Text
-          style={[
-            styles.profitValue,
-            pnl !== null && (pnl >= 0 ? styles.profitPositive : styles.profitNegative),
-          ]}
-          numberOfLines={1}
-          adjustsFontSizeToFit>
-          {pnl !== null ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)}%` : '—'}
-        </Text>
-      </View>
-    </View>
-  );
+function formatHours(h: number): string {
+  return `${Math.round(h)} h`;
 }
 
+/**
+ * One project card. Two swipeable pages over a SHARED property-art background
+ * (the art sits behind the pager, so the house doesn't slide with the text).
+ *
+ *   Page 1 — who and when: job number, stage, customer, address, next date.
+ *   Page 2 — how much: modules, forecast hours, and the money.
+ *
+ * Money renders only when `money` is present, which RLS already makes
+ * admin-only — crew simply get null, so this is enforced server-side rather
+ * than merely hidden in the UI.
+ */
 function PipelineCard({
   job,
   next,
   money,
   myHours,
   artUrl,
+  labor,
+  model,
 }: {
   job: Job;
   next: NextDate | undefined;
   money: JobMoney | undefined;
   myHours: number | undefined;
-  /** Cartoon artwork of this property, once it has been generated. */
   artUrl: string | undefined;
+  labor: JobLaborHours | undefined;
+  model: ForecastModel | null;
 }) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const pageWidth = Math.max(240, width - spacing.lg * 2);
+  const [page, setPage] = useState(0);
+
   const stage = jobStage(job);
-  const completedOn = (job as unknown as { completed_on?: string | null }).completed_on ?? null;
+  const extra = job as unknown as {
+    completed_on?: string | null;
+    module_count?: number | null;
+    job_type?: string | null;
+  };
+  const completedOn = extra.completed_on ?? null;
   const time = next ? formatTimeLabel(next.start_time) : null;
   const nextLabel =
     stage === 'Complete' && completedOn
@@ -105,37 +97,142 @@ function PipelineCard({
         ? `Next: ${formatShortDate(next.work_date)}${time ? ` — ${time}` : ''}`
         : 'No upcoming date';
 
+  const modules = extra.module_count ?? null;
+  const forecast = forecastJob(model, extra.job_type, modules);
+
+  // (paid − expenses − labor) ÷ paid. Only meaningful once money came in.
+  const profitPct =
+    money && money.paid > 0
+      ? ((money.paid - money.expenses - (labor?.labor ?? 0)) / money.paid) * 100
+      : null;
+
+  const open = () => router.push({ pathname: '/job/[id]', params: { id: job.id } });
+
   return (
-    <Pressable
-      onPress={() => router.push({ pathname: '/job/[id]', params: { id: job.id } })}
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
+    <View style={styles.card}>
       <PropertyArt seed={job.id} imageUrl={artUrl} radius={radii.md} />
-      <View style={styles.topRow}>
-        {job.job_number ? (
-          <View style={styles.chip}>
-            <Text style={styles.chipText}>{job.job_number}</Text>
+      <ScrollView
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={(event) =>
+          setPage(Math.round(event.nativeEvent.contentOffset.x / pageWidth))
+        }
+        style={{ width: pageWidth }}>
+        {/* ---- page 1: who and when ---- */}
+        <Pressable
+          onPress={open}
+          style={({ pressed }) => [styles.page, { width: pageWidth }, pressed && styles.cardPressed]}>
+          <View style={styles.topRow}>
+            {job.job_number ? (
+              <View style={styles.chip}>
+                <Text style={styles.chipText}>{job.job_number}</Text>
+              </View>
+            ) : null}
+            <StatusPill stage={stage} />
           </View>
-        ) : null}
-        <StatusPill stage={stage} />
+          <Text style={styles.name} numberOfLines={2}>
+            {job.name}
+          </Text>
+          {job.customer?.name ? (
+            <View style={styles.customerRow}>
+              <CustomerAvatar customer={job.customer} size={26} />
+              <Text style={styles.customer} numberOfLines={1}>
+                {job.customer.name}
+              </Text>
+            </View>
+          ) : null}
+          {job.address ? <Text style={styles.address}>{job.address}</Text> : null}
+          <Text
+            style={
+              (stage === 'Complete' && completedOn) || next ? styles.nextDate : styles.noDate
+            }>
+            {nextLabel}
+          </Text>
+          {myHours !== undefined && myHours > 0 ? (
+            <Text style={styles.hoursRow}>{`Your hours: ${myHours.toFixed(1)} h`}</Text>
+          ) : null}
+        </Pressable>
+
+        {/* ---- page 2: how much ---- */}
+        <Pressable
+          onPress={open}
+          style={({ pressed }) => [styles.page, { width: pageWidth }, pressed && styles.cardPressed]}>
+          <View style={styles.topRow}>
+            {job.job_number ? (
+              <View style={styles.chip}>
+                <Text style={styles.chipText}>{job.job_number}</Text>
+              </View>
+            ) : null}
+            {extra.job_type ? (
+              <View style={styles.typeChip}>
+                <Text style={styles.typeChipText}>{extra.job_type}</Text>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.statRow}>
+            <View style={styles.stat}>
+              <Text style={styles.statLabel}>Modules</Text>
+              <Text style={styles.statValue}>{modules ?? '—'}</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={styles.statLabel}>Est. hours</Text>
+              <Text style={styles.statValue}>
+                {forecast ? formatHours(forecast.hours) : '—'}
+              </Text>
+            </View>
+          </View>
+          {forecast ? (
+            <Text style={styles.forecastNote}>
+              {forecast.low !== null && forecast.high !== null
+                ? `${formatHours(forecast.low)}–${formatHours(forecast.high)} · from ${forecast.samples} finished ${forecast.basis} jobs`
+                : `from 1 finished ${forecast.basis} job — treat as rough`}
+            </Text>
+          ) : (
+            <Text style={styles.forecastNote}>
+              {modules ? 'No finished jobs to forecast from yet' : 'Set a module count to forecast'}
+            </Text>
+          )}
+
+          {money ? (
+            <>
+              <View style={styles.moneyRowNew}>
+                {([
+                  ['Est', money.estimate !== null ? formatCurrency(money.estimate) : '—'],
+                  ['Inv', formatCurrency(money.invoiced)],
+                  ['Paid', formatCurrency(money.paid)],
+                ] as [string, string][]).map(([label, value]) => (
+                  <View key={label} style={styles.moneyCell}>
+                    <Text style={styles.statLabel}>{label}</Text>
+                    <Text style={styles.moneyValue}>{value}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={styles.profitRowNew}>
+                <Text style={styles.statLabel}>Profit</Text>
+                <Text
+                  style={[
+                    styles.profitValueNew,
+                    profitPct !== null &&
+                      (profitPct >= 0 ? styles.profitPositive : styles.profitNegative),
+                  ]}>
+                  {profitPct !== null
+                    ? `${profitPct >= 0 ? '+' : ''}${profitPct.toFixed(1)}%`
+                    : '—'}
+                </Text>
+              </View>
+            </>
+          ) : null}
+        </Pressable>
+      </ScrollView>
+
+      <View style={styles.dots} pointerEvents="none">
+        {[0, 1].map((i) => (
+          <View key={i} style={[styles.dot, page === i && styles.dotActive]} />
+        ))}
       </View>
-      <Text style={styles.name}>{job.name}</Text>
-      {job.customer?.name ? <Text style={styles.customer}>{job.customer.name}</Text> : null}
-      {job.address ? <Text style={styles.address}>{job.address}</Text> : null}
-      <Text
-        style={
-          (stage === 'Complete' && completedOn) || next ? styles.nextDate : styles.noDate
-        }>
-        {nextLabel}
-      </Text>
-      {money ? (
-        <Text style={styles.moneyRow}>
-          {`Est ${money.estimate !== null ? formatCurrency(money.estimate) : '—'} · Inv ${formatCurrency(money.invoiced)} · Paid ${formatCurrency(money.paid)}`}
-        </Text>
-      ) : null}
-      {myHours !== undefined && myHours > 0 ? (
-        <Text style={styles.hoursRow}>{`Your hours: ${myHours.toFixed(1)} h`}</Text>
-      ) : null}
-    </Pressable>
+    </View>
   );
 }
 
@@ -149,7 +246,8 @@ export default function PipelineScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [nextDates, setNextDates] = useState<Map<string, NextDate>>(new Map());
   const [money, setMoney] = useState<Map<string, JobMoney> | null>(null);
-  const [totals, setTotals] = useState<CompanyTotals | null>(null);
+  const [labor, setLabor] = useState<Map<string, JobLaborHours> | null>(null);
+  const [model, setModel] = useState<ForecastModel | null>(null);
   const [myHours, setMyHours] = useState<Map<string, number>>(new Map());
   const [stageFilter, setStageFilter] = useState<Stage | 'All' | 'Active'>('All');
   const [artUrls, setArtUrls] = useState<Map<string, string>>(new Map());
@@ -160,24 +258,25 @@ export default function PipelineScreen() {
     setIsMock(mock);
     setNextDates(await fetchNextDates(mock));
     setArtUrls(mock ? new Map() : await fetchArtworkUrls());
+    setModel(mock ? null : await fetchForecastModel());
 
     if (!mock && role?.isAdmin) {
       // One finance fetch feeds both the per-card money rows and the
       // company totals header; both hide when it fails.
       const financeRows = await fetchFinanceEntries();
       setMoney(financeRows ? moneyByJobFromEntries(financeRows) : null);
-      setTotals(financeRows ? await fetchCompanyTotals(fetched, financeRows) : null);
+      setLabor(await fetchLaborHoursByJob());
       setMyHours(new Map());
     } else if (!mock && role) {
       setMoney(null);
-      setTotals(null);
+      setLabor(null);
       setMyHours(
         await fetchMyHoursByJob({ email: role.email, displayName: role.displayName }),
       );
     } else {
-      // Signed out / demo mode: no money, totals, or hours rows.
+      // Signed out / demo mode: no money, labor, or hours rows.
       setMoney(null);
-      setTotals(null);
+      setLabor(null);
       setMyHours(new Map());
     }
     setLoaded(true);
@@ -244,7 +343,7 @@ export default function PipelineScreen() {
                 </Pressable>
               ) : null}
             </View>
-            {role?.isAdmin && totals ? <TotalsHeader totals={totals} /> : null}
+            <PipelineHero />
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -285,6 +384,8 @@ export default function PipelineScreen() {
               money={money?.get(item.id)}
               myHours={myHours.get(item.id)}
               artUrl={artUrls.get(item.id)}
+              labor={labor?.get(item.id)}
+              model={model}
             />
           </View>
         )}
@@ -342,61 +443,6 @@ const styles = StyleSheet.create({
   pressed: {
     opacity: 0.85,
   },
-  totalsCard: {
-    backgroundColor: colors.card,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    ...shadows.card,
-  },
-  totalsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.md,
-  },
-  totalsTile: {
-    width: '50%',
-    gap: 2,
-    paddingRight: spacing.sm,
-  },
-  totalsLabel: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  totalsValue: {
-    color: colors.ink,
-    fontSize: 20,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  profitRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
-  },
-  profitValue: {
-    color: colors.ink,
-    fontSize: 24,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  profitPositive: {
-    color: colors.success,
-  },
-  profitNegative: {
-    color: colors.danger,
-  },
-  totalsSublabel: {
-    color: colors.inkSoft,
-    fontSize: 10,
-  },
   filterScroll: {
     marginBottom: spacing.md,
   },
@@ -427,8 +473,6 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.card,
     borderRadius: radii.md,
-    padding: spacing.md,
-    gap: spacing.xs,
     // The property artwork is an absolutely-positioned sibling underneath;
     // `overflow: hidden` keeps it inside the rounded corners.
     overflow: 'hidden',
@@ -437,6 +481,104 @@ const styles = StyleSheet.create({
   },
   cardPressed: {
     opacity: 0.8,
+  },
+  page: {
+    padding: spacing.md,
+    gap: spacing.xs,
+    minHeight: 150,
+  },
+  customerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  typeChip: {
+    backgroundColor: colors.violetSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs,
+  },
+  typeChipText: {
+    color: colors.violetDeep,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  statRow: {
+    flexDirection: 'row',
+    gap: spacing.lg,
+    marginTop: spacing.xs,
+  },
+  stat: {
+    gap: 2,
+  },
+  statLabel: {
+    color: colors.inkSoft,
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  statValue: {
+    color: colors.ink,
+    fontSize: 22,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  forecastNote: {
+    color: colors.inkSoft,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  moneyRowNew: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  moneyCell: {
+    gap: 2,
+  },
+  moneyValue: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  profitRowNew: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.xs,
+  },
+  profitValueNew: {
+    color: colors.ink,
+    fontSize: 18,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  profitPositive: {
+    color: colors.success,
+  },
+  profitNegative: {
+    color: colors.danger,
+  },
+  dots: {
+    position: 'absolute',
+    right: spacing.sm,
+    bottom: spacing.sm,
+    flexDirection: 'row',
+    gap: 4,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(61,53,46,0.22)',
+  },
+  dotActive: {
+    backgroundColor: colors.ocean,
   },
   topRow: {
     flexDirection: 'row',
@@ -478,12 +620,6 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     fontSize: 13,
     fontWeight: '600',
-  },
-  moneyRow: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
   },
   hoursRow: {
     color: colors.inkSoft,

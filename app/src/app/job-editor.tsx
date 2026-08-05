@@ -17,9 +17,13 @@ import {
   createCustomer,
   createJob,
   fetchCustomers,
+  JOB_TYPES,
   nextJobNumber,
+  parseJobType,
+  parseModuleCount,
   updateJob,
   type JobEditableFields,
+  type JobType,
   type JobWithPM,
 } from '@/lib/jobs';
 import { todayISO } from '@/lib/dates';
@@ -66,6 +70,9 @@ export default function JobEditorScreen() {
   const [ncError, setNcError] = useState<string | null>(null);
 
   const [saving, setSaving] = useState(false);
+  const [moduleCount, setModuleCount] = useState('');
+  const [jobType, setJobType] = useState<JobType>('R&R');
+  const [critterPanels, setCritterPanels] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
 
@@ -96,6 +103,20 @@ export default function JobEditorScreen() {
         setCustomerId(job.customer_id);
         setProjectManager(job.project_manager ?? '');
         setPmPhone(job.project_manager_phone ?? '');
+        const metrics = job as unknown as {
+          module_count?: number | null;
+          job_type?: JobType | null;
+          critter_guard_panels?: number | null;
+        };
+        setModuleCount(
+          metrics.module_count != null
+            ? String(metrics.module_count)
+            : (parseModuleCount(job.name, job.description)?.toString() ?? ''),
+        );
+        setJobType(metrics.job_type ?? parseJobType(job.name));
+        setCritterPanels(
+          metrics.critter_guard_panels != null ? String(metrics.critter_guard_panels) : '',
+        );
         setLoading(false);
       });
     } else {
@@ -186,6 +207,15 @@ export default function JobEditorScreen() {
       customer_id: customerId,
       project_manager: projectManager.trim() || null,
       project_manager_phone: pmPhone.trim() || null,
+      // Blank falls back to whatever the text says, so a new job written as
+      // "R&R … (22 modules)" fills itself in; typing a number always wins.
+      module_count:
+        moduleCount.trim() !== ''
+          ? Number(moduleCount.replace(/[^0-9]/g, '')) || null
+          : parseModuleCount(name, description),
+      job_type: jobType,
+      critter_guard_panels:
+        critterPanels.trim() !== '' ? Number(critterPanels.replace(/[^0-9]/g, '')) || null : null,
     };
 
     setSaving(true);
@@ -303,6 +333,55 @@ export default function JobEditorScreen() {
               );
             })}
           </View>
+          <Text style={styles.fieldLabel}>Job type</Text>
+          <View style={styles.chipRow}>
+            {JOB_TYPES.map((t) => {
+              const selected = jobType === t;
+              return (
+                <Pressable
+                  key={t}
+                  onPress={() => setJobType(t)}
+                  style={[styles.chip, selected && styles.chipSelected]}>
+                  <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{t}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.fieldHint}>
+            Removal &amp; reinstall work takes longer per panel than a fresh install, so this
+            picks which finished jobs the hours forecast learns from.
+          </Text>
+
+          {jobType === 'Critter Guard' ? (
+            <>
+              <Text style={styles.fieldLabel}>Critter guard panels</Text>
+              <TextInput
+                style={styles.input}
+                value={critterPanels}
+                onChangeText={setCritterPanels}
+                placeholder="e.g. 44"
+                placeholderTextColor={colors.inkSoft}
+                keyboardType="number-pad"
+              />
+            </>
+          ) : (
+            <>
+              <Text style={styles.fieldLabel}>Modules / panels</Text>
+              <TextInput
+                style={styles.input}
+                value={moduleCount}
+                onChangeText={setModuleCount}
+                placeholder="Leave blank to read it from the job name"
+                placeholderTextColor={colors.inkSoft}
+                keyboardType="number-pad"
+              />
+              <Text style={styles.fieldHint}>
+                Drives the panel totals on the pipeline header and the estimated hours on each
+                project card.
+              </Text>
+            </>
+          )}
+
           {stage === 'Complete' ? (
             <>
               <Text style={styles.fieldLabel}>Completed date (YYYY-MM-DD)</Text>
@@ -577,6 +656,12 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     gap: spacing.sm,
     ...shadows.card,
+  },
+  fieldHint: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: -spacing.xs,
   },
   fieldLabel: {
     color: colors.inkSoft,

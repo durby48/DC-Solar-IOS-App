@@ -26,6 +26,8 @@ export interface JobMoney {
   estimate: number | null;
   invoiced: number;
   paid: number;
+  /** Job-tagged expense entries — needed for the per-card profit %. */
+  expenses: number;
 }
 
 function num(v: unknown): number {
@@ -139,7 +141,7 @@ export function moneyByJobFromEntries(rows: FinanceRow[]): Map<string, JobMoney>
   const estimateDates = new Map<string, string>();
   for (const row of rows) {
     if (!row.job_id) continue;
-    const entry = map.get(row.job_id) ?? { estimate: null, invoiced: 0, paid: 0 };
+    const entry = map.get(row.job_id) ?? { estimate: null, invoiced: 0, paid: 0, expenses: 0 };
     const amount = num(row.amount);
     switch (row.type) {
       case 'estimate': {
@@ -156,6 +158,9 @@ export function moneyByJobFromEntries(rows: FinanceRow[]): Map<string, JobMoney>
         break;
       case 'payment':
         entry.paid += amount;
+        break;
+      case 'expense':
+        entry.expenses += amount;
         break;
     }
     map.set(row.job_id, entry);

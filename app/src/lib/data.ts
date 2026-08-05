@@ -10,7 +10,7 @@ export type { ScheduleDate };
 
 const COMPANY = 'dc-solar';
 
-const CUSTOMER_FIELDS = 'id, name, phone, email, address, company';
+const CUSTOMER_FIELDS = 'id, name, phone, email, address, company, photo_path';
 
 function normalize(row: Record<string, unknown>): Job {
   const customers = row.customers as Job['customer'] | Job['customer'][] | undefined;

@@ -15,7 +15,9 @@ import {
 } from 'react-native';
 
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 
+import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import {
   addCustomer,
@@ -24,6 +26,7 @@ import {
   fetchCustomers,
   updateCustomer,
   uploadCustomerDocument,
+  uploadCustomerPhoto,
   type CustomerDocument,
   type CustomerInput,
   type CustomerRecord,
@@ -126,6 +129,7 @@ export default function CustomersScreen() {
   const [uploadingFor, setUploadingFor] = useState<string | null>(null);
   const [busyDocId, setBusyDocId] = useState<string | null>(null);
   const [confirmDeleteDocId, setConfirmDeleteDocId] = useState<string | null>(null);
+  const [photoBusyId, setPhotoBusyId] = useState<string | null>(null);
 
   const loadCustomers = useCallback(async () => {
     const result = await fetchCustomers();
@@ -137,6 +141,43 @@ export default function CustomersScreen() {
       setListState('unavailable');
     }
   }, []);
+
+  /**
+   * Pick a contact photo from the device library. `allowsEditing` with a 1:1
+   * aspect makes the user crop it square in the OS UI, so the avatar is always
+   * correctly framed without us doing any image processing — there is no
+   * resizing library in the bundle.
+   */
+  const pickPhoto = useCallback(
+    async (customer: CustomerRecord) => {
+      setStatus(null);
+      try {
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.6,
+        });
+        if (result.canceled || !result.assets?.length) return;
+        setPhotoBusyId(customer.id);
+        const upload = await uploadCustomerPhoto({
+          customerId: customer.id,
+          uri: result.assets[0].uri,
+        });
+        setPhotoBusyId(null);
+        if (upload.ok) {
+          await loadCustomers();
+          notify(setStatus, 'success', 'Photo saved', `Contact photo updated for ${customer.name}.`);
+        } else {
+          notify(setStatus, 'error', 'Photo failed', upload.message);
+        }
+      } catch {
+        setPhotoBusyId(null);
+        notify(setStatus, 'error', 'Photo failed', 'Something went wrong. Please try again.');
+      }
+    },
+    [loadCustomers],
+  );
 
   const loadDocs = useCallback(async () => {
     setDocsByCustomer(await fetchCustomerDocuments());
@@ -551,9 +592,16 @@ export default function CustomersScreen() {
                         styles.nameRow,
                         pressed && isAdmin && styles.rowPressed,
                       ]}>
-                      <View style={styles.iconWrap}>
-                        <Ionicons name="person" size={18} color={colors.ocean} />
-                      </View>
+                      <Pressable
+                        onPress={() => (isAdmin ? void pickPhoto(customer) : undefined)}
+                        disabled={!isAdmin || photoBusyId === customer.id}
+                        hitSlop={6}>
+                        {photoBusyId === customer.id ? (
+                          <ActivityIndicator color={colors.ocean} />
+                        ) : (
+                          <CustomerAvatar customer={customer} size={38} />
+                        )}
+                      </Pressable>
                       <Text style={styles.customerName}>{customer.name}</Text>
                       {isAdmin ? (
                         <Ionicons

@@ -226,7 +226,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(255,255,255,0.80)',
+    backgroundColor: 'rgba(255,255,255,0.62)',
   },
   topScrim: {
     position: 'absolute',
@@ -234,7 +234,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: '34%',
-    backgroundColor: 'rgba(255,255,255,0.30)',
+    backgroundColor: 'rgba(255,255,255,0.22)',
   },
   sun: {
     position: 'absolute',

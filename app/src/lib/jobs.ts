@@ -23,6 +23,9 @@ export const STAGE_MIGRATION_WARNING = 'Stages need the latest database migratio
 export const COMPLETED_ON_MIGRATION_WARNING =
   'The completed date needs the latest database migration — the rest of the job was saved.';
 
+export const METRICS_MIGRATION_WARNING =
+  'Module count and job type need the latest database migration — the rest of the job was saved.';
+
 /** Optional columns (may not exist in the DB yet). */
 export interface JobProjectManager {
   project_manager?: string | null;
@@ -161,6 +164,52 @@ export interface JobEditableFields {
   project_manager_phone: string | null;
   /** YYYY-MM-DD when stage is Complete, null otherwise (migration 10). */
   completed_on: string | null;
+  /** Panels on this job — seeds the company metrics + hours forecast (migration 20). */
+  module_count: number | null;
+  /** R&R | Reinstall | Install | Critter Guard | Other (migration 20). */
+  job_type: JobType | null;
+  /** Panels covered by critter guard (migration 20). */
+  critter_guard_panels: number | null;
+}
+
+export const JOB_TYPES = ['R&R', 'Reinstall', 'Install', 'Critter Guard', 'Other'] as const;
+export type JobType = (typeof JOB_TYPES)[number];
+
+/**
+ * Best-guess module count from a job's free text.
+ *
+ * Counts were historically only ever written into the job NAME, in at least
+ * six shapes — "(22 modules)", "- 38 Modules", "of 10 modules",
+ * "43 panel removal", "39 module install", "38 new modules" — plus a typo'd
+ * "18 mobules" that we deliberately match. Against the 25 live jobs this
+ * resolves 19; the rest have no count written down anywhere.
+ *
+ * This only SEEDS jobs.module_count when creating/editing a job. The column is
+ * the source of truth so that fixing a typo in a title can never silently move
+ * the company's statistics.
+ */
+export function parseModuleCount(...text: (string | null | undefined)[]): number | null {
+  const unit = String.raw`(?:mod[ua]les?|mobules?|panels?)`;
+  const rx = new RegExp(String.raw`(\d{1,3})\s*(?:new\s+|used\s+|total\s+)?` + unit, 'i');
+  for (const candidate of text) {
+    const match = candidate ? rx.exec(candidate) : null;
+    if (match) {
+      const n = Number(match[1]);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return null;
+}
+
+/** Best-guess job type from a job's name, used to seed the toggle. */
+export function parseJobType(name: string | null | undefined): JobType {
+  const t = (name ?? '').toLowerCase();
+  if (t.includes('critter')) return 'Critter Guard';
+  if (t.startsWith('r&r') || t.includes('removal & reinstall') || t.includes('removal and reinstall'))
+    return 'R&R';
+  if (t.includes('reinstall')) return 'Reinstall';
+  if (t.includes('install')) return 'Install';
+  return 'Other';
 }
 
 export type SaveJobResult =
@@ -179,7 +228,16 @@ function payloadAttempts(fields: JobEditableFields): {
   warnings: string[];
   droppedColumns: string[];
 }[] {
-  const { project_manager, project_manager_phone, stage, completed_on, ...rest } = fields;
+  const {
+    project_manager,
+    project_manager_phone,
+    stage,
+    completed_on,
+    module_count,
+    job_type,
+    critter_guard_panels,
+    ...rest
+  } = fields;
   const groups = [
     { marker: 'stage', warning: STAGE_MIGRATION_WARNING, payload: { stage } },
     {
@@ -191,6 +249,11 @@ function payloadAttempts(fields: JobEditableFields): {
       marker: 'completed_on',
       warning: COMPLETED_ON_MIGRATION_WARNING,
       payload: { completed_on },
+    },
+    {
+      marker: 'module_count',
+      warning: METRICS_MIGRATION_WARNING,
+      payload: { module_count, job_type, critter_guard_panels },
     },
   ];
   const attempts: { payload: Record<string, unknown>; warnings: string[]; droppedColumns: string[] }[] =
@@ -220,7 +283,8 @@ function nextAttempt(
   rejected: Set<string>,
   error: { code?: string; message?: string } | null,
 ): number {
-  if (isMissingColumnError(error, 'stage')) rejected.add('stage');
+  if (isMissingColumnError(error, 'module_count')) rejected.add('module_count');
+  else if (isMissingColumnError(error, 'stage')) rejected.add('stage');
   else if (isMissingColumnError(error, 'completed_on')) rejected.add('completed_on');
   else if (isMissingColumnError(error, 'project_manager')) rejected.add('project_manager');
   else return -1;

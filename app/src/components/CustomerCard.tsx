@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { type Customer } from '@/lib/mockData';
 
@@ -57,9 +58,7 @@ export function CustomerCard({ customer }: { customer: Customer }) {
       <Text style={styles.sectionTitle}>Customer</Text>
       <View style={styles.card}>
         <View style={styles.nameRow}>
-          <View style={styles.iconWrap}>
-            <Ionicons name="person" size={18} color={colors.ocean} />
-          </View>
+          <CustomerAvatar customer={customer} size={40} />
           <Text style={styles.name}>{customer.name}</Text>
         </View>
         {rows.map((row) => (

@@ -15,6 +15,7 @@ export interface CustomerRecord {
   phone: string | null;
   address: string | null;
   notes: string | null;
+  photo_path?: string | null;
 }
 
 export interface CustomerInput {
@@ -200,5 +201,67 @@ export async function updateCustomer(
     return { ok: true };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not save the change.' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Customer contact photos (migration 20)
+// ---------------------------------------------------------------------------
+
+/**
+ * Avatars live in the EXISTING private `job-photos` bucket under a `customers/`
+ * prefix — reusing that bucket means no new storage policies to get wrong.
+ */
+const PHOTO_BUCKET = 'job-photos';
+
+/** Signed display URL for a stored avatar. Null on any failure. */
+export async function getCustomerPhotoUrl(storagePath: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.storage
+      .from(PHOTO_BUCKET)
+      .createSignedUrl(storagePath, 3600);
+    if (error || !data?.signedUrl) return null;
+    return data.signedUrl;
+  } catch {
+    return null;
+  }
+}
+
+export type PhotoUploadResult =
+  | { ok: true; path: string }
+  | { ok: false; message: string };
+
+/**
+ * Upload a picked image as a customer's contact photo and record the path.
+ * The caller should have already square-cropped/downscaled it via the image
+ * picker's own editing options — we don't resize here because there is no
+ * image-processing library in the bundle.
+ */
+export async function uploadCustomerPhoto(params: {
+  customerId: string;
+  uri: string;
+}): Promise<PhotoUploadResult> {
+  try {
+    const response = await fetch(params.uri);
+    const blob = await response.blob();
+    const ext = blob.type.includes('png') ? 'png' : 'jpg';
+    // Timestamped so a replacement never collides with a cached signed URL.
+    const path = `customers/${params.customerId}-${Date.now()}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from(PHOTO_BUCKET)
+      .upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
+    if (upErr) return { ok: false, message: upErr.message };
+
+    const { error } = await supabase
+      .from('customers')
+      .update({ photo_path: path })
+      .eq('id', params.customerId);
+    if (error) return { ok: false, message: error.message };
+    return { ok: true, path };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : 'Could not save that photo.',
+    };
   }
 }
