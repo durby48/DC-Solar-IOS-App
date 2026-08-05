@@ -2,6 +2,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -13,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
+import { PipelineBoard } from '@/components/PipelineBoard';
 import { PipelineHero } from '@/components/PipelineHero';
 import { PropertyArt } from '@/components/PropertyArt';
 import { StatusPill } from '@/components/StatusPill';
@@ -35,6 +37,9 @@ import { fetchForecastModel, forecastJob, type ForecastModel } from '@/lib/forec
 import { useRole } from '@/lib/role';
 import { STAGES, stageOrDefault, type Stage } from '@/lib/stages';
 import { formatTimeLabel } from '@/lib/time';
+
+/** Below this the browser window can't show the columns usefully. */
+const BOARD_MIN_WIDTH = 900;
 
 function formatCurrency(amount: number): string {
   return `$${Math.round(amount).toLocaleString('en-US')}`;
@@ -246,6 +251,7 @@ function PipelineCard({
 
 export default function PipelineScreen() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
   const role = useRole();
 
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -323,6 +329,42 @@ export default function PipelineScreen() {
   }, [jobs, stageFilter]);
 
   const filterChips: (Stage | 'All' | 'Active')[] = ['All', 'Active', ...STAGES];
+
+  // app.dcsolarkc.com gets a stage-column job board; iOS keeps the phone list,
+  // which is the right layout on a phone and is explicitly not to change. A
+  // narrow browser window also keeps the list — eight columns need real width.
+  const useBoard = Platform.OS === 'web' && width >= BOARD_MIN_WIDTH;
+
+  if (useBoard) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <ScrollView contentContainerStyle={styles.boardPage}>
+          <View style={styles.boardHeader}>
+            <View style={styles.headerRow}>
+              <Text style={styles.title}>Pipeline</Text>
+              {role?.isAdmin ? (
+                <Pressable
+                  onPress={() => router.push('/job-editor' as never)}
+                  style={({ pressed }) => [styles.newButton, pressed && styles.pressed]}>
+                  <Text style={styles.newButtonText}>+ New project</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <PipelineHero />
+          </View>
+          <PipelineBoard
+            jobs={jobs}
+            nextDates={nextDates}
+            money={money}
+            artUrls={artUrls}
+            isAdmin={role?.isAdmin ?? false}
+            onChanged={load}
+          />
+          {isMock ? <Text style={styles.mockNote}>Showing demo data</Text> : null}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -474,6 +516,13 @@ const styles = StyleSheet.create({
   },
   filterChipTextActive: {
     color: colors.white,
+  },
+  boardPage: {
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+  boardHeader: {
+    paddingHorizontal: spacing.lg,
   },
   cardWrap: {
     marginBottom: spacing.md,

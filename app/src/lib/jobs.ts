@@ -10,7 +10,7 @@
  */
 
 import { type Customer, type Job } from '@/lib/mockData';
-import { type Stage } from '@/lib/stages';
+import { statusForStage, type Stage } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
@@ -328,6 +328,45 @@ export async function updateJob(jobId: string, fields: JobEditableFields): Promi
     return { ok: false, message: 'Could not save the job.' };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not save the job.' };
+  }
+}
+
+/**
+ * Move a job to a different stage, without touching anything else.
+ *
+ * The full `updateJob` needs every editable field, which the web job board
+ * doesn't have to hand — it only knows the card it just moved. This writes the
+ * three columns a stage change actually implies: `stage`, the legacy `status`
+ * the dcsolarkc.com ops console still reads, and `completed_on` (stamped when
+ * a job lands on Complete, cleared when it leaves).
+ */
+export async function updateJobStage(jobId: string, stage: Stage): Promise<SaveJobResult> {
+  const payload: Record<string, unknown> = {
+    stage,
+    status: statusForStage(stage),
+    completed_on: stage === 'Complete' ? new Date().toISOString().slice(0, 10) : null,
+  };
+  try {
+    const { error } = await supabase
+      .from('jobs')
+      .update(payload)
+      .eq('company', COMPANY)
+      .eq('id', jobId);
+    if (!error) return { ok: true };
+    // Pre-migration databases may lack completed_on; retry without it rather
+    // than failing the move outright.
+    if (isMissingColumnError(error, 'completed_on')) {
+      const { error: retry } = await supabase
+        .from('jobs')
+        .update({ stage, status: statusForStage(stage) })
+        .eq('company', COMPANY)
+        .eq('id', jobId);
+      if (!retry) return { ok: true, warning: COMPLETED_ON_MIGRATION_WARNING };
+      return { ok: false, message: retry.message };
+    }
+    return { ok: false, message: error.message };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not move the job.' };
   }
 }
 

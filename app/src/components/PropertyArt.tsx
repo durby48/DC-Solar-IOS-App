@@ -189,12 +189,18 @@ export function PropertyArt({
   seed,
   imageUrl,
   radius,
+  scrim = 0.62,
 }: {
   /** Stable per-job seed — pass the job id. */
   seed: string;
   /** Cartoonified photo of the real property, once one exists. */
   imageUrl?: string | null;
   radius: number;
+  /**
+   * Whiteness over the art, 0–1. The default suits a full-width phone card;
+   * the web board passes more because its type is smaller and denser.
+   */
+  scrim?: number;
 }) {
   return (
     <View
@@ -212,7 +218,7 @@ export function PropertyArt({
         <DrawnScene seed={seed} />
       )}
       {/* Readability scrim — the card text sits on top of this. */}
-      <View style={styles.scrim} />
+      <View style={[styles.scrim, { backgroundColor: `rgba(255,255,255,${scrim})` }]} />
       {/* Slightly denser band behind the top chip row. */}
       <View style={styles.topScrim} />
     </View>

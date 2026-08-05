@@ -132,6 +132,11 @@ All 6 employees have Supabase auth logins; shared temp password `DCSolarKC2026` 
   - WebP is a poor codec for this content — 7.1 MB buys 8 s at 720p/12 fps, where the original MP4 is 2.55 MB for 10 s at 720p/**24** fps. If a native build is ever being spent anyway, switching to `expo-video` with the raw MP4 would be both better looking AND a smaller download.
   - The earlier code-drawn particle grid (`components/SolarFlow.tsx`) was **deleted** — the video is the particle grid now. It's in git history if ever wanted.
 
+- **WEB-ONLY job board (2026-08-05):** app.dcsolarkc.com renders the Pipeline as a stage-column board (`components/PipelineBoard.tsx`) — one column per stage in `STAGES` order, Pending Estimate far left through Complete far right, each with a live count and (for admins) the column's invoiced total. **iOS is deliberately unchanged** and must stay that way: `(tabs)/pipeline.tsx` gates on `Platform.OS === 'web' && width >= 900`, so the phone keeps its two-page swipe cards and a narrow browser window falls back to the same list.
+  - Admins move a job between stages with the ‹ › buttons on a card, which call the new `lib/jobs.ts::updateJobStage` — it writes ONLY stage/status/completed_on, unlike `updateJob` which needs every editable field. Drag-and-drop was skipped on purpose: doing it properly across RN-Web and touch is a lot of fragile surface for the same outcome.
+  - `PropertyArt` now takes an optional `scrim` (default 0.62, unchanged for the phone); the board passes 0.8 because its type is smaller and denser.
+  - **Verifying web-only screens locally:** the pipeline sits behind auth, so build with `npx expo export --platform web` and serve `dist` with a clean-URL rewrite (`/pipeline` → `pipeline.html`) or expo-router 404s — plain `python3 -m http.server` is not enough. A throwaway route under `src/app/` rendering the component against `MOCK_JOBS` is the quickest way to eyeball a gated screen; delete it before committing.
+
 ## Notifications (added 2026-07-24 evening)
 
 - **Local job reminders** (shipped): `lib/notifications.ts` schedules on-device notifications 24h and 1h before each job_schedule_dates start (next 14 days, default 8:00 AM when start_time is null). Re-synced on every Today-screen load; deduped via data.type tag. No server needed.
