@@ -362,6 +362,8 @@ export default function PipelineScreen() {
             nextDates={nextDates}
             money={money}
             artUrls={artUrls}
+            labor={labor}
+            model={model}
             isAdmin={role?.isAdmin ?? false}
             onChanged={load}
           />
