@@ -87,8 +87,18 @@ function OverviewCard({ data }: { data: FinancialsData }) {
 function PipelineTotalsCard({ totals }: { totals: CompanyTotals }) {
   const router = useRouter();
   const pnl = totals.avgProfitPct;
-  const tiles: { label: string; amount: number; view: string }[] = [
-    { label: 'Estimates', amount: totals.estimates, view: 'estimates' },
+  const tiles: { label: string; amount: number; view: string; note?: string }[] = [
+    {
+      label: 'Estimates',
+      amount: totals.estimates,
+      view: 'estimates',
+      // Spelled out because otherwise deleting a superseded estimate looks
+      // like a broken total: only each job's NEWEST estimate is counted.
+      note:
+        totals.estimateCount > totals.estimateJobs
+          ? `newest of ${totals.estimateCount} on ${totals.estimateJobs} jobs`
+          : `${totals.estimateCount} on file`,
+    },
     { label: 'Contracted', amount: totals.contracted, view: 'contracted' },
     { label: 'Invoiced', amount: totals.invoiced, view: 'invoices' },
     { label: 'Paid', amount: totals.paid, view: 'paid' },
@@ -108,6 +118,7 @@ function PipelineTotalsCard({ totals }: { totals: CompanyTotals }) {
             <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
               {formatRounded(tile.amount)}
             </Text>
+            {tile.note ? <Text style={styles.tileNote}>{tile.note}</Text> : null}
           </Pressable>
         ))}
       </View>
@@ -946,6 +957,11 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.tan,
+  },
+  tileNote: {
+    color: colors.inkSoft,
+    fontSize: 10,
+    fontWeight: '700',
   },
   profitSublabel: {
     color: colors.inkSoft,

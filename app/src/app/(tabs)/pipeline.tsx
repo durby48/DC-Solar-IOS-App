@@ -222,6 +222,11 @@ function PipelineCard({
                   </View>
                 ))}
               </View>
+              {money.estimateCount > 1 ? (
+                <Text style={styles.estimateNote}>
+                  {`Est is the newest of ${money.estimateCount} estimates`}
+                </Text>
+              ) : null}
               <View style={styles.profitRowNew}>
                 <Text style={styles.statLabel}>Profit</Text>
                 <Text
@@ -596,6 +601,11 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
+  },
+  estimateNote: {
+    color: colors.inkSoft,
+    fontSize: 10,
+    fontWeight: '700',
   },
   forecastNote: {
     color: colors.inkSoft,

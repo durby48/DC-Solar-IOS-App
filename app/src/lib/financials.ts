@@ -18,6 +18,8 @@ export interface LedgerEntry {
   counterparty: string | null;
   description: string | null;
   occurred_on: string | null; // YYYY-MM-DD
+  /** Tie-breaker for same-day estimate revisions (see lib/pipeline.ts). */
+  created_at?: string | null;
   job_id: string | null;
   document_number: string | null;
   document_path: string | null;
@@ -62,7 +64,7 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
     const { data, error } = await supabase
       .from('finance_entries')
       .select(
-        'id, type, amount, counterparty, description, occurred_on, job_id, document_number, document_path',
+        'id, type, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path',
       )
       .eq('company', COMPANY);
     if (error || !data) return null;

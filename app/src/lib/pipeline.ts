@@ -24,6 +24,12 @@ export interface NextDate {
 export interface JobMoney {
   /** Most recent estimate amount, or null when there is none. */
   estimate: number | null;
+  /**
+   * How many estimates exist on this job. `estimate` shows only the newest,
+   * so anything above 1 means older revisions are deliberately not counted —
+   * the UI says so, because otherwise deleting an old one looks like a bug.
+   */
+  estimateCount: number;
   invoiced: number;
   paid: number;
   /** Job-tagged expense entries — needed for the per-card profit %. */
@@ -110,6 +116,25 @@ export interface FinanceRow {
   type: string;
   amount: unknown;
   occurred_on: string | null;
+  /** Tie-breaker when two estimates share an occurred_on. */
+  created_at?: string | null;
+}
+
+/**
+ * Is estimate `a` newer than `b`?
+ *
+ * Estimates are compared by `occurred_on` and, when those tie, by
+ * `created_at`. Without the second key the winner was simply whichever row
+ * the database happened to return last — and nothing orders that query — so
+ * revising an estimate the same afternoon could flip the company total
+ * between two refreshes with no data change at all. (Found 2026-08-06.)
+ */
+function isNewerEstimate(
+  a: { when: string; created: string },
+  b: { when: string; created: string },
+): boolean {
+  if (a.when !== b.when) return a.when > b.when;
+  return a.created >= b.created;
 }
 
 /**
@@ -122,7 +147,7 @@ export async function fetchFinanceEntries(): Promise<FinanceRow[] | null> {
   try {
     const { data, error } = await supabase
       .from('finance_entries')
-      .select('job_id, type, amount, occurred_on')
+      .select('job_id, type, amount, occurred_on, created_at')
       .eq('company', COMPANY);
     if (error || !data) return null;
     return data as FinanceRow[];
@@ -138,18 +163,23 @@ export async function fetchFinanceEntries(): Promise<FinanceRow[] | null> {
  */
 export function moneyByJobFromEntries(rows: FinanceRow[]): Map<string, JobMoney> {
   const map = new Map<string, JobMoney>();
-  const estimateDates = new Map<string, string>();
+  const estimateStamps = new Map<string, { when: string; created: string }>();
   for (const row of rows) {
     if (!row.job_id) continue;
-    const entry = map.get(row.job_id) ?? { estimate: null, invoiced: 0, paid: 0, expenses: 0 };
+    const entry = map.get(row.job_id) ??
+      { estimate: null, estimateCount: 0, invoiced: 0, paid: 0, expenses: 0 };
     const amount = num(row.amount);
     switch (row.type) {
       case 'estimate': {
-        const when = row.occurred_on ?? '';
-        const prev = estimateDates.get(row.job_id);
-        if (entry.estimate === null || prev === undefined || when >= prev) {
+        entry.estimateCount += 1;
+        const stamp = {
+          when: row.occurred_on ?? '',
+          created: String(row.created_at ?? ''),
+        };
+        const prev = estimateStamps.get(row.job_id);
+        if (entry.estimate === null || !prev || isNewerEstimate(stamp, prev)) {
           entry.estimate = amount;
-          estimateDates.set(row.job_id, when);
+          estimateStamps.set(row.job_id, stamp);
         }
         break;
       }
@@ -184,6 +214,10 @@ export const CONTRACTED_STAGES: readonly Stage[] = [
 export interface CompanyTotals {
   /** Sum of each job's current (most recent) estimate + null-job estimates. */
   estimates: number;
+  /** How many estimate rows exist in total, newest-per-job or not. */
+  estimateCount: number;
+  /** How many jobs contribute an estimate to the figure above. */
+  estimateJobs: number;
   /** Contract values (invoice entries) of jobs contracted but not yet invoiced. */
   contracted: number;
   /** Contract values (invoice entries) of Pending Payment jobs only. */
@@ -227,7 +261,8 @@ export async function fetchCompanyTotals(
     // Estimates: current (latest by occurred_on) per job; null-job estimate
     // entries each count individually. Invoices, payments, and expenses are
     // also accumulated per job so stage buckets and per-job profit work.
-    const latestByJob = new Map<string, { amount: number; when: string }>();
+    const latestByJob = new Map<string, { amount: number; when: string; created: string }>();
+    let estimateCount = 0;
     let nullJobEstimates = 0;
     let paid = 0;
     const invoicedByJob = new Map<string, number>();
@@ -238,15 +273,21 @@ export async function fetchCompanyTotals(
     for (const row of rows) {
       const amount = num(row.amount);
       switch (row.type) {
-        case 'estimate':
+        case 'estimate': {
+          estimateCount += 1;
           if (row.job_id) {
-            const when = row.occurred_on ?? '';
+            const stamp = {
+              amount,
+              when: row.occurred_on ?? '',
+              created: String(row.created_at ?? ''),
+            };
             const prev = latestByJob.get(row.job_id);
-            if (!prev || when >= prev.when) latestByJob.set(row.job_id, { amount, when });
+            if (!prev || isNewerEstimate(stamp, prev)) latestByJob.set(row.job_id, stamp);
           } else {
             nullJobEstimates += amount;
           }
           break;
+        }
         case 'invoice':
           if (row.job_id) bump(invoicedByJob, row.job_id, amount);
           break;
@@ -290,7 +331,15 @@ export async function fetchCompanyTotals(
     }
     const avgProfitPct = pctCount > 0 ? pctSum / pctCount : null;
 
-    return { estimates, contracted, invoiced, paid, avgProfitPct };
+    return {
+      estimates,
+      estimateCount,
+      estimateJobs: latestByJob.size,
+      contracted,
+      invoiced,
+      paid,
+      avgProfitPct,
+    };
   } catch {
     return null;
   }
