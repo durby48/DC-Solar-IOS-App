@@ -52,6 +52,7 @@ export default function CustomerScreen() {
         router.replace('/');
         return;
       }
+      // 'unknown' (offline) stays put and just shows an empty portal.
       setEmail(info.email);
       setName(info.fullName);
       fetchCustomerPortal().then((portal) => {

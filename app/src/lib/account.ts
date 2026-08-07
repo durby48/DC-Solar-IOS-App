@@ -13,7 +13,13 @@
 
 import { supabase } from '@/lib/supabase';
 
-export type AccountKind = 'employee' | 'customer' | 'none';
+/**
+ * `unknown` = there IS a session but we couldn't classify it (offline, or the
+ * lookup failed). Distinct from `none` (definitely signed out) because the
+ * crew work in dead zones — treating a failed lookup as "signed out" would
+ * throw them back to the login screen holding a perfectly valid session.
+ */
+export type AccountKind = 'employee' | 'customer' | 'none' | 'unknown';
 
 export interface AccountInfo {
   kind: AccountKind;
@@ -33,11 +39,13 @@ export async function getAccountInfo(): Promise<AccountInfo> {
     const email = user?.email ?? null;
     if (!email) return { kind: 'none', email: null, fullName: null };
 
-    const { data: staff } = await supabase
+    const { data: staff, error: staffErr } = await supabase
       .from('employees')
       .select('display_name')
       .eq('email', email)
       .maybeSingle();
+    // A real failure (no network) must not read as "not staff".
+    if (staffErr) return { kind: 'unknown', email, fullName: null };
     if (staff) {
       return {
         kind: 'employee',
@@ -46,18 +54,21 @@ export async function getAccountInfo(): Promise<AccountInfo> {
       };
     }
 
-    const { data: customer } = await supabase
+    const { data: customer, error: custErr } = await supabase
       .from('customer_accounts')
       .select('full_name')
       .eq('user_id', user!.id)
       .maybeSingle();
+    if (custErr) return { kind: 'unknown', email, fullName: null };
     return {
       kind: customer ? 'customer' : 'none',
       email,
       fullName: (customer as { full_name: string | null } | null)?.full_name ?? null,
     };
   } catch {
-    return { kind: 'none', email: null, fullName: null };
+    // Threw before we could tell — assume a session may exist rather than
+    // signing someone out on a flaky connection.
+    return { kind: 'unknown', email: null, fullName: null };
   }
 }
 

@@ -24,9 +24,16 @@ function useStaffGate() {
     let cancelled = false;
     getAccountInfo().then((account) => {
       if (cancelled) return;
-      if (account.kind === 'employee') setState('staff');
-      else if (account.kind === 'customer') router.replace('/customer' as never);
-      else router.replace('/');
+      if (account.kind === 'employee' || account.kind === 'unknown') {
+        // 'unknown' = signed in but the role lookup failed (usually no signal).
+        // Let them through: RLS decides what actually loads, and bouncing a
+        // crew member to the login screen mid-job would be far worse.
+        setState('staff');
+      } else if (account.kind === 'customer') {
+        router.replace('/customer' as never);
+      } else {
+        router.replace('/');
+      }
     });
     return () => {
       cancelled = true;
