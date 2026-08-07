@@ -321,6 +321,29 @@ export default function FinancialsScreen() {
     return total;
   }, [data, companyJobId]);
 
+  /**
+   * Capital the owners put into the business. Not revenue and not a cost, so
+   * it is in none of the figures above — but it is real money that arrived,
+   * and it would be worse to leave it invisible than to show it plainly.
+   */
+  const capitalInvested = useMemo(() => {
+    if (!data) return { total: 0, byPerson: [] as { who: string; amount: number }[] };
+    const byPerson = new Map<string, number>();
+    let total = 0;
+    for (const entry of data.allEntries) {
+      if (entry.type !== 'investment') continue;
+      total += entry.amount;
+      const who = entry.counterparty?.trim() || 'Unattributed';
+      byPerson.set(who, (byPerson.get(who) ?? 0) + entry.amount);
+    }
+    return {
+      total,
+      byPerson: Array.from(byPerson.entries())
+        .map(([who, amount]) => ({ who, amount }))
+        .sort((a, b) => b.amount - a.amount),
+    };
+  }, [data]);
+
   // Totals across every PROJECT (top row of the P&L sheet). Overhead excluded.
   const pnlTotals = useMemo(() => {
     const t = { revenue: 0, expenses: 0, hours: 0, labor: 0, profit: 0 };
@@ -659,6 +682,25 @@ export default function FinancialsScreen() {
                       <Text style={styles.pnlDetail}>
                         Not charged to any job — these are company costs, kept out
                         of the per-job figures below.
+                      </Text>
+                    </View>
+                  ) : null}
+                  {capitalInvested.total > 0 ? (
+                    <View style={[styles.pnlRow, styles.capitalRow]}>
+                      <View style={styles.pnlTopRow}>
+                        <Text style={styles.pnlTotalLabel}>Capital invested</Text>
+                        <Text style={[styles.pnlPct, styles.netPositive]}>
+                          {`+${formatRounded(capitalInvested.total)}`}
+                        </Text>
+                      </View>
+                      <Text style={styles.pnlDetail} numberOfLines={2}>
+                        {capitalInvested.byPerson
+                          .map((p) => `${p.who} ${formatRounded(p.amount)}`)
+                          .join(' · ')}
+                      </Text>
+                      <Text style={styles.pnlDetail}>
+                        Money put into the business. Not revenue and not a cost —
+                        it is in none of the figures below.
                       </Text>
                     </View>
                   ) : null}
@@ -1181,6 +1223,10 @@ const styles = StyleSheet.create({
   // them — it is a cost of running the business, not of running a job.
   overheadRow: {
     backgroundColor: colors.skySoft,
+  },
+  // Capital in, distinct from both the per-job totals and overhead out.
+  capitalRow: {
+    backgroundColor: colors.tealSoft,
   },
   pnlTotalLabel: {
     color: colors.ink,

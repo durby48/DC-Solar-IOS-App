@@ -38,7 +38,8 @@ export interface LineItem {
 /** A finance_entries row (subset used by the app). */
 export interface FinanceEntry {
   id: string;
-  type: 'invoice' | 'estimate' | 'payment' | 'expense';
+  /** See FinanceType in lib/financials.ts — 'investment' is capital, not income. */
+  type: 'invoice' | 'estimate' | 'payment' | 'expense' | 'investment';
   amount: number;
   counterparty: string | null;
   description: string | null;
@@ -54,7 +55,10 @@ export type FinanceEntriesResult =
   | { status: 'unavailable' };
 
 /**
- * Fetch a job's invoice/estimate/payment/expense entries, newest first.
+ * Fetch a job's invoice/estimate/payment/expense/investment entries, newest
+ * first. 'investment' is included because owner capital is tagged to the
+ * Company container job — leaving it out of this filter would make $4,200 of
+ * real money invisible on the one screen you would look for it on.
  * Returns `unavailable` on any error (non-admin RLS / offline) so callers
  * can degrade to a friendly note.
  */
@@ -67,7 +71,7 @@ export async function fetchJobFinanceEntries(jobId: string): Promise<FinanceEntr
       )
       .eq('company', COMPANY)
       .eq('job_id', jobId)
-      .in('type', ['invoice', 'estimate', 'payment', 'expense'])
+      .in('type', ['invoice', 'estimate', 'payment', 'expense', 'investment'])
       .order('occurred_on', { ascending: false });
     if (error) return { status: 'unavailable' };
     const entries = ((data ?? []) as Record<string, unknown>[]).map((row) => ({

@@ -10,10 +10,27 @@ import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
 
+/**
+ * Categories a finance_entries row can carry.
+ *
+ * 'investment' is capital the owners put into the business. It is deliberately
+ * neither revenue nor a cost: counting it as a payment would inflate every
+ * margin, and counting it as an expense (which is how $4,200 of it was
+ * originally recorded) overstates overhead and reverses the sign on money that
+ * actually came in. Every rollup below therefore ignores it, and it is reported
+ * on its own.
+ */
+export type FinanceType =
+  | 'invoice'
+  | 'estimate'
+  | 'payment'
+  | 'expense'
+  | 'investment';
+
 /** One finance_entries row as shown on the Financials tab. */
 export interface LedgerEntry {
   id: string;
-  type: 'invoice' | 'estimate' | 'payment' | 'expense';
+  type: FinanceType;
   amount: number;
   counterparty: string | null;
   description: string | null;

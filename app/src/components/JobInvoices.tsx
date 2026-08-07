@@ -38,12 +38,16 @@ function entryIcon(entry: FinanceEntry): keyof typeof Ionicons.glyphMap {
   if (entry.type === 'invoice') return 'receipt';
   if (entry.type === 'estimate') return 'calculator';
   if (entry.type === 'payment') return 'cash';
+  if (entry.type === 'investment') return 'trending-up';
   return 'pricetag';
 }
 
 /** Money in is green, money out is coral, paperwork stays ink. */
 function amountStyle(entry: FinanceEntry) {
-  if (entry.type === 'payment') return { color: colors.mintDeep };
+  // Investment is money in, same as a payment — it just isn't revenue.
+  if (entry.type === 'payment' || entry.type === 'investment') {
+    return { color: colors.mintDeep };
+  }
   if (entry.type === 'expense') return { color: colors.coralDeep };
   return undefined;
 }
@@ -52,6 +56,7 @@ function entryTitle(entry: FinanceEntry): string {
   if (entry.type === 'invoice') return entry.document_number ?? 'Invoice';
   if (entry.type === 'estimate') return entry.document_number ?? 'Estimate';
   if (entry.type === 'payment') return 'Payment';
+  if (entry.type === 'investment') return entry.description ?? 'Investment';
   return entry.description ?? 'Expense';
 }
 
@@ -111,8 +116,14 @@ export function JobInvoices({
     load();
   }, [load]);
 
+  // Investment sits with the money-in rows rather than the expenses below —
+  // it is capital the owners put in, not a cost of the job.
   const listRows = entries.filter(
-    (e) => e.type === 'invoice' || e.type === 'estimate' || e.type === 'payment',
+    (e) =>
+      e.type === 'invoice' ||
+      e.type === 'estimate' ||
+      e.type === 'payment' ||
+      e.type === 'investment',
   );
   const expenses = entries.filter((e) => e.type === 'expense');
   const invoiced = entries
