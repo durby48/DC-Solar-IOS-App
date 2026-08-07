@@ -1,8 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { DefaultTheme, Stack, ThemeProvider, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { Platform, Pressable } from 'react-native';
+import { Platform, Pressable, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ConnectionBanner } from '@/components/ConnectionBanner';
 import { colors } from '@/constants/theme';
 import { configureNotificationHandler } from '@/lib/notifications';
 
@@ -40,6 +42,11 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={appTheme}>
       <StatusBar style="dark" />
+      {/* Floats above every screen — login, tabs, job detail — because losing
+          signal matters wherever you happen to be standing. */}
+      <SafeAreaView edges={['top']} style={styles.bannerLayer} pointerEvents="box-none">
+        <ConnectionBanner />
+      </SafeAreaView>
       <Stack
         screenOptions={{
           headerStyle: { backgroundColor: colors.cream },
@@ -65,3 +72,15 @@ export default function RootLayout() {
     </ThemeProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  // Sits above the navigator without capturing touches, so the banner never
+  // blocks the screen underneath it.
+  bannerLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+  },
+});

@@ -165,6 +165,8 @@ All 6 employees have Supabase auth logins; shared temp password `DCSolarKC2026` 
 - 12 of 16 customers have an email today; the other 4 need one before they can be invited (the function says so rather than failing silently).
 - Customers are **web-first** by intent, but nothing blocks iOS — the same screens work once the app ships.
 
+- **Offline / weak-signal banner (2026-08-06):** `lib/connection.ts` + `components/ConnectionBanner.tsx`, mounted in the ROOT layout so it floats over every screen. Three states — online / slow (>3.5 s) / offline — decided by polling `/auth/v1/health` (20 s when healthy, 6 s when not, plus an immediate re-check when the app foregrounds and on the web `online`/`offline` events). **No netinfo dependency on purpose**: that's native, and it would have cost a full App Store build instead of an OTA. It also measures the thing that matters — can we reach OUR server — since a phone can show four bars and still not reach Supabase. The copy names what actually survives: clock in/out is saved on the phone and syncs later, everything else does not. It's a banner, not a modal, because an installer up a ladder shouldn't have to dismiss a dialog to read an address.
+
 ## Notifications (added 2026-07-24 evening)
 
 - **Local job reminders** (shipped): `lib/notifications.ts` schedules on-device notifications 24h and 1h before each job_schedule_dates start (next 14 days, default 8:00 AM when start_time is null). Re-synced on every Today-screen load; deduped via data.type tag. No server needed.
