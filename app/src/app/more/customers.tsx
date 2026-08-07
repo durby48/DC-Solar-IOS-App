@@ -18,6 +18,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
+import { fetchEnrolledCustomerIds, inviteCustomer } from '@/lib/account';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import {
   addCustomer,
@@ -130,6 +131,9 @@ export default function CustomersScreen() {
   const [busyDocId, setBusyDocId] = useState<string | null>(null);
   const [confirmDeleteDocId, setConfirmDeleteDocId] = useState<string | null>(null);
   const [photoBusyId, setPhotoBusyId] = useState<string | null>(null);
+  // Which customers already have a portal login, so the button reads right.
+  const [enrolled, setEnrolled] = useState<Set<string>>(new Set());
+  const [inviteBusyId, setInviteBusyId] = useState<string | null>(null);
 
   const loadCustomers = useCallback(async () => {
     const result = await fetchCustomers();
@@ -179,6 +183,33 @@ export default function CustomersScreen() {
     [loadCustomers],
   );
 
+  const loadEnrolled = useCallback(async () => {
+    setEnrolled(await fetchEnrolledCustomerIds());
+  }, []);
+
+  const sendInvite = useCallback(
+    async (customer: CustomerRecord) => {
+      setStatus(null);
+      setInviteBusyId(customer.id);
+      const result = await inviteCustomer(customer.id);
+      setInviteBusyId(null);
+      if (result.ok) {
+        await loadEnrolled();
+        notify(
+          setStatus,
+          'success',
+          result.alreadyInvited ? 'Already invited' : 'Invite sent',
+          result.alreadyInvited
+            ? `${customer.name} already has a portal login.`
+            : `Emailed ${result.email} an invitation to the customer portal.`,
+        );
+      } else {
+        notify(setStatus, 'error', 'Invite failed', result.message);
+      }
+    },
+    [loadEnrolled],
+  );
+
   const loadDocs = useCallback(async () => {
     setDocsByCustomer(await fetchCustomerDocuments());
   }, []);
@@ -186,6 +217,7 @@ export default function CustomersScreen() {
   useEffect(() => {
     if (auth.state !== 'in') return;
     loadCustomers();
+    loadEnrolled();
   }, [auth.state, loadCustomers]);
 
   useEffect(() => {
@@ -604,6 +636,29 @@ export default function CustomersScreen() {
                       </Pressable>
                       <Text style={styles.customerName}>{customer.name}</Text>
                       {isAdmin ? (
+                        <Pressable
+                          onPress={() => void sendInvite(customer)}
+                          disabled={inviteBusyId === customer.id || enrolled.has(customer.id)}
+                          hitSlop={6}
+                          style={({ pressed }) => [
+                            styles.inviteChip,
+                            enrolled.has(customer.id) && styles.inviteChipDone,
+                            pressed && styles.rowPressed,
+                          ]}>
+                          {inviteBusyId === customer.id ? (
+                            <ActivityIndicator size="small" color={colors.ocean} />
+                          ) : (
+                            <Text
+                              style={[
+                                styles.inviteChipText,
+                                enrolled.has(customer.id) && styles.inviteChipTextDone,
+                              ]}>
+                              {enrolled.has(customer.id) ? 'In portal' : 'Invite'}
+                            </Text>
+                          )}
+                        </Pressable>
+                      ) : null}
+                      {isAdmin ? (
                         <Ionicons
                           name={expanded ? 'chevron-up' : 'pencil'}
                           size={16}
@@ -788,6 +843,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     padding: 0,
   },
+  inviteChip: {
+    backgroundColor: colors.skySoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 3,
+    minWidth: 58,
+    alignItems: 'center',
+  },
+  inviteChipDone: { backgroundColor: colors.mintSoft },
+  inviteChipText: { color: colors.ocean, fontSize: 11, fontWeight: '800' },
+  inviteChipTextDone: { color: colors.mintDeep },
   customerCard: {
     backgroundColor: colors.white,
     borderRadius: radii.md,

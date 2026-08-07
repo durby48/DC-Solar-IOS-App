@@ -14,7 +14,7 @@ Employee field-ops app for DC Solar LLC (solar installation, Kansas City). One E
 
 - `app/` — the Expo app (SDK 57, TypeScript, expo-router, src/ layout). All app work happens here.
 - `OVERHAUL.md` — the 2026-08-04 front-end overhaul: what changed, what's still blocked, and the two architecture corrections behind the artwork feature (Claude can't generate images; the generator runs as an edge function, not on the Windows PC).
-- `supabase/migrations/` — 24 SQL files. Status: **ALL 24 APPLIED — 1–18 audited against the live DB 2026-08-04 via the Management API (every table, column, function, trigger and policy present); #19 (job_artwork) and #20 (job metrics + customer photos) and #21 (critter guard flag) applied and verified.** Migrations no longer need Devon to paste them: sessions with the PAT run them via the Management API `database/query` endpoint (still write the file to this folder for the record).
+- `supabase/migrations/` — 25 SQL files. Status: **ALL 25 APPLIED — 1–18 audited against the live DB 2026-08-04 via the Management API (every table, column, function, trigger and policy present); #19 (job_artwork) and #20 (job metrics + customer photos) and #21 (critter guard flag) applied and verified.** Migrations no longer need Devon to paste them: sessions with the PAT run them via the Management API `database/query` endpoint (still write the file to this folder for the record).
 - `PLAN.md` — original build plan + phases; still the roadmap.
 - `HANDOFF.md` — this file. Keep it updated at the end of every session.
 - NOT in git: `app/.env` (recreate — see below), `data/` (local business-data exports; the DB is the source of truth), `website/` (separate repo: github.com/durby48/dcsolarkc).
@@ -155,6 +155,15 @@ All 6 employees have Supabase auth logins; shared temp password `DCSolarKC2026` 
 - **Password policy (Supabase Pro, enabled 2026-08-06):** min 10, requires upper + lower + digit, **leaked-password (HIBP) check ON**, email OTP expiry cut 60 min → 10 min. HIBP needs Pro; the other three work on Free.
 - **Session tokens are NOT httpOnly** — `localStorage` on web, `AsyncStorage` on native. That's the Supabase default and fine today, but it means XSS equals account takeover: be careful adding third-party scripts to the web app, especially once a public marketing portal shares the origin.
 - **Still open:** TOTP 2FA is enabled project-side but has no enrolment UI; Google OAuth is available but disabled; rate limits are per-IP only with no per-account lockout.
+
+## Customer portal (2026-08-06)
+
+- **Invite → link → read.** Devon taps **Invite** on a customer in More → Customers. That calls the `invite-customer` edge function (admin-only, service role), which uses Supabase's admin invite and stamps `customer_id` into the new user's metadata. The `handle_new_auth_user` trigger reads it, so the account arrives **already linked** to the CRM record. Linking at invite time is deliberate: a customer never types who they are, so nobody can claim someone else's projects by guessing an email. The button reads "In portal" once a login exists.
+- **What a customer may see is decided in SQL, not the UI:** `my_projects()`, `my_documents()`, `my_balance()` — all SECURITY DEFINER, granted to `authenticated` only, revoked from `anon`. Customers have **no direct table access** to `jobs` or `finance_entries` at all; the functions choose the rows AND the columns, so a customer can't widen the query.
+- **Expenses are excluded server-side** (`type in ('invoice','estimate','payment')`). That is our cost base — a homeowner must never see what we paid for their materials. Do not "fix" this by filtering in the client.
+- Verified by standing up a throwaway linked login in a rolled-back transaction: it saw **10 of 27** jobs, **21 of 110** finance rows and **0 of 57** expenses.
+- 12 of 16 customers have an email today; the other 4 need one before they can be invited (the function says so rather than failing silently).
+- Customers are **web-first** by intent, but nothing blocks iOS — the same screens work once the app ships.
 
 ## Notifications (added 2026-07-24 evening)
 

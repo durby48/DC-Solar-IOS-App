@@ -5,7 +5,13 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
-import { deleteOwnAccount, getAccountInfo } from '@/lib/account';
+import {
+  deleteOwnAccount,
+  fetchCustomerPortal,
+  getAccountInfo,
+  type CustomerDocument,
+  type CustomerProject,
+} from '@/lib/account';
 import { clearRoleCache } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
@@ -22,6 +28,12 @@ export default function CustomerScreen() {
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
+  const [projects, setProjects] = useState<CustomerProject[]>([]);
+  const [documents, setDocuments] = useState<CustomerDocument[]>([]);
+  const [balance, setBalance] = useState<{ invoiced: number; paid: number; balance: number } | null>(
+    null,
+  );
+  const [loaded, setLoaded] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +54,16 @@ export default function CustomerScreen() {
       }
       setEmail(info.email);
       setName(info.fullName);
+      fetchCustomerPortal().then((portal) => {
+        if (cancelled || !portal) {
+          setLoaded(true);
+          return;
+        }
+        setProjects(portal.projects);
+        setDocuments(portal.documents);
+        setBalance(portal.balance);
+        setLoaded(true);
+      });
     });
     return () => {
       cancelled = true;
@@ -73,11 +95,78 @@ export default function CustomerScreen() {
         <View style={styles.badge}>
           <Ionicons name="sunny" size={30} color={colors.sun} />
         </View>
-        <Text style={styles.title}>You&apos;re signed up{name ? `, ${name}` : ''}</Text>
-        <Text style={styles.body}>
-          Your DC Solar account is active. The customer portal — your project updates, documents
-          and referrals — isn&apos;t open yet. We&apos;ll email {email ?? 'you'} the moment it is.
-        </Text>
+        <Text style={styles.title}>Welcome{name ? `, ${name}` : ''}</Text>
+
+        {!loaded ? (
+          <ActivityIndicator color={colors.ocean} />
+        ) : projects.length === 0 && documents.length === 0 ? (
+          <Text style={styles.body}>
+            Your DC Solar account is active. Once we start work on your project, your estimates,
+            invoices and payments will appear here.
+          </Text>
+        ) : (
+          <>
+            {balance ? (
+              <View style={styles.balanceRow}>
+                {([
+                  ['Invoiced', balance.invoiced],
+                  ['Paid', balance.paid],
+                  ['Balance', balance.balance],
+                ] as [string, number][]).map(([label, value], i) => (
+                  <View key={label} style={styles.balanceTile}>
+                    <Text style={styles.cardLabel}>{label}</Text>
+                    <Text style={[styles.balanceValue, i === 2 && value > 0 && styles.owing]}>
+                      {`$${Math.round(value).toLocaleString('en-US')}`}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            {projects.length > 0 ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Your projects</Text>
+                {projects.map((p) => (
+                  <View key={p.job_id} style={styles.listRow}>
+                    <View style={styles.listBody}>
+                      <Text style={styles.listTitle} numberOfLines={2}>
+                        {p.name ?? p.job_number ?? 'Project'}
+                      </Text>
+                      {p.address ? (
+                        <Text style={styles.listMeta} numberOfLines={1}>
+                          {p.address}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <Text style={styles.listStage}>{p.stage ?? ''}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            {documents.length > 0 ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Estimates, invoices &amp; payments</Text>
+                {documents.map((d) => (
+                  <View key={d.entry_id} style={styles.listRow}>
+                    <View style={styles.listBody}>
+                      <Text style={styles.listTitle}>
+                        {d.document_number ??
+                          d.type.charAt(0).toUpperCase() + d.type.slice(1)}
+                      </Text>
+                      <Text style={styles.listMeta}>
+                        {[d.job_number, d.occurred_on].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                    <Text style={[styles.listAmount, d.type === 'payment' && styles.paidAmount]}>
+                      {`$${Math.round(d.amount).toLocaleString('en-US')}`}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Signed in as</Text>
@@ -167,6 +256,57 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   cardValue: { color: colors.ink, fontSize: 15, fontWeight: '700' },
+  balanceRow: { flexDirection: 'row', alignSelf: 'stretch', gap: spacing.sm },
+  balanceTile: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    gap: 2,
+    ...shadows.card,
+  },
+  balanceValue: {
+    color: colors.ink,
+    fontSize: 18,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  owing: { color: colors.coralDeep },
+  section: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.white,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    ...shadows.card,
+  },
+  sectionTitle: {
+    color: colors.inkSoft,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    paddingVertical: spacing.sm,
+  },
+  listRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  listBody: { flex: 1, gap: 2 },
+  listTitle: { color: colors.ink, fontSize: 14, fontWeight: '700' },
+  listMeta: { color: colors.inkSoft, fontSize: 12, fontWeight: '600' },
+  listStage: { color: colors.ocean, fontSize: 12, fontWeight: '800' },
+  listAmount: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  paidAmount: { color: colors.mintDeep },
   primary: {
     alignSelf: 'stretch',
     backgroundColor: colors.sun,

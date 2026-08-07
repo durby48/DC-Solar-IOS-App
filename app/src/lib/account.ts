@@ -135,3 +135,122 @@ export async function deleteOwnAccount(): Promise<DeleteAccountResult> {
     };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Customer portal (2026-08-06)
+// ---------------------------------------------------------------------------
+
+export interface CustomerProject {
+  job_id: string;
+  job_number: string | null;
+  name: string | null;
+  address: string | null;
+  stage: string | null;
+  scheduled_for: string | null;
+  completed_on: string | null;
+}
+
+export interface CustomerDocument {
+  entry_id: string;
+  job_id: string;
+  job_number: string | null;
+  type: 'invoice' | 'estimate' | 'payment';
+  amount: number;
+  occurred_on: string | null;
+  status: string | null;
+  document_number: string | null;
+  document_path: string | null;
+}
+
+export interface CustomerBalance {
+  invoiced: number;
+  paid: number;
+  balance: number;
+}
+
+/**
+ * Everything a signed-in customer may see.
+ *
+ * These come from SECURITY DEFINER functions, not table reads: the customer
+ * has no direct access to `jobs` or `finance_entries` at all. The functions
+ * pick the columns AND the rows, so a customer can't widen the query — and
+ * expenses are excluded server-side, not filtered here.
+ */
+export async function fetchCustomerPortal(): Promise<{
+  projects: CustomerProject[];
+  documents: CustomerDocument[];
+  balance: CustomerBalance;
+} | null> {
+  try {
+    const [projects, documents, balance] = await Promise.all([
+      supabase.rpc('my_projects'),
+      supabase.rpc('my_documents'),
+      supabase.rpc('my_balance'),
+    ]);
+    if (projects.error || documents.error || balance.error) return null;
+    const totals = (balance.data as CustomerBalance[] | null)?.[0];
+    return {
+      projects: (projects.data ?? []) as CustomerProject[],
+      documents: (documents.data ?? []) as CustomerDocument[],
+      balance: {
+        invoiced: Number(totals?.invoiced ?? 0),
+        paid: Number(totals?.paid ?? 0),
+        balance: Number(totals?.balance ?? 0),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+export type InviteResult =
+  | { ok: true; alreadyInvited: boolean; email: string }
+  | { ok: false; message: string };
+
+/** Admin: email a customer an invitation to the portal. */
+export async function inviteCustomer(customerId: string): Promise<InviteResult> {
+  try {
+    const { data, error } = await supabase.functions.invoke('invite-customer', {
+      body: { customerId },
+    });
+    if (error) {
+      const context = (error as { context?: unknown }).context;
+      if (context && typeof context === 'object') {
+        try {
+          const body = (await (context as Response).clone().json()) as { error?: string };
+          if (typeof body?.error === 'string') return { ok: false, message: body.error };
+        } catch {
+          // fall through
+        }
+      }
+      return { ok: false, message: error.message ?? 'Could not send the invite.' };
+    }
+    const result = data as { ok?: boolean; alreadyInvited?: boolean; email?: string } | null;
+    if (!result?.ok) return { ok: false, message: 'Could not send the invite.' };
+    return {
+      ok: true,
+      alreadyInvited: Boolean(result.alreadyInvited),
+      email: result.email ?? '',
+    };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not send the invite.' };
+  }
+}
+
+/** Admin: which customers already have a portal login. */
+export async function fetchEnrolledCustomerIds(): Promise<Set<string>> {
+  const ids = new Set<string>();
+  try {
+    const { data, error } = await supabase
+      .from('customer_accounts')
+      .select('customer_id')
+      .not('customer_id', 'is', null);
+    if (error || !data) return ids;
+    for (const row of data as { customer_id: string | null }[]) {
+      if (row.customer_id) ids.add(row.customer_id);
+    }
+  } catch {
+    // empty set — the button just shows "Invite"
+  }
+  return ids;
+}
