@@ -35,7 +35,14 @@ import {
 import { fetchArtworkUrls } from '@/lib/artwork';
 import { fetchForecastModel, forecastJob, type ForecastModel } from '@/lib/forecast';
 import { useRole } from '@/lib/role';
-import { STAGES, stageOrDefault, type Stage } from '@/lib/stages';
+import {
+  COMPANY_LABEL,
+  STAGES,
+  isCompanyJob,
+  labelForJob,
+  stageOrDefault,
+  type Stage,
+} from '@/lib/stages';
 import { formatTimeLabel } from '@/lib/time';
 
 /** Below this the browser window can't show the columns usefully. */
@@ -135,7 +142,7 @@ function PipelineCard({
                 <Text style={styles.chipText}>{job.job_number}</Text>
               </View>
             ) : null}
-            <StatusPill stage={stage} />
+            <StatusPill stage={labelForJob(job)} />
           </View>
           <Text style={styles.name} numberOfLines={2}>
             {job.name}
@@ -268,7 +275,9 @@ export default function PipelineScreen() {
   const [labor, setLabor] = useState<Map<string, JobLaborHours> | null>(null);
   const [model, setModel] = useState<ForecastModel | null>(null);
   const [myHours, setMyHours] = useState<Map<string, number>>(new Map());
-  const [stageFilter, setStageFilter] = useState<Stage | 'All' | 'Active'>('All');
+  const [stageFilter, setStageFilter] = useState<
+    Stage | 'All' | 'Active' | typeof COMPANY_LABEL
+  >('All');
   const [artUrls, setArtUrls] = useState<Map<string, string>>(new Map());
 
   const load = useCallback(async () => {
@@ -318,22 +327,35 @@ export default function PipelineScreen() {
     }
   }, [load]);
 
+  // The Company container is overhead, not a project: it is deliberately kept
+  // out of every stage bucket so it can't inflate a stage count or show up
+  // under "Complete". It has its own chip.
+  const projectJobs = useMemo(() => jobs.filter((job) => !isCompanyJob(job)), [jobs]);
+  const companyJobs = useMemo(() => jobs.filter(isCompanyJob), [jobs]);
+
   const stageCounts = useMemo(() => {
     const counts = new Map<Stage, number>();
-    for (const job of jobs) {
+    for (const job of projectJobs) {
       const stage = jobStage(job);
       counts.set(stage, (counts.get(stage) ?? 0) + 1);
     }
     return counts;
-  }, [jobs]);
+  }, [projectJobs]);
 
   const filteredJobs = useMemo(() => {
     if (stageFilter === 'All') return jobs;
-    if (stageFilter === 'Active') return jobs.filter((job) => jobStage(job) !== 'Complete');
-    return jobs.filter((job) => jobStage(job) === stageFilter);
-  }, [jobs, stageFilter]);
+    if (stageFilter === COMPANY_LABEL) return companyJobs;
+    if (stageFilter === 'Active')
+      return projectJobs.filter((job) => jobStage(job) !== 'Complete');
+    return projectJobs.filter((job) => jobStage(job) === stageFilter);
+  }, [jobs, projectJobs, companyJobs, stageFilter]);
 
-  const filterChips: (Stage | 'All' | 'Active')[] = ['All', 'Active', ...STAGES];
+  const filterChips: (Stage | 'All' | 'Active' | typeof COMPANY_LABEL)[] = [
+    'All',
+    'Active',
+    ...STAGES,
+    ...(companyJobs.length > 0 ? [COMPANY_LABEL] : []),
+  ];
 
   // app.dcsolarkc.com gets a stage-column job board; iOS keeps the phone list,
   // which is the right layout on a phone and is explicitly not to change. A
@@ -408,12 +430,16 @@ export default function PipelineScreen() {
               <View style={styles.filterRow}>
                 {filterChips.map((chip) => {
                   const active = stageFilter === chip;
+                  // "Active" counts projects only — the Company container is
+                  // neither active work nor complete work.
                   const count =
                     chip === 'All'
                       ? jobs.length
-                      : chip === 'Active'
-                        ? jobs.length - (stageCounts.get('Complete') ?? 0)
-                        : (stageCounts.get(chip) ?? 0);
+                      : chip === COMPANY_LABEL
+                        ? companyJobs.length
+                        : chip === 'Active'
+                          ? projectJobs.length - (stageCounts.get('Complete') ?? 0)
+                          : (stageCounts.get(chip) ?? 0);
                   return (
                     <Pressable
                       key={chip}

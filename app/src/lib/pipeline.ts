@@ -9,7 +9,7 @@
 import { fetchJobs } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
 import { MOCK_SCHEDULE_DATES, type Job } from '@/lib/mockData';
-import { stageOrDefault, type Stage } from '@/lib/stages';
+import { isCompanyJob, stageOrDefault, type Stage } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
@@ -250,8 +250,13 @@ export async function fetchCompanyTotals(
     const rows = prefetched ?? (await fetchFinanceEntries());
     if (!rows) return null;
 
+    // The Company container is overhead, not a project: it must never reach the
+    // stage buckets or the profit average. It is skipped today only because it
+    // happens to have no payments — one payment logged against it would quietly
+    // corrupt Avg Profit. Exclude it explicitly instead of relying on that.
     const stageById = new Map<string, Stage>();
     for (const job of jobs) {
+      if (isCompanyJob(job)) continue;
       stageById.set(
         job.id,
         stageOrDefault((job as unknown as { stage?: unknown }).stage, job.status),

@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { StatusPill } from '@/components/StatusPill';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { type Job } from '@/lib/mockData';
-import { stageOrDefault } from '@/lib/stages';
+import { labelForJob } from '@/lib/stages';
 
 export function JobCard({ job, subtitle }: { job: Job; subtitle?: string }) {
   const router = useRouter();
@@ -18,7 +18,7 @@ export function JobCard({ job, subtitle }: { job: Job; subtitle?: string }) {
             <Text style={styles.chipText}>{job.job_number}</Text>
           </View>
         ) : null}
-        <StatusPill stage={stageOrDefault(job.stage, job.status)} />
+        <StatusPill stage={labelForJob(job)} />
       </View>
       {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       <Text style={styles.name}>{job.name}</Text>

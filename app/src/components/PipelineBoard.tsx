@@ -11,7 +11,15 @@ import { forecastJob, type ForecastModel } from '@/lib/forecast';
 import { updateJobStage } from '@/lib/jobs';
 import { type Job } from '@/lib/mockData';
 import { type JobLaborHours, type JobMoney, type NextDate } from '@/lib/pipeline';
-import { STAGES, STAGE_COLORS, stageOrDefault, type Stage } from '@/lib/stages';
+import {
+  COMPANY_LABEL,
+  LABEL_COLORS,
+  STAGES,
+  isCompanyJob,
+  stageOrDefault,
+  type Stage,
+  type StageLabel,
+} from '@/lib/stages';
 import { formatTimeLabel } from '@/lib/time';
 
 /**
@@ -89,6 +97,10 @@ function BoardCard({
   const [face, setFace] = useState<CardFace>('overview');
   const stage = jobStage(job);
   const index = STAGES.indexOf(stage);
+  // The overhead container. It has no pipeline stage to move between, and its
+  // expenses are company costs rather than job costs — so no stage arrows and
+  // no per-job money on the card.
+  const company = isCompanyJob(job);
   const extra = job as unknown as {
     completed_on?: string | null;
     module_count?: number | null;
@@ -153,7 +165,11 @@ function BoardCard({
               </View>
             ) : null}
 
-            {money ? (
+            {company ? (
+              <Text style={styles.cardMoney} numberOfLines={1}>
+                {money ? `Overhead ${formatCurrency(money.expenses)}` : 'Company overhead'}
+              </Text>
+            ) : money ? (
               <Text style={styles.cardMoney} numberOfLines={1}>
                 {`Inv ${formatCurrency(money.invoiced)} · Paid ${formatCurrency(money.paid)}`}
               </Text>
@@ -190,30 +206,49 @@ function BoardCard({
               {job.name}
             </Text>
 
-            <View style={styles.statRow}>
-              <View style={styles.stat}>
-                <Text style={styles.statLabel}>Modules</Text>
-                <Text style={styles.statValue}>{modules ?? '—'}</Text>
-              </View>
-              <View style={styles.stat}>
-                <Text style={styles.statLabel}>Est. hours</Text>
-                <Text style={styles.statValue}>
-                  {forecast ? formatHours(forecast.hours) : '—'}
+            {/* Modules and an hours forecast describe installed work. The
+                overhead container has neither, so it gets the overhead figure
+                alone rather than two dashes and a prompt to set a module
+                count. */}
+            {company ? null : (
+              <>
+                <View style={styles.statRow}>
+                  <View style={styles.stat}>
+                    <Text style={styles.statLabel}>Modules</Text>
+                    <Text style={styles.statValue}>{modules ?? '—'}</Text>
+                  </View>
+                  <View style={styles.stat}>
+                    <Text style={styles.statLabel}>Est. hours</Text>
+                    <Text style={styles.statValue}>
+                      {forecast ? formatHours(forecast.hours) : '—'}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={styles.forecastNote} numberOfLines={2}>
+                  {forecast
+                    ? forecast.low !== null && forecast.high !== null
+                      ? `${formatHours(forecast.low)}–${formatHours(forecast.high)} · from ${forecast.samples} finished ${forecast.basis} jobs`
+                      : `from 1 finished ${forecast.basis} job — treat as rough`
+                    : modules
+                      ? 'No finished jobs to forecast from yet'
+                      : 'Set a module count to forecast'}
                 </Text>
+              </>
+            )}
+
+            {company && money ? (
+              // Overhead is a company cost, not job profit. Show what it is and
+              // nothing that implies a per-job margin.
+              <View style={styles.moneyRow}>
+                <View style={styles.moneyCell}>
+                  <Text style={styles.statLabel}>Overhead</Text>
+                  <Text style={styles.moneyValue} numberOfLines={1}>
+                    {formatCurrency(money.expenses)}
+                  </Text>
+                </View>
               </View>
-            </View>
-
-            <Text style={styles.forecastNote} numberOfLines={2}>
-              {forecast
-                ? forecast.low !== null && forecast.high !== null
-                  ? `${formatHours(forecast.low)}–${formatHours(forecast.high)} · from ${forecast.samples} finished ${forecast.basis} jobs`
-                  : `from 1 finished ${forecast.basis} job — treat as rough`
-                : modules
-                  ? 'No finished jobs to forecast from yet'
-                  : 'Set a module count to forecast'}
-            </Text>
-
-            {money ? (
+            ) : money ? (
               <>
                 <View style={styles.moneyRow}>
                   {(
@@ -278,7 +313,7 @@ function BoardCard({
           </View>
         </Pressable>
 
-        {isAdmin ? (
+        {isAdmin && !company ? (
           <View style={styles.moveRow}>
             {moving ? <ActivityIndicator size="small" color={colors.ocean} /> : null}
             <Pressable
@@ -337,6 +372,13 @@ export function PipelineBoard({
   const [movingId, setMovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Pipeline stages, then a Company column on the far right — only when a
+  // container job actually exists, so the board doesn't grow an empty column
+  // for companies that don't use one.
+  const columns: StageLabel[] = jobs.some(isCompanyJob)
+    ? [...STAGES, COMPANY_LABEL]
+    : [...STAGES];
+
   const move = async (job: Job, direction: -1 | 1) => {
     const current = STAGES.indexOf(jobStage(job));
     const target = STAGES[current + direction];
@@ -353,12 +395,27 @@ export function PipelineBoard({
     <View style={styles.wrap}>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.columns}>
-        {STAGES.map((stage) => {
-          const columnJobs = jobs.filter((job) => jobStage(job) === stage);
+        {columns.map((stage) => {
+          const company = stage === COMPANY_LABEL;
+          // The Company container never belongs to a pipeline column — it is
+          // overhead, not work in progress.
+          const columnJobs = company
+            ? jobs.filter(isCompanyJob)
+            : jobs.filter((job) => !isCompanyJob(job) && jobStage(job) === stage);
+          // Pipeline columns total what's been invoiced; the Company column
+          // totals overhead spent, which is the only number that means anything
+          // there.
           const value = money
-            ? columnJobs.reduce((sum, job) => sum + (money.get(job.id)?.invoiced ?? 0), 0)
+            ? columnJobs.reduce(
+                (sum, job) =>
+                  sum +
+                  (company
+                    ? (money.get(job.id)?.expenses ?? 0)
+                    : (money.get(job.id)?.invoiced ?? 0)),
+                0,
+              )
             : 0;
-          const tone = STAGE_COLORS[stage];
+          const tone = LABEL_COLORS[stage];
           return (
             <View key={stage} style={styles.column}>
               <View style={[styles.columnHeader, { backgroundColor: tone.bg }]}>

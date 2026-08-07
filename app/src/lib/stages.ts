@@ -67,3 +67,50 @@ export function stageOrDefault(
   if (isStage(stage)) return stage;
   return status === 'completed' ? 'Complete' : 'Pending Estimate';
 }
+
+/**
+ * "Company" — the container job that holds overhead (DC-26026, DC Solar
+ * Company). It is NOT a pipeline stage and deliberately not in STAGES.
+ *
+ * The label is derived from `jobs.is_internal`, which the app already treats as
+ * the one way to say "this is overhead" (see financials.tsx). Making Company a
+ * real stage would mean altering the jobs_stage_check constraint, adding it to
+ * the job editor's picker so any job could be set to it, and letting the board's
+ * ‹ › arrows move projects into it — none of which we want. It is a category,
+ * not a step work moves through.
+ */
+export const COMPANY_LABEL = 'Company' as const;
+
+/** A stage pill, or the Company pill for the overhead container. */
+export type StageLabel = Stage | typeof COMPANY_LABEL;
+
+/** True for the overhead container job. */
+export function isCompanyJob(job: unknown): boolean {
+  return (job as { is_internal?: boolean } | null)?.is_internal === true;
+}
+
+/**
+ * What to show on a job's pill. Company wins over whatever stage the row
+ * happens to carry — DC-26026 is stored as 'Complete' and showing that reads
+ * as a finished project rather than the overhead bucket it is.
+ */
+export function labelForJob(job: {
+  stage?: unknown;
+  status?: string | null;
+  is_internal?: boolean;
+}): StageLabel {
+  if (isCompanyJob(job)) return COMPANY_LABEL;
+  return stageOrDefault(job.stage, job.status);
+}
+
+export const LABEL_COLORS: Record<StageLabel, { bg: string; fg: string }> = {
+  ...STAGE_COLORS,
+  // Warm neutral, deliberately unlike every pipeline hue: overhead is not a
+  // step in the pipeline and shouldn't read as one.
+  [COMPANY_LABEL]: { bg: colors.ink, fg: colors.cream },
+};
+
+export const LABEL_ACCENT: Record<StageLabel, string> = {
+  ...STAGE_ACCENT,
+  [COMPANY_LABEL]: colors.inkSoft,
+};

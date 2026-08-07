@@ -25,6 +25,7 @@ import {
   type LedgerEntry,
 } from '@/lib/financials';
 import { type Job } from '@/lib/mockData';
+import { isCompanyJob } from '@/lib/stages';
 import {
   fetchCompanyTotals,
   fetchLaborHoursByJob,
@@ -278,7 +279,11 @@ export default function FinancialsScreen() {
         expByJob.set(entry.job_id, (expByJob.get(entry.job_id) ?? 0) + entry.amount);
       }
     }
-    return jobsFull.map((job) => {
+    // Company overhead is not a job cost. The container job carries expenses
+    // with no revenue, so leaving it in gave it a -100%-style row of its own AND
+    // dragged the "All jobs" totals down by costs no single job incurred. It is
+    // reported separately, below (2026-08-07).
+    return jobsFull.filter((job) => !isCompanyJob(job)).map((job) => {
       const revenue = paidByJob.get(job.id) ?? 0;
       const expensesJob = expByJob.get(job.id) ?? 0;
       const labor = laborMap?.get(job.id)?.labor ?? 0;
@@ -302,7 +307,21 @@ export default function FinancialsScreen() {
     });
   }, [data, jobsFull, laborMap]);
 
-  // Company-wide totals across every job (top row of the P&L sheet).
+  /**
+   * Company overhead — expenses tagged to the container job. Kept out of the
+   * per-job sheet above and shown on its own, so the money is still visible
+   * without being charged to anybody's project.
+   */
+  const companyOverhead = useMemo(() => {
+    if (!data || !companyJobId) return 0;
+    let total = 0;
+    for (const entry of data.allEntries) {
+      if (entry.job_id === companyJobId && entry.type === 'expense') total += entry.amount;
+    }
+    return total;
+  }, [data, companyJobId]);
+
+  // Totals across every PROJECT (top row of the P&L sheet). Overhead excluded.
   const pnlTotals = useMemo(() => {
     const t = { revenue: 0, expenses: 0, hours: 0, labor: 0, profit: 0 };
     for (const row of pnlRows) {
@@ -629,6 +648,20 @@ export default function FinancialsScreen() {
               </Pressable>
               {pnlOpen ? (
                 <View style={styles.pnlCard}>
+                  {companyOverhead > 0 ? (
+                    <View style={[styles.pnlRow, styles.overheadRow]}>
+                      <View style={styles.pnlTopRow}>
+                        <Text style={styles.pnlTotalLabel}>Company overhead</Text>
+                        <Text style={styles.pnlPct}>
+                          {`−${formatRounded(companyOverhead)}`}
+                        </Text>
+                      </View>
+                      <Text style={styles.pnlDetail}>
+                        Not charged to any job — these are company costs, kept out
+                        of the per-job figures below.
+                      </Text>
+                    </View>
+                  ) : null}
                   <View style={[styles.pnlRow, styles.pnlTotalRow]}>
                     <View style={styles.pnlTopRow}>
                       <Text style={styles.pnlTotalLabel}>All jobs</Text>
@@ -1143,6 +1176,11 @@ const styles = StyleSheet.create({
   },
   pnlTotalRow: {
     backgroundColor: colors.sunLight,
+  },
+  // Company overhead sits above the per-job rows and is visually separate from
+  // them — it is a cost of running the business, not of running a job.
+  overheadRow: {
+    backgroundColor: colors.skySoft,
   },
   pnlTotalLabel: {
     color: colors.ink,
