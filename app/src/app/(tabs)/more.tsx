@@ -1,9 +1,19 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { deleteOwnAccount } from '@/lib/account';
+import { clearRoleCache } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -34,6 +44,23 @@ const ITEMS: {
 
 export default function MoreScreen() {
   const router = useRouter();
+
+  const [deleting, setDeleting] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const removeAccount = async () => {
+    setBusy(true);
+    setDeleteError(null);
+    const result = await deleteOwnAccount();
+    setBusy(false);
+    if (result.ok) {
+      clearRoleCache();
+      router.replace('/');
+    } else {
+      setDeleteError(result.message);
+    }
+  };
 
   const signOut = async () => {
     try {
@@ -78,6 +105,38 @@ export default function MoreScreen() {
             <Text style={[styles.rowText, styles.signOutText]}>Sign out</Text>
           </Pressable>
         </View>
+
+        {/* Required by App Store guideline 5.1.1(v) for any app with accounts. */}
+        {deleting ? (
+          <View style={styles.dangerCard}>
+            <Text style={styles.dangerTitle}>Delete your account?</Text>
+            <Text style={styles.dangerBody}>
+              This permanently removes your login and signs you out everywhere. It does not remove
+              your employment record, or the jobs and hours you&apos;ve logged — the office keeps
+              those. Ask Devon if you need those changed.
+            </Text>
+            {deleteError ? <Text style={styles.dangerError}>{deleteError}</Text> : null}
+            <View style={styles.dangerRow}>
+              <Pressable onPress={() => setDeleting(false)} disabled={busy} hitSlop={8}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={removeAccount}
+                disabled={busy}
+                style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}>
+                {busy ? (
+                  <ActivityIndicator color={colors.white} />
+                ) : (
+                  <Text style={styles.deleteText}>Delete permanently</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <Pressable onPress={() => setDeleting(true)} hitSlop={8} style={styles.deleteLinkWrap}>
+            <Text style={styles.deleteLink}>Delete my account</Text>
+          </Pressable>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -131,6 +190,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  deleteLinkWrap: { alignSelf: 'center', paddingVertical: spacing.sm },
+  deleteLink: { color: colors.danger, fontSize: 14, fontWeight: '700' },
+  dangerCard: {
+    backgroundColor: colors.white,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  dangerTitle: { color: colors.danger, fontSize: 15, fontWeight: '800' },
+  dangerBody: { color: colors.inkSoft, fontSize: 13, lineHeight: 19 },
+  dangerError: { color: colors.danger, fontSize: 13, fontWeight: '600' },
+  dangerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: spacing.md,
+  },
+  cancelText: { color: colors.inkSoft, fontSize: 14, fontWeight: '700' },
+  deleteButton: {
+    backgroundColor: colors.danger,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+  },
+  deleteText: { color: colors.white, fontSize: 14, fontWeight: '800' },
   signOutText: {
     color: colors.danger,
   },

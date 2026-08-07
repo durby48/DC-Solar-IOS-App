@@ -17,6 +17,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { getAccountInfo } from '@/lib/account';
 import { supabase } from '@/lib/supabase';
 import { verseOfTheDay } from '@/lib/verses';
 
@@ -57,7 +58,9 @@ export default function LoginScreen() {
         router.replace('/set-password');
         return;
       }
-      router.replace('/(tabs)');
+      // Staff go to the app; anyone else is a customer and has no access yet.
+      const account = await getAccountInfo();
+      router.replace(account.kind === 'employee' ? '/(tabs)' : ('/customer' as never));
     } catch {
       setError('Could not reach the server. Try demo mode below.');
     } finally {
@@ -137,6 +140,9 @@ export default function LoginScreen() {
               )}
             </Pressable>
 
+            <Pressable onPress={() => router.push('/sign-up' as never)} hitSlop={8}>
+              <Text style={styles.signUpLink}>New customer? Create an account</Text>
+            </Pressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -219,6 +225,15 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md - 2,
     fontSize: 16,
     color: colors.ink,
+  },
+  signUpLink: {
+    color: '#12405E',
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+    textShadowColor: 'rgba(255,248,234,0.95)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 7,
   },
   error: {
     color: '#FFB4A8',

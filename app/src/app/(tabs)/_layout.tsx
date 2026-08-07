@@ -1,9 +1,52 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 
 import { colors } from '@/constants/theme';
+import { getAccountInfo } from '@/lib/account';
+
+/**
+ * Staff-only gate.
+ *
+ * Before this, the tab routes had NO gate at all — a signed-in customer (or
+ * anyone typing /pipeline on the web) reached the crew UI. It rendered empty
+ * because RLS blocks the queries, but it should never have been reachable.
+ *
+ * RLS remains the real protection; this is about not showing people a shell
+ * of an app they have no business in.
+ */
+function useStaffGate() {
+  const router = useRouter();
+  const [state, setState] = useState<'checking' | 'staff'>('checking');
+
+  useEffect(() => {
+    let cancelled = false;
+    getAccountInfo().then((account) => {
+      if (cancelled) return;
+      if (account.kind === 'employee') setState('staff');
+      else if (account.kind === 'customer') router.replace('/customer' as never);
+      else router.replace('/');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  return state;
+}
 
 export default function TabsLayout() {
+  const gate = useStaffGate();
+
+  if (gate === 'checking') {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.cream }}>
+        <ActivityIndicator color={colors.ocean} />
+      </View>
+    );
+  }
+
   return (
     <Tabs
       screenOptions={{
