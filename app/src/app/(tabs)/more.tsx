@@ -27,7 +27,8 @@ const ITEMS: {
     | '/more/receipts'
     | '/more/customers'
     | '/more/monitoring'
-    | '/more/employees';
+    | '/more/employees'
+    | '/security';
   title: string;
   icon: IconName;
 }[] = [
@@ -38,6 +39,7 @@ const ITEMS: {
   { href: '/more/receipts', title: 'Receipts', icon: 'receipt' },
   { href: '/more/customers', title: 'Customers', icon: 'people' },
   { href: '/more/monitoring', title: 'Monitoring Logins', icon: 'pulse' },
+  { href: '/security', title: 'Security & 2FA', icon: 'shield-checkmark' },
   // Visible to everyone; the screen itself is admin-gated.
   { href: '/more/employees', title: 'Employees', icon: 'id-card' },
 ];

@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { getAccountInfo } from '@/lib/account';
+import { pendingChallenge, submitChallenge } from '@/lib/mfa';
 import { supabase } from '@/lib/supabase';
 import { verseOfTheDay } from '@/lib/verses';
 
@@ -37,6 +38,29 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Second step for staff with 2FA on: the session is signed in but only at
+  // aal1 until a code is entered.
+  const [challengeFactor, setChallengeFactor] = useState<string | null>(null);
+  const [code, setCode] = useState('');
+
+  /** Send staff to the app and everyone else to the customer portal. */
+  const routeByAccount = async () => {
+    const account = await getAccountInfo();
+    router.replace(account.kind === 'employee' ? '/(tabs)' : ('/customer' as never));
+  };
+
+  const verifyCode = async () => {
+    if (!challengeFactor) return;
+    setLoading(true);
+    setError(null);
+    const result = await submitChallenge(challengeFactor, code);
+    setLoading(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    await routeByAccount();
+  };
 
   const signIn = async () => {
     if (!email.trim() || !password) {
@@ -58,9 +82,13 @@ export default function LoginScreen() {
         router.replace('/set-password');
         return;
       }
-      // Staff go to the app; anyone else is a customer and has no access yet.
-      const account = await getAccountInfo();
-      router.replace(account.kind === 'employee' ? '/(tabs)' : ('/customer' as never));
+      // 2FA: if this account has a verified factor, finish before routing.
+      const challenge = await pendingChallenge();
+      if (challenge.required && challenge.factorId) {
+        setChallengeFactor(challenge.factorId);
+        return;
+      }
+      await routeByAccount();
     } catch {
       setError('Could not reach the server. Try demo mode below.');
     } finally {
@@ -106,6 +134,33 @@ export default function LoginScreen() {
             <Text style={styles.verseReference}>— {verseOfTheDay().reference}</Text>
           </View>
 
+          {challengeFactor ? (
+            <View style={styles.form}>
+              <Text style={styles.verseReference}>Enter the 6-digit code from your authenticator</Text>
+              <TextInput
+                style={[styles.input, styles.codeInput]}
+                value={code}
+                onChangeText={setCode}
+                placeholder="000000"
+                placeholderTextColor={colors.inkSoft}
+                keyboardType="number-pad"
+                maxLength={6}
+                autoFocus
+                onSubmitEditing={verifyCode}
+              />
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+              <Pressable
+                style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+                onPress={verifyCode}
+                disabled={loading || code.length < 6}>
+                {loading ? (
+                  <ActivityIndicator color={colors.ink} />
+                ) : (
+                  <Text style={styles.buttonText}>Verify</Text>
+                )}
+              </Pressable>
+            </View>
+          ) : (
           <View style={styles.form}>
             <TextInput
               style={styles.input}
@@ -144,6 +199,7 @@ export default function LoginScreen() {
               <Text style={styles.signUpLink}>New customer? Create an account</Text>
             </Pressable>
           </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
       </SafeAreaView>
@@ -225,6 +281,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md - 2,
     fontSize: 16,
     color: colors.ink,
+  },
+  codeInput: {
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: 8,
+    textAlign: 'center',
   },
   signUpLink: {
     color: '#12405E',
