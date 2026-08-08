@@ -39,7 +39,7 @@ export interface LineItem {
 export interface FinanceEntry {
   id: string;
   /** See FinanceType in lib/financials.ts — 'investment' is capital, not income. */
-  type: 'invoice' | 'estimate' | 'payment' | 'expense' | 'investment';
+  type: 'invoice' | 'estimate' | 'contract' | 'payment' | 'expense' | 'investment';
   amount: number;
   counterparty: string | null;
   description: string | null;
@@ -71,7 +71,7 @@ export async function fetchJobFinanceEntries(jobId: string): Promise<FinanceEntr
       )
       .eq('company', COMPANY)
       .eq('job_id', jobId)
-      .in('type', ['invoice', 'estimate', 'payment', 'expense', 'investment'])
+      .in('type', ['invoice', 'estimate', 'contract', 'payment', 'expense', 'investment'])
       .order('occurred_on', { ascending: false });
     if (error) return { status: 'unavailable' };
     const entries = ((data ?? []) as Record<string, unknown>[]).map((row) => ({

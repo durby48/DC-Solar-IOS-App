@@ -19,10 +19,21 @@ const COMPANY = 'dc-solar';
  * originally recorded) overstates overhead and reverses the sign on money that
  * actually came in. Every rollup below therefore ignores it, and it is reported
  * on its own.
+ *
+ * 'contract' is the signed amount — what the customer agreed to pay, which can
+ * differ from both the estimate and what eventually gets invoiced. It is the
+ * middle of the funnel and drives estimate→contract conversion on the Sales
+ * tab. Like investment, it is not revenue: money is only earned when invoiced
+ * and only received when paid, so the rollups below ignore it too.
+ *
+ * NOTE: `contractedYtd` and /ledger/contracted still derive "under contract"
+ * from invoice rows on jobs in a contracted stage. That predates this type and
+ * is left alone for now — see the Sales tab for the signed-amount figure.
  */
 export type FinanceType =
   | 'invoice'
   | 'estimate'
+  | 'contract'
   | 'payment'
   | 'expense'
   | 'investment';

@@ -37,6 +37,7 @@ function formatMoney(amount: number): string {
 function entryIcon(entry: FinanceEntry): keyof typeof Ionicons.glyphMap {
   if (entry.type === 'invoice') return 'receipt';
   if (entry.type === 'estimate') return 'calculator';
+  if (entry.type === 'contract') return 'document-text';
   if (entry.type === 'payment') return 'cash';
   if (entry.type === 'investment') return 'trending-up';
   return 'pricetag';
@@ -55,6 +56,7 @@ function amountStyle(entry: FinanceEntry) {
 function entryTitle(entry: FinanceEntry): string {
   if (entry.type === 'invoice') return entry.document_number ?? 'Invoice';
   if (entry.type === 'estimate') return entry.document_number ?? 'Estimate';
+  if (entry.type === 'contract') return entry.description ?? 'Contract signed';
   if (entry.type === 'payment') return 'Payment';
   if (entry.type === 'investment') return entry.description ?? 'Investment';
   return entry.description ?? 'Expense';
@@ -122,6 +124,7 @@ export function JobInvoices({
     (e) =>
       e.type === 'invoice' ||
       e.type === 'estimate' ||
+      e.type === 'contract' ||
       e.type === 'payment' ||
       e.type === 'investment',
   );
