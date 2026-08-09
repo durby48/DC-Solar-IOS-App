@@ -1,0 +1,15 @@
+{
+  "_comment": "Shape only. Real statements live OUTSIDE this repo — it is public.",
+  "period": "2026-08",
+  "from": "2026-08-01",
+  "to": "2026-08-31",
+  "openingBalance": 0,
+  "closingBalance": 0,
+  "payrollThrough": "2026-08-03",
+  "preLedgerCash": 0,
+  "cashOnlyAdjustment": 0,
+  "debits": [{ "date": "08/07", "amount": 0, "desc": "Example merchant" }],
+  "credits": [{ "date": "08/04", "amount": 0, "desc": "Example customer ACH" }],
+  "payrollRuns": [{ "date": "2026-08-07", "gross": 0, "businessTaxes": 0, "total": 0 }],
+  "reimbursementChecks": [{ "date": "2026-08-07", "amount": 0, "desc": "Example cheque" }]
+}

@@ -12,3 +12,8 @@ data/
 dist/
 
 .vercel
+
+# Bank statements — this repo is PUBLIC. Never commit financial data.
+scripts/reconcile/statements/
+statements/
+*.statement.json

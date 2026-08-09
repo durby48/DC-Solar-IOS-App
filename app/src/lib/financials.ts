@@ -15,10 +15,10 @@ const COMPANY = 'dc-solar';
  *
  * 'investment' is capital the owners put into the business. It is deliberately
  * neither revenue nor a cost: counting it as a payment would inflate every
- * margin, and counting it as an expense (which is how $4,200 of it was
- * originally recorded) overstates overhead and reverses the sign on money that
- * actually came in. Every rollup below therefore ignores it, and it is reported
- * on its own.
+ * margin, and counting it as an expense (which is how it was originally
+ * recorded) overstates overhead and reverses the sign on money that actually
+ * came in. Every rollup below therefore ignores it, and it is reported on its
+ * own.
  *
  * 'contract' is the signed amount — what the customer agreed to pay, which can
  * differ from both the estimate and what eventually gets invoiced. It is the
@@ -63,9 +63,17 @@ export interface LedgerEntry {
 export interface FinancialsData {
   /** Sum of all payment entries (money in). */
   paid: number;
-  /** Sum of all expense entries (money out; labor is not included). */
+  /** Sum of all expense entries (money out). Excludes wages — see `labor`. */
   expenses: number;
-  /** paid − expenses */
+  /**
+   * Wages from employee_hours (hours × rate), across every job.
+   *
+   * Payroll deliberately does NOT live in finance_entries — booking it in both
+   * places double-counted it once already. But it is a real cost, so `net` has
+   * to subtract it or the headline reports a profit the business never made.
+   */
+  labor: number;
+  /** paid − expenses − labor. The per-job P&L uses the same formula. */
   net: number;
   /** Expense total for the current calendar month. */
   expensesThisMonth: number;
@@ -95,13 +103,23 @@ function byDateDesc(a: LedgerEntry, b: LedgerEntry): number {
  */
 export async function fetchFinancials(): Promise<FinancialsData | null> {
   try {
-    const { data, error } = await supabase
-      .from('finance_entries')
-      .select(
-        'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path',
-      )
-      .eq('company', COMPANY);
+    const [{ data, error }, hoursResult] = await Promise.all([
+      supabase
+        .from('finance_entries')
+        .select(
+          'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path',
+        )
+        .eq('company', COMPANY),
+      // Wages live here, not in finance_entries. Fetched alongside so `net`
+      // can subtract them — the headline overstated profit by every wage
+      // dollar ever paid without this.
+      supabase.from('employee_hours').select('hours, rate').eq('company', COMPANY),
+    ]);
     if (error || !data) return null;
+    const labor = (hoursResult.data ?? []).reduce(
+      (sum, row) => sum + num(row.hours) * num(row.rate),
+      0,
+    );
 
     const rows = (data as Record<string, unknown>[]).map((row) => ({
       ...row,
@@ -132,7 +150,8 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
     return {
       paid,
       expenses,
-      net: paid - expenses,
+      labor,
+      net: paid - expenses - labor,
       expensesThisMonth,
       contractedYtd,
       expenseEntries,

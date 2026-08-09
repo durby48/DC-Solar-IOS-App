@@ -54,6 +54,9 @@ function OverviewCard({ data }: { data: FinancialsData }) {
   const tiles: [string, string, object?][] = [
     ['Paid in', formatRounded(data.paid)],
     ['Expenses', formatRounded(data.expenses)],
+    // Shown next to Expenses so the Net below is obviously the three together.
+    // Wages are a real cost that lives in employee_hours, not finance_entries.
+    ['Labor', formatRounded(data.labor)],
     [
       'Net',
       `${data.net >= 0 ? '+' : '−'}${formatRounded(Math.abs(data.net))}`,
