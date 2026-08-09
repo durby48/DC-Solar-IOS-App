@@ -17,3 +17,7 @@ dist/
 scripts/reconcile/statements/
 statements/
 *.statement.json
+
+# Plaid — keys and the bank access token live in secrets/, never here.
+plaid*.txt
+*plaid-access-token*
