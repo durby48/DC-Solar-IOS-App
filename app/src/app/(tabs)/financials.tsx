@@ -24,6 +24,11 @@ import {
   type FinancialsData,
   type LedgerEntry,
 } from '@/lib/financials';
+import {
+  fetchCompanySettings,
+  fetchUnpaidWages,
+  type CompanySettings,
+} from '@/lib/cashPosition';
 import { type Job } from '@/lib/mockData';
 import { isCompanyJob } from '@/lib/stages';
 import {
@@ -145,6 +150,89 @@ function PipelineTotalsCard({ totals }: { totals: CompanyTotals }) {
   );
 }
 
+
+/**
+ * Cash position — why the bank balance is not the same number as profit.
+ *
+ * Each subtraction is money physically in the account that the business has not
+ * earned, and each addition is money earned that has not arrived. Working down
+ * the list turns a balance into profit retained, which is the figure most
+ * people mean when they ask "how are we doing".
+ */
+function CashPositionCard({
+  bankBalance,
+  asOf,
+  capital,
+  owed,
+  unpaidWages,
+  inTransit,
+  byPerson,
+}: {
+  bankBalance: number | null;
+  asOf: string | null;
+  capital: number;
+  owed: number;
+  unpaidWages: number;
+  inTransit: number;
+  /** Who put the capital in, so the single figure can be broken out. */
+  byPerson: { who: string; amount: number }[];
+}) {
+  if (bankBalance === null) {
+    return (
+      <View style={styles.overviewCard}>
+        <Text style={styles.sectionTitle}>Cash position</Text>
+        <Text style={styles.cashEmpty}>
+          No bank balance recorded yet. Add one and this panel will reconcile it
+          against the ledger.
+        </Text>
+      </View>
+    );
+  }
+  const profitRetained = bankBalance - capital - owed - unpaidWages + inTransit;
+  const rows: { label: string; amount: number; note?: string }[] = [
+    { label: 'Bank balance', amount: bankBalance, note: asOf ? `as of ${formatShortDate(asOf)}` : undefined },
+    { label: 'Less capital invested', amount: -capital, note: 'contributed, never earned' },
+    { label: 'Less owed for out-of-pocket', amount: -owed, note: 'spent, not yet paid back' },
+    { label: 'Less wages worked, unpaid', amount: -unpaidWages, note: 'earned by the crew' },
+    { label: 'Plus receipts in transit', amount: inTransit, note: 'earned, not yet deposited' },
+  ];
+  return (
+    <View style={styles.overviewCard}>
+      <Text style={styles.sectionTitle}>Cash position</Text>
+      {rows
+        .filter((r) => r.amount !== 0 || r.label === 'Bank balance')
+        .map((r) => (
+          <View key={r.label} style={styles.cashRow}>
+            <View style={styles.cashLabelWrap}>
+              <Text style={styles.cashLabel}>{r.label}</Text>
+              {r.note ? <Text style={styles.cashNote}>{r.note}</Text> : null}
+            </View>
+            <Text style={styles.cashAmount}>
+              {r.amount < 0 ? `−${formatRounded(Math.abs(r.amount))}` : formatRounded(r.amount)}
+            </Text>
+          </View>
+        ))}
+      {byPerson.length ? (
+        <View style={styles.capitalBreakdown}>
+          <Text style={styles.cashNote}>
+            {`Invested: ${byPerson.map((p) => `${p.who} ${formatRounded(p.amount)}`).join(' · ')}`}
+          </Text>
+        </View>
+      ) : null}
+      <View style={[styles.cashRow, styles.cashTotalRow]}>
+        <Text style={styles.cashTotalLabel}>Profit retained</Text>
+        <Text
+          style={[
+            styles.cashTotalAmount,
+            profitRetained >= 0 ? styles.netPositive : styles.netNegative,
+          ]}>
+          {formatRounded(profitRetained)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 export default function FinancialsScreen() {
   const role = useRole();
   const router = useRouter();
@@ -153,6 +241,8 @@ export default function FinancialsScreen() {
   const [totals, setTotals] = useState<CompanyTotals | null>(null);
   const [jobsFull, setJobsFull] = useState<Job[]>([]);
   const [laborMap, setLaborMap] = useState<Map<string, JobLaborHours> | null>(null);
+  const [settings, setSettings] = useState<CompanySettings | null>(null);
+  const [unpaidWages, setUnpaidWages] = useState(0);
   // Collapsible sections: the per-job P&L sheet and each expense month.
   const [pnlOpen, setPnlOpen] = useState(false);
   const [openMonths, setOpenMonths] = useState<Set<string>>(new Set());
@@ -195,6 +285,9 @@ export default function FinancialsScreen() {
         fetchPipelineJobs(),
         fetchLaborHoursByJob(),
       ]);
+      const companySettings = await fetchCompanySettings();
+      setSettings(companySettings);
+      setUnpaidWages(await fetchUnpaidWages(companySettings?.payrollThrough ?? null));
       setData(financials);
       setLaborMap(labor);
       // Same math as the Pipeline header, fed by the same rows we just got.
@@ -334,6 +427,30 @@ export default function FinancialsScreen() {
    * later draws $800 of it has $200 in the business, not $1,800 — summing the
    * rows without regard to direction would report the money twice.
    */
+  /**
+   * Booked expenses somebody paid out of their own pocket and has not been paid
+   * back for — including reimbursements sent but not yet cleared, because the
+   * cash is still in the account until the debit lands.
+   */
+  const owedOutOfPocket = useMemo(() => {
+    if (!data) return 0;
+    return data.expenseEntries
+      .filter((e) => /NOT yet reimbursed|not yet cleared/i.test(e.description ?? ''))
+      .reduce((sum, e) => sum + e.amount, 0);
+  }, [data]);
+
+  /**
+   * Payments recorded whose money has not arrived — a card payment is taken
+   * today and deposited days later, net of the processor's fee. Both rows are
+   * already in the ledger, so the net has to come back out of the balance.
+   */
+  const receiptsInTransit = useMemo(() => {
+    if (!data) return 0;
+    return data.allEntries
+      .filter((e) => /awaiting deposit/i.test(e.description ?? ''))
+      .reduce((sum, e) => sum + (e.type === 'payment' ? e.amount : -e.amount), 0);
+  }, [data]);
+
   const capitalInvested = useMemo(() => {
     if (!data) {
       return { total: 0, contributed: 0, returned: 0, byPerson: [] as { who: string; amount: number }[] };
@@ -669,6 +786,15 @@ export default function FinancialsScreen() {
       ) : (
         <>
           <OverviewCard data={data} />
+          <CashPositionCard
+            bankBalance={settings?.bankBalance ?? null}
+            asOf={settings?.bankBalanceAsOf ?? null}
+            capital={capitalInvested.total}
+            owed={owedOutOfPocket}
+            unpaidWages={unpaidWages}
+            inTransit={receiptsInTransit}
+            byPerson={capitalInvested.byPerson}
+          />
           {totals ? <PipelineTotalsCard totals={totals} /> : null}
 
           {pnlRows.length > 0 ? (
@@ -1246,6 +1372,58 @@ const styles = StyleSheet.create({
   // them — it is a cost of running the business, not of running a job.
   overheadRow: {
     backgroundColor: colors.skySoft,
+  },
+  cashRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  cashLabelWrap: {
+    flex: 1,
+  },
+  cashLabel: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  cashNote: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  cashAmount: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  cashTotalRow: {
+    borderTopWidth: 1,
+    borderTopColor: colors.ink + '22',
+    marginTop: spacing.xs,
+    paddingTop: spacing.md,
+    alignItems: 'center',
+  },
+  cashTotalLabel: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  cashTotalAmount: {
+    fontSize: 20,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  capitalBreakdown: {
+    paddingBottom: spacing.xs,
+  },
+  cashEmpty: {
+    color: colors.inkSoft,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: spacing.sm,
   },
   // Capital in, distinct from both the per-job totals and overhead out.
   capitalRow: {
