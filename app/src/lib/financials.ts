@@ -43,6 +43,12 @@ export interface LedgerEntry {
   id: string;
   type: FinanceType;
   amount: number;
+  /**
+   * Which way the money moved. Amounts are always positive, so for capital this
+   * is the only thing distinguishing a contribution ('in') from money taken
+   * back out ('out') — netting them wrong overstates what is in the business.
+   */
+  direction: 'in' | 'out' | null;
   counterparty: string | null;
   description: string | null;
   occurred_on: string | null; // YYYY-MM-DD
@@ -92,7 +98,7 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
     const { data, error } = await supabase
       .from('finance_entries')
       .select(
-        'id, type, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path',
+        'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path',
       )
       .eq('company', COMPANY);
     if (error || !data) return null;

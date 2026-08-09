@@ -326,20 +326,34 @@ export default function FinancialsScreen() {
    * it is in none of the figures above — but it is real money that arrived,
    * and it would be worse to leave it invisible than to show it plainly.
    */
+  /**
+   * Capital NET of anything taken back out. An owner who puts $1,000 in and
+   * later draws $800 of it has $200 in the business, not $1,800 — summing the
+   * rows without regard to direction would report the money twice.
+   */
   const capitalInvested = useMemo(() => {
-    if (!data) return { total: 0, byPerson: [] as { who: string; amount: number }[] };
+    if (!data) {
+      return { total: 0, contributed: 0, returned: 0, byPerson: [] as { who: string; amount: number }[] };
+    }
     const byPerson = new Map<string, number>();
-    let total = 0;
+    let contributed = 0;
+    let returned = 0;
     for (const entry of data.allEntries) {
       if (entry.type !== 'investment') continue;
-      total += entry.amount;
+      const out = entry.direction === 'out';
+      const signed = out ? -entry.amount : entry.amount;
+      if (out) returned += entry.amount;
+      else contributed += entry.amount;
       const who = entry.counterparty?.trim() || 'Unattributed';
-      byPerson.set(who, (byPerson.get(who) ?? 0) + entry.amount);
+      byPerson.set(who, (byPerson.get(who) ?? 0) + signed);
     }
     return {
-      total,
+      total: contributed - returned,
+      contributed,
+      returned,
       byPerson: Array.from(byPerson.entries())
         .map(([who, amount]) => ({ who, amount }))
+        .filter((p) => p.amount !== 0)
         .sort((a, b) => b.amount - a.amount),
     };
   }, [data]);
@@ -698,9 +712,15 @@ export default function FinancialsScreen() {
                           .map((p) => `${p.who} ${formatRounded(p.amount)}`)
                           .join(' · ')}
                       </Text>
+                      {capitalInvested.returned > 0 ? (
+                        <Text style={styles.pnlDetail}>
+                          {`${formatRounded(capitalInvested.contributed)} contributed · ${formatRounded(capitalInvested.returned)} taken back out`}
+                        </Text>
+                      ) : null}
                       <Text style={styles.pnlDetail}>
-                        Money put into the business. Not revenue and not a cost —
-                        it is in none of the figures below.
+                        Money put into the business, net of anything withdrawn.
+                        Not revenue and not a cost — it is in none of the figures
+                        below.
                       </Text>
                     </View>
                   ) : null}
