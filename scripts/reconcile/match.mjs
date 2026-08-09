@@ -78,6 +78,59 @@ if (ghosts.length) {
   console.log('  processor fees netted out of a deposit rather than debited.');
 }
 
+// --- deposits ------------------------------------------------------------
+// Card processors deposit NET, but the payment is recorded GROSS with the fee
+// as a separate expense. So a deposit rarely equals any single payment row,
+// and the naive fix — booking the deposit as a new payment — double-counts the
+// revenue. Worse, a net deposit can coincidentally equal an unrelated open
+// invoice, which invites crediting the wrong job.
+if (stmt.credits.length) {
+  const { data: payments } = await client
+    .from('finance_entries')
+    .select('amount, occurred_on, description, job_id')
+    .eq('company', 'dc-solar')
+    .eq('type', 'payment');
+  const { data: openInvoices } = await client
+    .from('finance_entries')
+    .select('amount, job_id')
+    .eq('company', 'dc-solar')
+    .eq('type', 'invoice');
+  const { data: jobs } = await client
+    .from('jobs')
+    .select('id, job_number')
+    .eq('company', 'dc-solar');
+  const numberOf = new Map((jobs ?? []).map((j) => [j.id, j.job_number]));
+  const paymentAmounts = new Set((payments ?? []).map((p) => cents(p.amount)));
+
+  console.log('\nDEPOSITS');
+  for (const c of stmt.credits) {
+    const amt = cents(c.amount);
+    const exact = paymentAmounts.has(amt);
+    // Does gross-minus-fee explain it? Look for a payment whose amount less a
+    // recorded fee lands on this deposit.
+    const netOf = (payments ?? []).filter((p) => cents(p.amount) > amt);
+    const feeMatch = netOf.find((p) =>
+      /gross|stripe|fee/i.test(p.description ?? '') &&
+      cents(p.amount) - amt < cents(p.amount) * 0.1,
+    );
+    const collisions = (openInvoices ?? []).filter((i) => cents(i.amount) === amt);
+
+    let note = exact ? 'matches a recorded payment' : 'NO exact payment match';
+    if (!exact && feeMatch) {
+      note = `net of a gross payment (${money(feeMatch.amount)} less fees) — already recorded`;
+    }
+    console.log(`  ${c.date}  ${money(amt).padStart(12)}  ${note}`);
+    if (collisions.length > 1 || (collisions.length === 1 && !exact && feeMatch)) {
+      for (const col of collisions) {
+        console.log(
+          `      ⚠ an invoice on ${numberOf.get(col.job_id) ?? '?'} is also ${money(amt)} — ` +
+            'do not credit it with this deposit without checking',
+        );
+      }
+    }
+  }
+}
+
 // Payroll cross-check: gross + business taxes must equal the debit.
 if (stmt.payrollRuns.length) {
   console.log('\nPAYROLL RUNS');
