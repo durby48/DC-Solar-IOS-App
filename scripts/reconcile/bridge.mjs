@@ -11,6 +11,7 @@
  *     − capital returned           money out that is not a cost
  *     + labor accrued, unpaid      cost booked, wages not yet run
  *     + owed for out-of-pocket     cost booked, nobody reimbursed yet
+ *     − receipts awaiting deposit  payment booked, processor has not paid out
  *     ± cash-only movement         revenue or draws that bypassed the bank
  *     = bank balance
  */
@@ -44,12 +45,27 @@ const owed = expenses
   .filter((r) => /NOT yet reimbursed|not yet cleared/i.test(r.desc))
   .reduce((s, r) => s + r.amount, 0);
 
+// Money earned but not yet in the account: a card payment recorded on the day
+// it was taken, where the processor deposits days later. Both the gross payment
+// and its fee are already booked, so the ledger shows cash the bank has not
+// received — subtract the NET to bring them back into line. Tag both rows
+// '[awaiting deposit]' and drop the tag once the deposit lands.
+const { data: transitRows } = await client
+  .from('finance_entries')
+  .select('type, amount, description')
+  .eq('company', 'dc-solar')
+  .ilike('description', '%awaiting deposit%');
+const inTransit = (transitRows ?? []).reduce(
+  (s, r) => s + (r.type === 'payment' ? Number(r.amount) : -Number(r.amount)),
+  0,
+);
+
 const profit = t.payments - t.expenses - laborAll;
 const cashOnly = Number(stmt.cashOnlyAdjustment ?? 0);
 const opening = Number(stmt.preLedgerCash ?? 0);
 
 const implied = cents(
-  profit + t.capitalIn - t.capitalOut + laborUnpaid + owed + cashOnly + opening,
+  profit + t.capitalIn - t.capitalOut + laborUnpaid + owed - inTransit + cashOnly + opening,
 );
 const actual = cents(stmt.closingBalance);
 const gap = cents(actual - implied);
@@ -69,6 +85,7 @@ line('+ capital contributed', t.capitalIn);
 if (t.capitalOut) line('− capital returned to owners', -t.capitalOut);
 if (laborUnpaid) line('+ labor accrued, not yet paid', laborUnpaid);
 if (owed) line('+ owed for out-of-pocket purchases', owed);
+if (inTransit) line('− receipts awaiting deposit', -inTransit);
 if (cashOnly) line('± cash that bypassed the bank', cashOnly);
 if (opening) line('+ cash predating the ledger', opening);
 console.log(`  ${'-'.repeat(51)}`);
@@ -85,6 +102,7 @@ console.log(
     '  1. duplicates.mjs — a double entry moves this by its full amount\n' +
     '  2. match.mjs — a bank debit never recorded\n' +
     '  3. out-of-pocket purchases missing the "NOT yet reimbursed" tag\n' +
-    '  4. cash revenue or an owner draw that never touched the account\n',
+    '  4. cash revenue or an owner draw that never touched the account\n' +
+    "  5. a card payment recorded but not yet deposited — tag it '[awaiting deposit]'\n",
 );
 process.exit(1);
