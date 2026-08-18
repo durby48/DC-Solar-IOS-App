@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { EmployeeOfMonth } from '@/components/EmployeeOfMonth';
 import { JobCard } from '@/components/JobCard';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import {
@@ -491,6 +492,10 @@ export default function CalendarScreen() {
               (sessionEmail ? 'Syncs to the office' : 'Demo mode — saves to this phone only')}
           </Text>
         </View>
+
+        {/* Company recognition — every role sees this, crew included. Renders
+            nothing at all when there is no award on record. */}
+        <EmployeeOfMonth />
 
         {role?.isAdmin ? (
           <View style={styles.viewToggleRow}>

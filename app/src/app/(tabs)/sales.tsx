@@ -12,19 +12,33 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { MarketingPanel } from '@/components/MarketingPanel';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { useRole } from '@/lib/role';
 import { fetchSalesData, type SalesData, type SalesFunnel } from '@/lib/sales';
 
 /**
- * Sales tab — the funnel: Lead → Estimate → Contract.
+ * Sales tab — two segments over one screen.
  *
- * What each person sees is decided by RLS, not by this screen. An admin
- * (Devon, Isaiah, Clark) gets the company view plus a per-rep breakdown. A
- * viewer's queries return only their own leads and only the estimate/contract
- * rows on jobs where they are the sales rep, so the same code renders their
- * own numbers without any filtering here. See lib/sales.ts.
+ * LEADS is the funnel: Lead → Estimate → Contract. What each person sees is
+ * decided by RLS, not by this screen. An admin (Devon, Isaiah, Clark) gets the
+ * company view plus a per-rep breakdown. A viewer's queries return only their
+ * own leads and only the estimate/contract rows on jobs where they are the
+ * sales rep, so the same code renders their own numbers without any filtering
+ * here. See lib/sales.ts.
+ *
+ * MARKETING (added 2026-08-18) is where those leads come from — Google
+ * Business Profile, Facebook, Instagram and Yelp. It lives here rather than in
+ * its own tab because reach without conversion is a vanity number; the two
+ * belong side by side. See components/MarketingPanel.tsx.
  */
+
+type SalesSegment = 'leads' | 'marketing';
+
+const SEGMENTS: { key: SalesSegment; label: string }[] = [
+  { key: 'leads', label: 'Leads' },
+  { key: 'marketing', label: 'Marketing' },
+];
 
 function formatMoney(amount: number): string {
   return `$${Math.round(amount).toLocaleString('en-US')}`;
@@ -117,9 +131,13 @@ function Funnel({ funnel }: { funnel: SalesFunnel }) {
 
 export default function SalesScreen() {
   const role = useRole();
+  const [segment, setSegment] = useState<SalesSegment>('leads');
   const [data, setData] = useState<SalesData | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Bumped on pull-to-refresh so the Marketing panel reloads too; it owns its
+  // own data (and its own period chips), so it can't ride on `load` above.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const load = useCallback(async () => {
     setData(await fetchSalesData());
@@ -136,6 +154,7 @@ export default function SalesScreen() {
     setRefreshing(true);
     try {
       await load();
+      setRefreshKey((n) => n + 1);
     } finally {
       setRefreshing(false);
     }
@@ -155,85 +174,112 @@ export default function SalesScreen() {
           />
         }>
         <Text style={styles.title}>Sales</Text>
-        <Text style={styles.subtitle}>
-          {isAdmin
-            ? 'Company-wide funnel, and how each rep is doing.'
-            : 'Your leads and the projects you sold.'}
-        </Text>
 
-        {!loaded ? (
-          <ActivityIndicator style={styles.loading} color={colors.ocean} />
-        ) : !data ? (
-          <Text style={styles.empty}>
-            Couldn&apos;t load sales data. Pull to retry.
-          </Text>
+        <View style={styles.segmentRow}>
+          {SEGMENTS.map((option) => {
+            const active = option.key === segment;
+            return (
+              <Pressable
+                key={option.key}
+                onPress={() => setSegment(option.key)}
+                style={({ pressed }) => [
+                  styles.segment,
+                  active && styles.segmentActive,
+                  pressed && styles.segmentPressed,
+                ]}>
+                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {segment === 'marketing' ? (
+          <MarketingPanel refreshKey={refreshKey} />
         ) : (
           <>
-            <Text style={styles.sectionTitle}>
-              {isAdmin ? 'Everyone' : 'You'}
-            </Text>
-            <Funnel funnel={data.overall} />
+          <Text style={styles.subtitle}>
+            {isAdmin
+              ? 'Company-wide funnel, and how each rep is doing.'
+              : 'Your leads and the projects you sold.'}
+          </Text>
 
-            {isAdmin && data.byRep.length > 0 ? (
-              <>
-                <Text style={styles.sectionTitle}>By rep</Text>
-                {data.byRep.map(({ rep, funnel }) => (
-                  <View key={rep.email} style={styles.repCard}>
-                    <View style={styles.repHeader}>
-                      <Text style={styles.repName}>{rep.displayName}</Text>
-                      <Text style={styles.repValue}>
-                        {formatMoney(funnel.contractedValue)}
+          {!loaded ? (
+            <ActivityIndicator style={styles.loading} color={colors.ocean} />
+          ) : !data ? (
+            <Text style={styles.empty}>
+              Couldn&apos;t load sales data. Pull to retry.
+            </Text>
+          ) : (
+            <>
+              <Text style={styles.sectionTitle}>
+                {isAdmin ? 'Everyone' : 'You'}
+              </Text>
+              <Funnel funnel={data.overall} />
+
+              {isAdmin && data.byRep.length > 0 ? (
+                <>
+                  <Text style={styles.sectionTitle}>By rep</Text>
+                  {data.byRep.map(({ rep, funnel }) => (
+                    <View key={rep.email} style={styles.repCard}>
+                      <View style={styles.repHeader}>
+                        <Text style={styles.repName}>{rep.displayName}</Text>
+                        <Text style={styles.repValue}>
+                          {formatMoney(funnel.contractedValue)}
+                        </Text>
+                      </View>
+                      <Text style={styles.repDetail}>
+                        {`${funnel.leads} leads · ${funnel.projectsEstimated} estimated · ${funnel.projectsContracted} contracted · ${formatPct(funnel.estimateToContractPct)} close rate`}
                       </Text>
                     </View>
-                    <Text style={styles.repDetail}>
-                      {`${funnel.leads} leads · ${funnel.projectsEstimated} estimated · ${funnel.projectsContracted} contracted · ${formatPct(funnel.estimateToContractPct)} close rate`}
-                    </Text>
-                  </View>
-                ))}
-              </>
-            ) : null}
+                  ))}
+                </>
+              ) : null}
 
-            <Text style={styles.sectionTitle}>Leads</Text>
-            {data.leads.length === 0 ? (
-              <View style={styles.card}>
-                <Text style={styles.emptyLead}>
-                  No leads yet.
-                </Text>
-                <Text style={styles.emptyLeadHint}>
-                  {isAdmin
-                    ? 'Once leads are being entered, lead → estimate and win rates fill in here. Every other number on this page already works.'
-                    : 'Leads assigned to you will appear here.'}
-                </Text>
-              </View>
-            ) : (
-              data.leads.map((lead) => (
-                <View key={lead.id} style={styles.repCard}>
-                  <View style={styles.repHeader}>
-                    <Text style={styles.repName}>{lead.name}</Text>
-                    <View style={[styles.statusPill, statusTone(lead.status)]}>
-                      <Text style={styles.statusText}>{lead.status}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.repDetail}>
-                    {[
-                      lead.address,
-                      lead.source ? `via ${lead.source}` : null,
-                      lead.estimated_value !== null
-                        ? formatMoney(lead.estimated_value)
-                        : null,
-                      lead.assigned_to ?? 'unassigned',
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
+              <Text style={styles.sectionTitle}>Leads</Text>
+              {data.leads.length === 0 ? (
+                <View style={styles.card}>
+                  <Text style={styles.emptyLead}>
+                    No leads yet.
+                  </Text>
+                  <Text style={styles.emptyLeadHint}>
+                    {isAdmin
+                      ? 'Once leads are being entered, lead → estimate and win rates fill in here. Every other number on this page already works.'
+                      : 'Leads assigned to you will appear here.'}
                   </Text>
                 </View>
-              ))
-            )}
+              ) : (
+                data.leads.map((lead) => (
+                  <View key={lead.id} style={styles.repCard}>
+                    <View style={styles.repHeader}>
+                      <Text style={styles.repName}>{lead.name}</Text>
+                      <View style={[styles.statusPill, statusTone(lead.status)]}>
+                        <Text style={styles.statusText}>{lead.status}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.repDetail}>
+                      {[
+                        lead.address,
+                        lead.source ? `via ${lead.source}` : null,
+                        lead.estimated_value !== null
+                          ? formatMoney(lead.estimated_value)
+                          : null,
+                        lead.assigned_to ?? 'unassigned',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                  </View>
+                ))
+              )}
 
-            <Text style={styles.footnote}>
-              Estimated is what we quoted, Contracted is what was signed. A job
-              quoted twice counts once, at its current number.
-            </Text>
+              <Text style={styles.footnote}>
+                Estimated is what we quoted, Contracted is what was signed. A job
+                quoted twice counts once, at its current number.
+              </Text>
+            </>
+          )}
           </>
         )}
       </ScrollView>
@@ -258,6 +304,27 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   subtitle: { color: colors.inkSoft, fontSize: 14, marginBottom: spacing.sm },
+  // Segmented control: a pill track with the active half filled, so it reads
+  // as one control rather than two loose chips.
+  segmentRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.tan,
+    borderRadius: radii.pill,
+    padding: 3,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  segment: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    paddingVertical: spacing.sm - 2,
+  },
+  segmentActive: { backgroundColor: colors.white, ...shadows.card },
+  segmentPressed: { opacity: 0.7 },
+  segmentText: { color: colors.inkSoft, fontSize: 14, fontWeight: '800' },
+  segmentTextActive: { color: colors.ink },
   sectionTitle: {
     marginTop: spacing.md,
     fontSize: 13,

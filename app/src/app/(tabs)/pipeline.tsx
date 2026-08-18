@@ -95,6 +95,11 @@ function PipelineCard({
   const [page, setPage] = useState(0);
 
   const stage = jobStage(job);
+  // The overhead container (DC-26026). It is not a project: no stage, no
+  // modules, no forecast, and above all no per-job profit — its expenses are
+  // company costs. Left as a normal card it once read "Profit −5,790%" because
+  // a stray deposit had been filed against it. Same treatment as PipelineBoard.
+  const company = isCompanyJob(job);
   const extra = job as unknown as {
     completed_on?: string | null;
     module_count?: number | null;
@@ -103,19 +108,21 @@ function PipelineCard({
   };
   const completedOn = extra.completed_on ?? null;
   const time = next ? formatTimeLabel(next.start_time) : null;
-  const nextLabel =
-    stage === 'Complete' && completedOn
+  const nextLabel = company
+    ? 'Company overhead — not a project'
+    : stage === 'Complete' && completedOn
       ? `Completed ${formatShortDate(completedOn)}`
       : next
         ? `Next: ${formatShortDate(next.work_date)}${time ? ` — ${time}` : ''}`
         : 'No upcoming date';
 
   const modules = extra.module_count ?? null;
-  const forecast = forecastJob(model, extra.job_type, modules);
+  const forecast = company ? null : forecastJob(model, extra.job_type, modules);
 
-  // (paid − expenses − labor) ÷ paid. Only meaningful once money came in.
+  // (paid − expenses − labor) ÷ paid. Only meaningful once money came in, and
+  // never for the company container.
   const profitPct =
-    money && money.paid > 0
+    !company && money && money.paid > 0
       ? ((money.paid - money.expenses - (labor?.labor ?? 0)) / money.paid) * 100
       : null;
 
@@ -191,6 +198,36 @@ function PipelineCard({
             </View>
           </View>
 
+          {company ? (
+            // ---- company container: overhead, not a project ----
+            <>
+              <View style={styles.statRow}>
+                <View style={styles.stat}>
+                  <Text style={styles.statLabel}>Overhead</Text>
+                  <Text style={styles.statValue}>
+                    {money ? formatCurrency(money.expenses) : '—'}
+                  </Text>
+                </View>
+                <View style={styles.stat}>
+                  <Text style={styles.statLabel}>Hours logged</Text>
+                  <Text style={styles.statValue}>
+                    {labor ? formatHours(labor.hours) : '—'}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.forecastNote}>
+                Company costs — shop, tools, insurance, software. Never charged to a
+                job and never counted as job profit.
+              </Text>
+              {money && money.paid > 0 ? (
+                <Text style={styles.misfiledNote}>
+                  {`⚠ ${formatCurrency(money.paid)} in payments is filed here. Company earns no revenue — assign it to its job from the payment row.`}
+                </Text>
+              ) : null}
+            </>
+          ) : null}
+
+          {company ? null : (
           <View style={styles.statRow}>
             <View style={styles.stat}>
               <Text style={styles.statLabel}>Modules</Text>
@@ -203,7 +240,8 @@ function PipelineCard({
               </Text>
             </View>
           </View>
-          {forecast ? (
+          )}
+          {company ? null : forecast ? (
             <Text style={styles.forecastNote}>
               {forecast.low !== null && forecast.high !== null
                 ? `${formatHours(forecast.low)}–${formatHours(forecast.high)} · from ${forecast.samples} finished ${forecast.basis} jobs`
@@ -215,7 +253,7 @@ function PipelineCard({
             </Text>
           )}
 
-          {money ? (
+          {!company && money ? (
             <>
               <View style={styles.moneyRowNew}>
                 {([
@@ -329,7 +367,9 @@ export default function PipelineScreen() {
 
   // The Company container is overhead, not a project: it is deliberately kept
   // out of every stage bucket so it can't inflate a stage count or show up
-  // under "Complete". It has its own chip.
+  // under "Complete" — and, since 2026-08-18, out of "All" too. "All" means all
+  // PROJECTS; the container lives under its own Company chip only, so it can't
+  // be read as a job in the list.
   const projectJobs = useMemo(() => jobs.filter((job) => !isCompanyJob(job)), [jobs]);
   const companyJobs = useMemo(() => jobs.filter(isCompanyJob), [jobs]);
 
@@ -343,7 +383,7 @@ export default function PipelineScreen() {
   }, [projectJobs]);
 
   const filteredJobs = useMemo(() => {
-    if (stageFilter === 'All') return jobs;
+    if (stageFilter === 'All') return projectJobs;
     if (stageFilter === COMPANY_LABEL) return companyJobs;
     if (stageFilter === 'Active')
       return projectJobs.filter((job) => jobStage(job) !== 'Complete');
@@ -434,7 +474,7 @@ export default function PipelineScreen() {
                   // neither active work nor complete work.
                   const count =
                     chip === 'All'
-                      ? jobs.length
+                      ? projectJobs.length
                       : chip === COMPANY_LABEL
                         ? companyJobs.length
                         : chip === 'Active'
@@ -639,6 +679,12 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     fontSize: 11,
     fontWeight: '700',
+  },
+  misfiledNote: {
+    color: colors.coralDeep,
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: spacing.xs,
   },
   moneyRowNew: {
     flexDirection: 'row',

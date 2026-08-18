@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import BuildInfo from '@/components/BuildInfo';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { deleteOwnAccount } from '@/lib/account';
 import { clearRoleCache } from '@/lib/role';
@@ -28,6 +29,7 @@ const ITEMS: {
     | '/more/customers'
     | '/more/monitoring'
     | '/more/employees'
+    | '/more/employee-of-month'
     | '/security';
   title: string;
   icon: IconName;
@@ -42,6 +44,7 @@ const ITEMS: {
   { href: '/security', title: 'Security & 2FA', icon: 'shield-checkmark' },
   // Visible to everyone; the screen itself is admin-gated.
   { href: '/more/employees', title: 'Employees', icon: 'id-card' },
+  { href: '/more/employee-of-month', title: 'Employee of the Month', icon: 'trophy' },
 ];
 
 export default function MoreScreen() {
@@ -139,6 +142,9 @@ export default function MoreScreen() {
             <Text style={styles.deleteLink}>Delete my account</Text>
           </Pressable>
         )}
+
+        {/* Which build + OTA update this device runs; tap to check for a newer one. */}
+        <BuildInfo />
       </ScrollView>
     </SafeAreaView>
   );

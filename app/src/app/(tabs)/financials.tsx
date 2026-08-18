@@ -418,6 +418,26 @@ export default function FinancialsScreen() {
   }, [data, companyJobId]);
 
   /**
+   * Payments filed against the Company container. The container is overhead —
+   * it never earns revenue — so any payment here is a deposit the email scanner
+   * couldn't match to a job (2026-08-10: a $434.85 Chase deposit). Left alone it
+   * gave DC-26026 a "job profit" of −5,790%. Surface it as a to-do rather than
+   * hiding it: the money is real, it just belongs on a project.
+   */
+  const companyMisfiledPayments = useMemo(() => {
+    if (!data || !companyJobId) return { total: 0, count: 0 };
+    let total = 0;
+    let count = 0;
+    for (const entry of data.allEntries) {
+      if (entry.job_id === companyJobId && entry.type === 'payment') {
+        total += entry.amount;
+        count += 1;
+      }
+    }
+    return { total, count };
+  }, [data, companyJobId]);
+
+  /**
    * Capital the owners put into the business. Not revenue and not a cost, so
    * it is in none of the figures above — but it is real money that arrived,
    * and it would be worse to leave it invisible than to show it plainly.
@@ -826,6 +846,15 @@ export default function FinancialsScreen() {
                         Not charged to any job — these are company costs, kept out
                         of the per-job figures below.
                       </Text>
+                      {companyMisfiledPayments.count > 0 ? (
+                        <Text style={[styles.pnlDetail, styles.misfiledNote]}>
+                          {`⚠ ${formatRounded(companyMisfiledPayments.total)} in ${
+                            companyMisfiledPayments.count === 1
+                              ? 'a payment'
+                              : `${companyMisfiledPayments.count} payments`
+                          } is filed under Company. Company earns no revenue — open the payment in the ledger and assign it to its job.`}
+                        </Text>
+                      ) : null}
                     </View>
                   ) : null}
                   {capitalInvested.total > 0 ? (
@@ -1372,6 +1401,10 @@ const styles = StyleSheet.create({
   // them — it is a cost of running the business, not of running a job.
   overheadRow: {
     backgroundColor: colors.skySoft,
+  },
+  misfiledNote: {
+    color: colors.coralDeep,
+    marginTop: spacing.xs,
   },
   cashRow: {
     flexDirection: 'row',
