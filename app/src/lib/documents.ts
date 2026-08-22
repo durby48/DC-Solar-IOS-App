@@ -23,7 +23,7 @@ import {
   COMPANY_WEBSITE,
 } from '@/lib/company';
 import { todayISO } from '@/lib/dates';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';

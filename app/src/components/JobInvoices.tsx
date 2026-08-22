@@ -31,7 +31,7 @@ import {
   type SplitAllocation,
 } from '@/lib/documents';
 import { fetchPipelineJobs } from '@/lib/pipeline';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 import { isValidISODate } from '@/lib/time';
 
 function formatMoney(amount: number): string {
@@ -91,7 +91,7 @@ function isStale(entry: FinanceEntry): boolean {
  * with buttons to create new documents and to record a payment. Rows can be
  * edited inline (amount / date / description) and deleted with a two-tap
  * confirm — both admin-only via RLS (needs the finance-entries migration).
- * The parent must gate rendering on isAdmin + non-demo job; pass
+ * The parent must gate rendering on isAdmin; pass
  * `onEntriesChanged` so sibling finance summaries can refresh after edits.
  */
 export function JobInvoices({

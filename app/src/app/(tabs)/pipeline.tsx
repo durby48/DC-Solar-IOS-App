@@ -18,9 +18,11 @@ import { PipelineBoard } from '@/components/PipelineBoard';
 import { PipelineHero } from '@/components/PipelineHero';
 import { PropertyArt } from '@/components/PropertyArt';
 import { StatusPill } from '@/components/StatusPill';
+import { EmptyState } from '@/components/ui';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { type FetchStatus } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 import {
   fetchFinanceEntries,
   fetchMyHoursByJob,
@@ -305,7 +307,7 @@ export default function PipelineScreen() {
   const role = useRole();
 
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [isMock, setIsMock] = useState(false);
+  const [status, setStatus] = useState<FetchStatus>('ok');
   const [loaded, setLoaded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [nextDates, setNextDates] = useState<Map<string, NextDate>>(new Map());
@@ -319,28 +321,28 @@ export default function PipelineScreen() {
   const [artUrls, setArtUrls] = useState<Map<string, string>>(new Map());
 
   const load = useCallback(async () => {
-    const { jobs: fetched, isMock: mock } = await fetchPipelineJobs();
+    const { jobs: fetched, status: fetchStatus } = await fetchPipelineJobs();
     setJobs(fetched);
-    setIsMock(mock);
-    setNextDates(await fetchNextDates(mock));
-    setArtUrls(mock ? new Map() : await fetchArtworkUrls());
-    setModel(mock ? null : await fetchForecastModel());
+    setStatus(fetchStatus);
+    setNextDates(await fetchNextDates());
+    setArtUrls(await fetchArtworkUrls());
+    setModel(await fetchForecastModel());
 
-    if (!mock && role?.isAdmin) {
+    if (role?.isAdmin) {
       // One finance fetch feeds both the per-card money rows and the
       // company totals header; both hide when it fails.
       const financeRows = await fetchFinanceEntries();
       setMoney(financeRows ? moneyByJobFromEntries(financeRows) : null);
       setLabor(await fetchLaborHoursByJob());
       setMyHours(new Map());
-    } else if (!mock && role) {
+    } else if (role) {
       setMoney(null);
       setLabor(null);
       setMyHours(
         await fetchMyHoursByJob({ email: role.email, displayName: role.displayName }),
       );
     } else {
-      // Signed out / demo mode: no money, labor, or hours rows.
+      // Signed out: no money, labor, or hours rows.
       setMoney(null);
       setLabor(null);
       setMyHours(new Map());
@@ -429,7 +431,21 @@ export default function PipelineScreen() {
             isAdmin={role?.isAdmin ?? false}
             onChanged={load}
           />
-          {isMock ? <Text style={styles.mockNote}>Showing demo data</Text> : null}
+          {loaded && jobs.length === 0 ? (
+            status === 'unavailable' ? (
+              <EmptyState
+                icon="cloud-offline"
+                title="Couldn't load the pipeline"
+                body="Pull to retry."
+              />
+            ) : (
+              <EmptyState
+                icon="briefcase"
+                title="No projects yet"
+                body="New projects show up here as soon as they're created."
+              />
+            )
+          ) : null}
         </ScrollView>
       </SafeAreaView>
     );
@@ -514,17 +530,26 @@ export default function PipelineScreen() {
         )}
         ListEmptyComponent={
           loaded ? (
-            <Text style={styles.empty}>
-              {stageFilter === 'All'
-                ? 'No projects yet.'
-                : stageFilter === 'Active'
+            status === 'unavailable' ? (
+              <EmptyState
+                icon="cloud-offline"
+                title="Couldn't load the pipeline"
+                body="Pull to retry."
+              />
+            ) : jobs.length === 0 ? (
+              <EmptyState
+                icon="briefcase"
+                title="No projects yet"
+                body="New projects show up here as soon as they're created."
+              />
+            ) : (
+              <Text style={styles.empty}>
+                {stageFilter === 'Active'
                   ? 'No active projects.'
                   : `No projects in ${stageFilter}.`}
-            </Text>
+              </Text>
+            )
           ) : null
-        }
-        ListFooterComponent={
-          isMock ? <Text style={styles.mockNote}>Showing demo data</Text> : null
         }
       />
     </SafeAreaView>
@@ -787,11 +812,5 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     fontSize: 15,
     marginTop: spacing.lg,
-  },
-  mockNote: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    textAlign: 'center',
-    marginTop: spacing.md,
   },
 });

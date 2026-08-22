@@ -32,15 +32,16 @@ import { supabase } from '@/lib/supabase';
  *
  * The award is one row per month (see the 2026-08-18 migration) precisely so
  * this screen can exist: Devon adds next month's row and photo without anyone
- * shipping a build. Today's standing rule is Garrett every month with a fresh
- * photo, which is why the employee picker DEFAULTS to him — it is a default,
- * not a hard-coded winner.
+ * shipping a build.
+ *
+ * THE PICKER STARTS EMPTY. It used to default to one named employee, which
+ * made a standing rule look like it was baked into the app; the admin now
+ * chooses from the roster every time, and saving without a choice is refused
+ * by `upsertEmployeeOfMonth`.
  *
  * The admin gate below is cosmetic. RLS is the real barrier: insert/update/
  * delete on `employee_of_month` require public.is_company_admin('dc-solar').
  */
-
-const DEFAULT_EMPLOYEE_EMAIL = 'gnimsgern.2022@gmail.com';
 
 interface RosterEntry {
   email: string;
@@ -107,7 +108,7 @@ export default function EmployeeOfMonthScreen() {
   // preloads the same form with that month's values.
   const [open, setOpen] = useState(false);
   const [month, setMonth] = useState(currentMonthISO().slice(0, 7));
-  const [email, setEmail] = useState(DEFAULT_EMPLOYEE_EMAIL);
+  const [email, setEmail] = useState('');
   const [caption, setCaption] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -150,7 +151,7 @@ export default function EmployeeOfMonthScreen() {
 
   const resetForm = useCallback(() => {
     setMonth(currentMonthISO().slice(0, 7));
-    setEmail(DEFAULT_EMPLOYEE_EMAIL);
+    setEmail('');
     setCaption('');
     setPhotoUri(null);
   }, []);
@@ -361,24 +362,33 @@ export default function EmployeeOfMonthScreen() {
                 </View>
 
                 <Text style={styles.fieldLabel}>Employee</Text>
-                <View style={styles.chipWrap}>
-                  {(roster.length > 0
-                    ? roster
-                    : [{ email: DEFAULT_EMPLOYEE_EMAIL, name: 'Garrett Nimsgern' }]
-                  ).map((person) => {
-                    const active = person.email.toLowerCase() === email.toLowerCase();
-                    return (
-                      <Pressable
-                        key={person.email}
-                        onPress={() => setEmail(person.email)}
-                        style={[styles.personChip, active && styles.personChipActive]}>
-                        <Text style={[styles.personChipText, active && styles.personChipTextActive]}>
-                          {person.name}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                {roster.length === 0 ? (
+                  <Text style={styles.hintText}>
+                    No employees to pick from — the roster is admin-only and
+                    could not be read.
+                  </Text>
+                ) : (
+                  <View style={styles.chipWrap}>
+                    {roster.map((person) => {
+                      const active =
+                        email !== '' && person.email.toLowerCase() === email.toLowerCase();
+                      return (
+                        <Pressable
+                          key={person.email}
+                          onPress={() => setEmail(person.email)}
+                          style={[styles.personChip, active && styles.personChipActive]}>
+                          <Text
+                            style={[
+                              styles.personChipText,
+                              active && styles.personChipTextActive,
+                            ]}>
+                            {person.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
 
                 <Text style={styles.fieldLabel}>Photo</Text>
                 <View style={styles.photoRow}>

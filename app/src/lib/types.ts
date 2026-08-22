@@ -1,16 +1,15 @@
 /**
  * Shared domain types for the DC Solar KC app.
  *
- * These interfaces lived in `lib/mockData.ts` until 2026-08-22, which meant
- * every screen that only wanted a TYPE pulled the bundled demo jobs in with
- * it. They moved here verbatim (plus the CRM columns added by
- * `supabase/migrations/2026-08-22_crm.sql`, all optional so nothing that
- * builds a Customer by hand has to change).
+ * These interfaces used to live alongside a file of bundled fake jobs, so
+ * every screen that only wanted a TYPE pulled five invented customers and a
+ * "Rain make-up day" into the bundle with it. That file is gone (2026-08-22):
+ * there is no mock data anywhere in this app any more, and a query that comes
+ * back empty now renders an empty state that says so.
  *
- * `mockData.ts` re-exports all three, so the ~17 existing
- * `import { type Job } from '@/lib/mockData'` sites keep working. New code
- * should import from here. The mock fallbacks themselves stay for now — they
- * are removed in Phase 3, not in this OTA.
+ * The types carry the CRM columns added by
+ * `supabase/migrations/2026-08-22_crm.sql` as optionals, so anything that
+ * builds a Customer by hand still compiles.
  */
 
 import { type JobStatus } from '@/constants/theme';

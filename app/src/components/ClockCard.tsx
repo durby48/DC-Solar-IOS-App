@@ -23,7 +23,7 @@ import {
 import { fetchJobs } from '@/lib/data';
 import { formatElapsed, todayISO } from '@/lib/dates';
 import { haptics } from '@/lib/haptics';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 import { updateWidgetState } from '@/lib/widget';
 
 /**

@@ -1,4 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
+import { setStatusBarStyle } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, useWindowDimensions, View } from 'react-native';
 
@@ -25,7 +26,7 @@ import { fetchUnreadCount } from '@/lib/comms';
 import { fetchJobs, fetchScheduleEntries } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
 import { visibleGroups, visibleItems } from '@/lib/hub';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 import { registerPushToken, scheduleJobReminders } from '@/lib/notifications';
 import { clearRoleCache, useRoleGate } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
@@ -61,7 +62,6 @@ export default function HomeScreen() {
 
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [isMock, setIsMock] = useState(false);
   const [todayCount, setTodayCount] = useState<number | null>(null);
   const [unread, setUnread] = useState(0);
 
@@ -79,21 +79,38 @@ export default function HomeScreen() {
     };
   }, []);
 
+  /**
+   * Light status-bar glyphs while Home is on screen.
+   *
+   * The root layout sets `<StatusBar style="dark" />` globally, which is right
+   * for every cream page in the app — but Home's olive header runs under the
+   * status bar, and dark glyphs on #4D5C2B are close to invisible. Flipping it
+   * imperatively on focus (and back on blur) keeps that global default for
+   * everyone else: only this screen ever asks for light, and the cleanup runs
+   * whether you swipe to Calendar, push into a job, or background the app.
+   * `setStatusBarStyle` is a no-op on web, so app.dcsolarkc.com is unaffected.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      setStatusBarStyle('light');
+      return () => setStatusBarStyle('dark');
+    }, []),
+  );
+
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      fetchJobs().then(({ jobs: fetched, isMock: mock }) => {
-        if (cancelled) return;
-        setJobs(fetched);
-        setIsMock(mock);
+      fetchJobs().then(({ jobs: fetched }) => {
+        if (!cancelled) setJobs(fetched);
       });
       // "Today · N jobs" counts SCHEDULED work, not jobs whose one date
       // happens to be today — a two-day install shows on both of its days.
-      fetchScheduleEntries().then(({ entries, isMock: mock }) => {
+      fetchScheduleEntries().then(({ entries }) => {
         if (cancelled) return;
         const today = todayISO();
-        const rows = mock && !isMock ? [] : entries;
-        const ids = new Set(rows.filter((e) => e.work_date === today).map((e) => e.job.id));
+        const ids = new Set(
+          entries.filter((e) => e.work_date === today).map((e) => e.job.id),
+        );
         setTodayCount(ids.size);
       });
       /**
@@ -106,9 +123,6 @@ export default function HomeScreen() {
       return () => {
         cancelled = true;
       };
-      // `isMock` only ever flips once per session, and re-running this on it
-      // would double every fetch on the flip.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
   );
 
@@ -116,14 +130,13 @@ export default function HomeScreen() {
    * Signed-in devices: keep 24h/1h job reminders synced with the schedule and
    * register this device's push token. Moved here with the clock card — Home
    * is the screen everyone opens, so it is the reliable place to do it.
-   * Both are silent no-ops on web and on denied permission; reminders are
-   * skipped for demo data.
+   * Both are silent no-ops on web and on denied permission.
    */
   useEffect(() => {
-    if (!sessionEmail || isMock || jobs.length === 0) return;
+    if (!sessionEmail || jobs.length === 0) return;
     void scheduleJobReminders(jobs);
     void registerPushToken(sessionEmail);
-  }, [sessionEmail, isMock, jobs]);
+  }, [sessionEmail, jobs]);
 
   const signOut = async () => {
     try {

@@ -9,7 +9,7 @@ import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
 import { forecastJob, type ForecastModel } from '@/lib/forecast';
 import { updateJobStage } from '@/lib/jobs';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 import { type JobLaborHours, type JobMoney, type NextDate } from '@/lib/pipeline';
 import {
   COMPANY_LABEL,

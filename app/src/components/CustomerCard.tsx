@@ -3,7 +3,7 @@ import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
-import { type Customer } from '@/lib/mockData';
+import { type Customer } from '@/lib/types';
 
 function open(url: string) {
   Linking.openURL(url).catch(() => {});

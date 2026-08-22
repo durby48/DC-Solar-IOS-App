@@ -6,9 +6,9 @@
  * next-dates return empty maps.
  */
 
-import { fetchJobs } from '@/lib/data';
+import { fetchJobs, type FetchStatus } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
-import { MOCK_SCHEDULE_DATES, type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 import { isCompanyJob, stageOrDefault, type Stage } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
 
@@ -44,8 +44,7 @@ function num(v: unknown): number {
 /**
  * Sort jobs for the pipeline: job_number descending (newest project — e.g.
  * DC-26018 — first, scroll down to DC-26001), then jobs without a number
- * last, newest created_at first (created_at is present on server rows; mock
- * jobs without one keep their bundled order).
+ * last, newest created_at first.
  */
 export function sortPipelineJobs(jobs: Job[]): Job[] {
   const createdAt = (j: Job) =>
@@ -58,33 +57,23 @@ export function sortPipelineJobs(jobs: Job[]): Job[] {
   });
 }
 
-/** All company jobs in pipeline order. Falls back to mock data (isMock). */
-export async function fetchPipelineJobs(): Promise<{ jobs: Job[]; isMock: boolean }> {
-  const { jobs, isMock } = await fetchJobs();
-  return { jobs: sortPipelineJobs(jobs), isMock };
+/**
+ * All company jobs in pipeline order, carrying `fetchJobs`'s status through
+ * unchanged: `ok` + an empty array is a company with no projects yet,
+ * `unavailable` is a screen that should say it couldn't load.
+ */
+export async function fetchPipelineJobs(): Promise<{ jobs: Job[]; status: FetchStatus }> {
+  const { jobs, status } = await fetchJobs();
+  return { jobs: sortPipelineJobs(jobs), status };
 }
 
 /**
  * Next upcoming scheduled day per job, from one bulk job_schedule_dates
- * query (mock schedule rows when in demo mode). Empty map on error.
+ * query. Empty map on error.
  */
-export async function fetchNextDates(isMock: boolean): Promise<Map<string, NextDate>> {
+export async function fetchNextDates(): Promise<Map<string, NextDate>> {
   const today = todayISO();
   const map = new Map<string, NextDate>();
-  const sortKey = (d: { work_date: string; start_time: string | null }) =>
-    `${d.work_date}~${d.start_time ?? '99'}`;
-
-  if (isMock) {
-    const upcoming = MOCK_SCHEDULE_DATES.filter((d) => d.work_date >= today).sort(
-      (a, b) => sortKey(a).localeCompare(sortKey(b)),
-    );
-    for (const d of upcoming) {
-      if (!map.has(d.job_id)) {
-        map.set(d.job_id, { work_date: d.work_date, start_time: d.start_time });
-      }
-    }
-    return map;
-  }
 
   try {
     const { data, error } = await supabase

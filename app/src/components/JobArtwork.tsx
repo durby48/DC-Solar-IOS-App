@@ -12,7 +12,7 @@ import {
   type JobArtwork as ArtworkRow,
 } from '@/lib/artwork';
 import { fetchJobPhotos, getPhotoUrl, type JobPhoto } from '@/lib/data';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 
 /**
  * Admin-only "Property artwork" card on the job screen.

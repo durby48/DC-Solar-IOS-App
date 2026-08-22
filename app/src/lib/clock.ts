@@ -44,7 +44,7 @@ interface GpsStamp {
   note: string | null;
 }
 
-/** Email of the signed-in employee, or null when signed out / demo mode. */
+/** Email of the signed-in employee, or null when signed out. */
 export async function getSessionEmail(): Promise<string | null> {
   try {
     const { data } = await supabase.auth.getSession();

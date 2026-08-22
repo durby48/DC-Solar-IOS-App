@@ -37,7 +37,7 @@ import {
   type FinanceEntry,
   type LineItem,
 } from '@/lib/documents';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 import { shareLocalPdf, viewDocument } from '@/lib/pdf';
 import { getRole, type RoleInfo } from '@/lib/role';
 import { isValidISODate } from '@/lib/time';

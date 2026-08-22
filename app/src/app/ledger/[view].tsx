@@ -23,7 +23,7 @@ import {
   updateFinanceEntry,
 } from '@/lib/documents';
 import { fetchFinancials, type LedgerEntry } from '@/lib/financials';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 import { shareDocument, viewDocument } from '@/lib/pdf';
 import { CONTRACTED_STAGES, fetchPipelineJobs } from '@/lib/pipeline';
 import { useRole } from '@/lib/role';
@@ -132,27 +132,25 @@ export default function LedgerScreen() {
 
   const load = useCallback(async () => {
     if (role?.isAdmin) {
-      const [financials, { jobs: fetched, isMock }] = await Promise.all([
+      const [financials, { jobs: fetched }] = await Promise.all([
         fetchFinancials(),
         fetchPipelineJobs(),
       ]);
       setEntries(financials?.allEntries ?? null);
-      if (!isMock) {
-        const map = new Map<string, JobInfo>();
-        for (const job of fetched as Job[]) {
-          map.set(job.id, {
-            id: job.id,
-            label: job.job_number ?? job.name,
-            name: job.name,
-            customer: job.customer?.name ?? null,
-            customerId: job.customer_id,
-            stage: stageOrDefault((job as unknown as { stage?: unknown }).stage, job.status),
-            raw: job,
-          });
-        }
-        setJobs(map);
-        setJobOrder(fetched.map((j) => j.id)); // pipeline order: newest job first
+      const map = new Map<string, JobInfo>();
+      for (const job of fetched as Job[]) {
+        map.set(job.id, {
+          id: job.id,
+          label: job.job_number ?? job.name,
+          name: job.name,
+          customer: job.customer?.name ?? null,
+          customerId: job.customer_id,
+          stage: stageOrDefault((job as unknown as { stage?: unknown }).stage, job.status),
+          raw: job,
+        });
       }
+      setJobs(map);
+      setJobOrder(fetched.map((j) => j.id)); // pipeline order: newest job first
     } else {
       setEntries(null);
     }

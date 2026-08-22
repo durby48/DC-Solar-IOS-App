@@ -3,13 +3,15 @@
  *
  * The award is DATA, not code: one `employee_of_month` row per month, written
  * by an admin along with that month's photo (see
- * supabase/migrations/2026-08-18_employee_of_month.sql for why). Today's rule
- * — Garrett every month with a different photo — is therefore just a series of
- * rows, and changing it needs no release.
+ * supabase/migrations/2026-08-18_employee_of_month.sql for why). Whatever the
+ * standing rule is in a given month, it is a row somebody wrote, not a name
+ * compiled into the app — changing it needs no release.
  *
- * Reads NEVER throw. The card sits on the Today screen in front of the whole
- * crew, so a missing table, an RLS denial or a dead connection must degrade to
- * "show nothing" (or the signed-out mock), not to a red screen.
+ * Reads NEVER throw. The card sits on the Home screen in front of the whole
+ * crew, so a missing table, an RLS denial, a dead connection or a signed-out
+ * session must all degrade to "show nothing", not to a red screen. Until
+ * 2026-08-22 the signed-out case returned a hard-coded named employee; it
+ * returns null now, because inventing a winner is worse than showing nothing.
  *
  * Photos live in the EXISTING private `job-photos` bucket under an `eom/`
  * prefix — the same trick customer avatars use, so there are no new storage
@@ -45,8 +47,6 @@ export interface EmployeeOfMonthCard {
   caption: string | null;
   /** True when no row exists for the current month and an older one is shown. */
   isFallback: boolean;
-  /** True for the signed-out demo card (never hits the database). */
-  isMock: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,36 +108,17 @@ export async function getEomPhotoUrl(storagePath: string): Promise<string | null
 }
 
 /**
- * The demo card. Shown only when nobody is signed in, so the signed-out
- * preview still has something to look at. No photo — the component falls back
- * to initials, and the private bucket would refuse an anonymous read anyway.
- */
-function mockCard(): EmployeeOfMonthCard {
-  const month = currentMonthISO();
-  return {
-    month,
-    label: formatMonthLabel(month),
-    employeeName: 'Garrett Nimsgern',
-    employeeEmail: 'gnimsgern.2022@gmail.com',
-    photoUrl: null,
-    caption: null,
-    isFallback: false,
-    isMock: true,
-  };
-}
-
-/**
  * The card to show right now: this month's row, or — when nobody has filed one
  * yet — the most recent row that exists, still labelled with the CURRENT month
  * so the card never goes blank in front of the crew.
  *
- * Returns null (render nothing) when signed in but the table is missing, RLS
- * denies, or there are no rows at all.
+ * Returns null (render nothing) when nobody is signed in, when the table is
+ * missing, when RLS denies, or when there are no rows at all.
  */
 export async function fetchEmployeeOfMonth(): Promise<EmployeeOfMonthCard | null> {
   try {
     const { data: session } = await supabase.auth.getSession();
-    if (!session.session?.user?.email) return mockCard();
+    if (!session.session?.user?.email) return null;
 
     const thisMonth = currentMonthISO();
     // One query, newest first: the current month sorts to the top when it
@@ -163,7 +144,6 @@ export async function fetchEmployeeOfMonth(): Promise<EmployeeOfMonthCard | null
       photoUrl,
       caption: row.caption ?? null,
       isFallback: row.month !== thisMonth,
-      isMock: false,
     };
   } catch {
     return null;

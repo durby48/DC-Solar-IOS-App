@@ -2,7 +2,7 @@
  * Financials tab data helpers — company-wide money overview plus the
  * itemized expense ledger. Everything comes from ONE bulk finance_entries
  * fetch (admin-only per RLS) and is grouped client-side, matching
- * lib/pipeline. Returns null on any failure (non-admin / offline / demo)
+ * lib/pipeline. Returns null on any failure (non-admin / offline)
  * so the screen can degrade to a friendly placeholder.
  */
 

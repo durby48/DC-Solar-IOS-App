@@ -66,7 +66,7 @@ export default function JobDetailScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!id || !crewEmail || id.startsWith('mock-')) {
+    if (!id || !crewEmail) {
       setMyHours(0);
       return;
     }
@@ -88,7 +88,6 @@ export default function JobDetailScreen() {
     );
   };
 
-  const isMockJob = job?.id.startsWith('mock-') ?? true;
 
   return (
     <>
@@ -100,11 +99,11 @@ export default function JobDetailScreen() {
           <Text style={styles.notFound}>Job not found.</Text>
         ) : (
           <>
-            {role?.isAdmin && !isMockJob ? (
+            {role?.isAdmin ? (
               <JobFinanceHeader jobId={job.id} refreshKey={financeRefresh} />
             ) : null}
 
-            {role?.isAdmin && !isMockJob ? (
+            {role?.isAdmin ? (
               <JobInvoices
                 job={job}
                 onEntriesChanged={() => setFinanceRefresh((k) => k + 1)}
@@ -120,7 +119,7 @@ export default function JobDetailScreen() {
               </View>
               <View style={styles.nameRow}>
                 <Text style={styles.name}>{job.name}</Text>
-                {role?.isAdmin && !isMockJob ? (
+                {role?.isAdmin ? (
                   <Pressable
                     onPress={() =>
                       router.push({ pathname: '/job-editor', params: { jobId: job.id } })
@@ -192,7 +191,7 @@ export default function JobDetailScreen() {
               </View>
             ) : null}
 
-            {isCrewMember && !isMockJob && myHours > 0 ? (
+            {isCrewMember && myHours > 0 ? (
               <View style={styles.hoursCard}>
                 <View style={styles.iconWrap}>
                   <Ionicons name="time" size={18} color={colors.ocean} />
@@ -208,11 +207,11 @@ export default function JobDetailScreen() {
 
             <JobScheduleDates jobId={job.id} isAdmin={role?.isAdmin ?? false} />
 
-            {role && !isMockJob ? (
+            {role ? (
               <JobAssignedCrew jobId={job.id} isAdmin={role.isAdmin} />
             ) : null}
 
-            {role && !isMockJob ? (
+            {role ? (
               <JobMyHours
                 jobId={job.id}
                 email={role.email}
@@ -225,13 +224,9 @@ export default function JobDetailScreen() {
 
             <JobPhotos jobId={job.id} />
 
-            <JobMaterials
-              jobId={job.id}
-              isAdmin={role?.isAdmin ?? false}
-              isMock={isMockJob}
-            />
+            <JobMaterials jobId={job.id} isAdmin={role?.isAdmin ?? false} />
 
-            {role?.isAdmin && !isMockJob ? <JobArtwork job={job} /> : null}
+            {role?.isAdmin ? <JobArtwork job={job} /> : null}
           </>
         )}
       </ScrollView>

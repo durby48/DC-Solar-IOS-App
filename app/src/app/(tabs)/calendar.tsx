@@ -15,7 +15,7 @@ import { colors, radii, spacing } from '@/constants/theme';
 import { fetchAssignmentsByJob, type Assignment } from '@/lib/assignments';
 import { fetchJobs, fetchScheduleEntries, fetchScheduleRange, type ScheduleEntry } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 import { useRole } from '@/lib/role';
 import { formatTimeLabel } from '@/lib/time';
 
@@ -147,9 +147,7 @@ export default function CalendarScreen() {
   const router = useRouter();
   const role = useRole();
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [isMock, setIsMock] = useState(false);
   const [scheduleEntries, setScheduleEntries] = useState<ScheduleEntry[]>([]);
-  const [scheduleIsMock, setScheduleIsMock] = useState(false);
   // Crew assignments per job (names shown on every calendar entry).
   const [assignments, setAssignments] = useState<Map<string, Assignment[]> | null>(null);
   // Admin view toggle + month navigation (0 = current month).
@@ -167,15 +165,11 @@ export default function CalendarScreen() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      fetchJobs().then(({ jobs: fetched, isMock: mock }) => {
-        if (cancelled) return;
-        setJobs(fetched);
-        setIsMock(mock);
+      fetchJobs().then(({ jobs: fetched }) => {
+        if (!cancelled) setJobs(fetched);
       });
-      fetchScheduleEntries().then(({ entries, isMock: mock }) => {
-        if (cancelled) return;
-        setScheduleEntries(entries);
-        setScheduleIsMock(mock);
+      fetchScheduleEntries().then(({ entries }) => {
+        if (!cancelled) setScheduleEntries(entries);
       });
       fetchAssignmentsByJob().then((map) => {
         if (!cancelled) setAssignments(map);
@@ -239,19 +233,16 @@ export default function CalendarScreen() {
   );
 
   const today = todayISO();
-  // Signed-in with an empty real schedule: the schedule fetch falls back to
-  // mock — treat that as "no entries" instead of showing demo rows.
-  const realEntries = scheduleIsMock && !isMock ? [] : scheduleEntries;
-  const todayEntries = realEntries.filter((e) => e.work_date === today);
+  const todayEntries = scheduleEntries.filter((e) => e.work_date === today);
   const todaysJobs =
     todayEntries.length > 0
       ? todayEntries
           .map((e) => e.job)
           .filter((job, index, arr) => arr.findIndex((j) => j.id === job.id) === index)
       : jobs.filter((j) => j.scheduled_for === today);
-  // Signed-in devices use the week range query; demo/mock mode falls back to
-  // the bundled entries so the signed-out preview still shows something.
-  const weekSource = scheduleIsMock ? realEntries : (weekEntries ?? realEntries);
+  // The week pager has its own range query; until it lands, fall back to the
+  // default ±window fetch so the week doesn't flash empty.
+  const weekSource = weekEntries ?? scheduleEntries;
   const weekRows = buildWeekRows(weekSource, weekOffset);
 
   const openJob = (id: string) => router.push({ pathname: '/job/[id]', params: { id } });
@@ -536,12 +527,6 @@ export default function CalendarScreen() {
           </Card>
         </>
       )}
-
-      {isMock ? (
-        <AppText variant="caption" color={colors.textMuted} align="center" style={styles.mockNote}>
-          Showing demo data
-        </AppText>
-      ) : null}
     </Screen>
   );
 }
@@ -679,8 +664,5 @@ const styles = StyleSheet.create({
   gridMore: {
     fontSize: 9,
     lineHeight: 12,
-  },
-  mockNote: {
-    marginTop: spacing.md,
   },
 });

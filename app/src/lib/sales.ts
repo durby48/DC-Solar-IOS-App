@@ -17,7 +17,7 @@
  */
 
 import { supabase } from '@/lib/supabase';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 
 const COMPANY = 'dc-solar';
 

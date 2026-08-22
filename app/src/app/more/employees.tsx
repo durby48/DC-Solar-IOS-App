@@ -10,7 +10,9 @@ import {
   View,
 } from 'react-native';
 
+import { EmptyState } from '@/components/ui';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { fetchPaystubs, type EmployeeDocument } from '@/lib/paystubs';
 import { getRole, type EmployeeRole, type RoleInfo } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
@@ -28,11 +30,11 @@ const ROLE_META: Record<EmployeeRole, { label: string; bg: string; text: string 
   viewer: { bg: colors.tan, text: colors.inkSoft, label: 'Viewer' },
 };
 
-const PLACEHOLDER_SECTIONS: { icon: keyof typeof Ionicons.glyphMap; title: string }[] = [
-  { icon: 'cash', title: 'Pay history' },
-  { icon: 'document-text', title: 'Tax documents (W-4/W-2)' },
-  { icon: 'briefcase', title: 'Employment details' },
-];
+/** What the expanded row shows for one employee's documents. */
+type DocsState =
+  | { status: 'loading' }
+  | { status: 'ok'; paystubs: EmployeeDocument[] }
+  | { status: 'unavailable' };
 
 function formatPayRate(rate: number | null): string | null {
   if (rate == null || !Number.isFinite(rate)) return null;
@@ -82,6 +84,33 @@ export default function EmployeesScreen() {
   const [listState, setListState] = useState<'loading' | 'ok' | 'unavailable'>('loading');
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  /** Paystub rows per employee, fetched the first time a row is expanded. */
+  const [docs, setDocs] = useState<Map<string, DocsState>>(new Map());
+
+  /**
+   * Load one employee's paystubs on demand. Admins read the whole company
+   * under RLS, so this is scoped by employee_id rather than filtered here.
+   */
+  useEffect(() => {
+    const id = expandedId;
+    if (!id || docs.has(id)) return;
+    let cancelled = false;
+    setDocs((prev) => new Map(prev).set(id, { status: 'loading' }));
+    fetchPaystubs(id).then((result) => {
+      if (cancelled) return;
+      setDocs((prev) =>
+        new Map(prev).set(
+          id,
+          result.status === 'ok'
+            ? { status: 'ok', paystubs: result.paystubs }
+            : { status: 'unavailable' },
+        ),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedId, docs]);
 
   useEffect(() => {
     if (gate.state !== 'in' || !isAdmin) return;
@@ -117,6 +146,50 @@ export default function EmployeesScreen() {
     };
   }, [gate.state, isAdmin]);
 
+  /** The expanded row: what this employee actually has on file. */
+  const renderDocs = (employee: EmployeeRow) => {
+    const state = docs.get(employee.id) ?? { status: 'loading' as const };
+    if (state.status === 'loading') {
+      return (
+        <View style={styles.docsCard}>
+          <ActivityIndicator color={colors.ocean} />
+        </View>
+      );
+    }
+    if (state.status === 'unavailable') {
+      return (
+        <View style={styles.docsCard}>
+          <Text style={styles.docsText}>Documents are unavailable right now.</Text>
+        </View>
+      );
+    }
+    if (state.paystubs.length === 0) {
+      return (
+        <EmptyState
+          icon="document-text"
+          title="No documents on file"
+          body="Paystubs uploaded on the Paystubs screen show up here."
+        />
+      );
+    }
+    const newest = state.paystubs[0];
+    return (
+      <View style={styles.docsCard}>
+        <View style={styles.docsHeader}>
+          <Ionicons name="document-text" size={16} color={colors.ocean} />
+          <Text style={styles.docsTitle}>
+            {state.paystubs.length === 1 ? '1 paystub' : `${state.paystubs.length} paystubs`}
+          </Text>
+        </View>
+        <Text style={styles.docsText}>
+          {newest.period_label
+            ? `Most recent: ${newest.period_label}`
+            : `Most recent: ${newest.created_at.slice(0, 10)}`}
+        </Text>
+      </View>
+    );
+  };
+
   const renderEmployee = (employee: EmployeeRow) => {
     const meta = ROLE_META[employee.role] ?? ROLE_META.viewer;
     const pay = formatPayRate(employee.pay_rate);
@@ -145,21 +218,7 @@ export default function EmployeesScreen() {
             color={colors.inkSoft}
           />
         </Pressable>
-        {expanded ? (
-          <View style={styles.expandArea}>
-            {PLACEHOLDER_SECTIONS.map((section) => (
-              <View key={section.title} style={styles.placeholderCard}>
-                <View style={styles.placeholderHeader}>
-                  <Ionicons name={section.icon} size={16} color={colors.ocean} />
-                  <Text style={styles.placeholderTitle}>{section.title}</Text>
-                </View>
-                <View style={styles.comingSoonPill}>
-                  <Text style={styles.comingSoonText}>Coming soon</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        ) : null}
+        {expanded ? <View style={styles.expandArea}>{renderDocs(employee)}</View> : null}
       </View>
     );
   };
@@ -194,13 +253,6 @@ export default function EmployeesScreen() {
           </View>
         ) : (
           <>
-            <View style={styles.noteCard}>
-              <Ionicons name="information-circle" size={18} color={colors.ocean} />
-              <Text style={styles.noteText}>
-                Payroll data will appear here after the Gusto migration.
-              </Text>
-            </View>
-
             <Text style={styles.sectionTitle}>Team</Text>
             {listState === 'loading' ? (
               <View style={styles.centerCard}>
@@ -268,20 +320,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
-  noteCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.md,
-  },
-  noteText: {
-    flex: 1,
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '600',
-  },
   employeeCard: {
     backgroundColor: colors.white,
     borderRadius: radii.md,
@@ -344,38 +382,26 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     gap: spacing.sm,
   },
-  placeholderCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
+  docsCard: {
+    gap: spacing.xs,
     backgroundColor: colors.skySoft,
     borderRadius: radii.sm,
     padding: spacing.md,
   },
-  placeholderHeader: {
+  docsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    flexShrink: 1,
   },
-  placeholderTitle: {
+  docsTitle: {
     color: colors.ink,
     fontSize: 14,
     fontWeight: '700',
     flexShrink: 1,
   },
-  comingSoonPill: {
-    borderRadius: radii.pill,
-    backgroundColor: colors.white,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-  },
-  comingSoonText: {
+  docsText: {
     color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

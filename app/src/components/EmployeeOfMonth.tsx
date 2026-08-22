@@ -8,13 +8,13 @@ import { accentCycle, colors, radii, shadows, spacing } from '@/constants/theme'
 import { fetchEmployeeOfMonth, type EmployeeOfMonthCard } from '@/lib/eom';
 
 /**
- * Employee of the Month card for the Today screen — visible to EVERY role,
+ * Employee of the Month card for the Home screen — visible to EVERY role,
  * crew included. That's the point: it's a bit of company recognition, not an
  * admin report, and it carries nothing but a name, a photo and a caption.
  *
- * Renders NOTHING when there is no card to show (table not migrated yet, RLS
- * denied, no rows at all). `fetchEmployeeOfMonth` never throws, so the worst
- * case here is an absent card, never a broken Today screen.
+ * Renders NOTHING when there is no card to show (signed out, table not
+ * migrated yet, RLS denied, no rows at all). `fetchEmployeeOfMonth` never
+ * throws, so the worst case here is an absent card, never a broken screen.
  *
  * The month in the eyebrow is always the CURRENT month even when the row shown
  * is an older one — see lib/eom.ts for why the fallback exists.

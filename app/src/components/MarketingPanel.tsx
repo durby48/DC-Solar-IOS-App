@@ -2,6 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { MarketingPhotos } from '@/components/MarketingPhotos';
+import { Card, EmptyState } from '@/components/ui';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
 import {
@@ -28,11 +30,24 @@ import { useRole } from '@/lib/role';
  * looks us up. It sits next to the sales funnel on purpose: "where did this
  * month's leads come from" is a marketing question with a sales answer.
  *
- * NOTHING IS CONNECTED YET, and the panel says so rather than implying the
- * numbers are live. Google Business Profile API access has to be requested and
- * approved by Google, and Meta needs a developer app Devon creates — see
- * docs/MARKETING_SETUP.md. Until then `fetchMarketingOverview` returns sample
- * data flagged `isMock`, which is what the note at the top of the panel means.
+ * NOTHING IS CONNECTED YET, and the panel now shows that as an empty state
+ * rather than as sample numbers. It used to open on plausible view counts and
+ * three invented reviews under a small amber "Sample data" badge — anyone who
+ * scrolled past the badge read fabricated praise from named customers, one of
+ * them carrying a fabricated reply signed by DC Solar. All of that is deleted;
+ * see the docstring in `lib/marketing.ts`.
+ *
+ * THREE LAYOUTS, one per `overview.state`:
+ *   unavailable   — one EmptyState. We could not ask, so we say nothing else.
+ *   not-connected — an explanation card, then four platform cards reduced to
+ *                   name + "Not connected" + Connect. NO metric grid: six
+ *                   em-dashes per card is a worse way of saying "no data" than
+ *                   not drawing the grid at all.
+ *   connected     — the full dashboard: reputation, period, metrics, reviews.
+ *
+ * The installation-photo strip is mounted ABOVE all three, because those
+ * photos come from storage rather than from a platform API and are the only
+ * real content this panel has today.
  *
  * Visible to EVERY role: profile views are not money. The Connect and Reply
  * buttons are drawn for admins only, which is cosmetic — RLS is the barrier
@@ -73,56 +88,31 @@ const PLATFORM_TONE: Record<MarketingPlatform, { fg: string; bg: string }> = {
 };
 
 /**
- * What connecting a platform actually does, in plain words. Shown before any
- * OAuth flow exists, because the honest answer today is "not yet, and here is
- * what has to happen first".
+ * What connecting a platform actually does, in three lines: what it reads,
+ * that it only reads, and why it cannot be switched on today. The long
+ * version — OAuth mechanics, the exact Meta permission list — lives in
+ * docs/MARKETING_SETUP.md, which is where somebody doing the setup will be.
  */
 function connectExplanation(platform: MarketingPlatform): { title: string; body: string } {
-  const shared =
-    'Connecting uses OAuth: you sign in on their site and approve access. ' +
-    'DC Solar never stores your password — only a revocable token, kept ' +
-    'server-side where the app cannot read it.';
-
   if (platform === 'google_business') {
     return {
       title: 'Connect Google Business Profile',
       body:
-        'This would read your profile performance (views on Search and Maps, ' +
-        'website clicks, calls, direction requests, messages) and your reviews, ' +
-        'so they show here instead of in a separate dashboard. It reads only — ' +
-        'it never posts.\n\n' +
-        `${shared}\n\n` +
-        'NOT AVAILABLE YET. Google requires the Business Profile APIs to be ' +
-        'enabled on a Google Cloud project AND an access request approved by ' +
-        'Google before any of this works. That is a form Devon submits, and it ' +
-        'takes a few days. See docs/MARKETING_SETUP.md.',
+        'Pulls your profile views, website clicks, calls, direction requests and reviews into this panel. Read only — it never posts.\n\nNot available yet: Google has to approve an API access request first.\n\nSee docs/MARKETING_SETUP.md.',
     };
   }
   if (platform === 'facebook' || platform === 'instagram') {
-    const which = platform === 'facebook' ? 'the Facebook page' : 'the Instagram business account';
+    const which = platform === 'facebook' ? 'the page' : 'the business account';
     return {
       title: `Connect ${PLATFORM_LABELS[platform]}`,
       body:
-        `This would read insights for ${which} — reach, followers and ` +
-        'engagement — plus page reviews and recommendations. Read only; it ' +
-        'never posts on your behalf.\n\n' +
-        `${shared}\n\n` +
-        'NOT AVAILABLE YET. Meta requires a developer app that Devon creates ' +
-        'at developers.facebook.com, with the pages_read_engagement, ' +
-        'read_insights, instagram_basic and instagram_manage_insights ' +
-        'permissions. Instagram also has to be a business account linked to ' +
-        'the Facebook page. See docs/MARKETING_SETUP.md.',
+        `Pulls reach, followers and engagement for ${which}, plus reviews and recommendations. Read only — it never posts on your behalf.\n\nNot available yet: Meta needs a developer app Devon creates first.\n\nSee docs/MARKETING_SETUP.md.`,
     };
   }
   return {
     title: 'Connect Yelp',
     body:
-      'This would read the Yelp business rating and review count. Yelp does ' +
-      'not expose full review text or replies to the Fusion API, so this card ' +
-      'stays deliberately thin.\n\n' +
-      'Yelp uses an API key rather than OAuth — Devon creates one at ' +
-      'yelp.com/developers and it is stored server-side, never in the app.\n\n' +
-      'NOT AVAILABLE YET. See docs/MARKETING_SETUP.md.',
+      'Pulls the Yelp rating and review count. Yelp does not expose review text to its API, so this card stays deliberately thin.\n\nNot available yet: it needs an API key, stored server-side and never in the app.\n\nSee docs/MARKETING_SETUP.md.',
   };
 }
 
@@ -172,11 +162,48 @@ export function MarketingPanel({ refreshKey = 0 }: { refreshKey?: number }) {
     [openNotice],
   );
 
+  /**
+   * The photo strip is outside every branch below, including loading: it owns
+   * its own fetch, and it renders nothing at all when the library is not set
+   * up, so it can be mounted unconditionally.
+   */
+  const withPhotos = (body: React.ReactNode) => (
+    <>
+      <MarketingPhotos refreshKey={refreshKey} />
+      {body}
+    </>
+  );
+
+  const noticeCard = notice ? (
+    <View style={styles.noticeCard}>
+      <View style={styles.noticeHeader}>
+        <Text style={styles.noticeTitle}>{notice.title}</Text>
+        <Pressable onPress={() => setNotice(null)} hitSlop={8}>
+          <Ionicons name="close" size={18} color={colors.inkSoft} />
+        </Pressable>
+      </View>
+      <Text style={styles.noticeBody}>{notice.body}</Text>
+    </View>
+  ) : null;
+
+  const footnote = (
+    <Text style={styles.footnote}>
+      Reach numbers are visible to everyone — they are not money. Replying and
+      connecting are admin-only, and enforced in the database, not here.
+    </Text>
+  );
+
   if (!loaded) {
-    return <ActivityIndicator style={styles.loading} color={colors.ocean} />;
+    return withPhotos(<ActivityIndicator style={styles.loading} color={colors.ocean} />);
   }
-  if (!data) {
-    return <Text style={styles.empty}>Couldn&apos;t load marketing data. Pull to retry.</Text>;
+  if (!data || data.state === 'unavailable') {
+    return withPhotos(
+      <EmptyState
+        icon="cloud-offline"
+        title="Marketing isn't available right now"
+        body="Pull down to retry."
+      />,
+    );
   }
 
   const connectionOf = (platform: MarketingPlatform) =>
@@ -190,28 +217,74 @@ export function MarketingPanel({ refreshKey = 0 }: { refreshKey?: number }) {
       lastError: null,
     };
 
-  return (
-    <>
-      {data.isMock ? (
-        <View style={styles.mockNote}>
-          <Ionicons name="information-circle" size={16} color={colors.inkSoft} />
-          <Text style={styles.mockNoteText}>
-            Sample data — connect a platform to see real numbers.
+  const connectButton = (platform: MarketingPlatform) => (
+    <Pressable
+      onPress={() => openNotice(connectExplanation(platform))}
+      style={({ pressed }) => [styles.connectButton, pressed && styles.pressed]}>
+      <Ionicons name="link" size={14} color={colors.ink} />
+      <Text style={styles.connectButtonText}>{`Connect ${PLATFORM_SHORT[platform]}`}</Text>
+    </Pressable>
+  );
+
+  // -------------------------------------------------------------------
+  // Nothing connected: explain it once, then four name-only cards.
+  // -------------------------------------------------------------------
+  if (data.state === 'not-connected') {
+    return withPhotos(
+      <>
+        {noticeCard}
+
+        <Card style={styles.introCard}>
+          <Text style={styles.introTitle}>Nothing is connected yet</Text>
+          <Text style={styles.introBody}>
+            Google, Facebook, Instagram and Yelp each have to be connected
+            before their numbers and reviews can appear here. None of them are,
+            so there is nothing to report yet — these cards are empty, not zero.
+          </Text>
+          <Text style={styles.introBody}>
+            {isAdmin
+              ? 'Tap Connect on a platform to see exactly what it needs first.'
+              : 'Devon connects these from this screen once each platform approves access.'}
+          </Text>
+        </Card>
+
+        {MARKETING_PLATFORMS.map((platform) => {
+          const tone = PLATFORM_TONE[platform];
+          return (
+            <View key={platform} style={styles.card}>
+              <View style={styles.platformHeader}>
+                <View style={[styles.platformIcon, { backgroundColor: tone.bg }]}>
+                  <Ionicons name={PLATFORM_ICON[platform]} size={16} color={tone.fg} />
+                </View>
+                <View style={styles.platformTitleWrap}>
+                  <Text style={styles.platformTitle}>{PLATFORM_LABELS[platform]}</Text>
+                  <Text style={styles.platformSub}>Not connected</Text>
+                </View>
+              </View>
+              {isAdmin ? connectButton(platform) : null}
+            </View>
+          );
+        })}
+
+        <Text style={styles.sectionTitle}>Recent reviews</Text>
+        <View style={styles.card}>
+          <Text style={styles.emptyLead}>No reviews connected</Text>
+          <Text style={styles.emptyLeadHint}>
+            Reviews land here once a platform is connected.
           </Text>
         </View>
-      ) : null}
 
-      {notice ? (
-        <View style={styles.noticeCard}>
-          <View style={styles.noticeHeader}>
-            <Text style={styles.noticeTitle}>{notice.title}</Text>
-            <Pressable onPress={() => setNotice(null)} hitSlop={8}>
-              <Ionicons name="close" size={18} color={colors.inkSoft} />
-            </Pressable>
-          </View>
-          <Text style={styles.noticeBody}>{notice.body}</Text>
-        </View>
-      ) : null}
+        {footnote}
+      </>,
+    );
+  }
+
+  // -------------------------------------------------------------------
+  // Connected: the real dashboard.
+  // -------------------------------------------------------------------
+  return withPhotos(
+    <>
+      {noticeCard}
 
       {/* ---- Reputation ---- */}
       <Text style={styles.sectionTitle}>Reputation</Text>
@@ -223,7 +296,11 @@ export function MarketingPanel({ refreshKey = 0 }: { refreshKey?: number }) {
             </Text>
             <Stars rating={data.rating.average} size={16} />
             <Text style={styles.repCount}>
-              {data.rating.count === 1 ? '1 Google review' : `${data.rating.count} Google reviews`}
+              {data.rating.count === 0
+                ? 'No reviews connected'
+                : data.rating.count === 1
+                  ? '1 Google review'
+                  : `${data.rating.count} Google reviews`}
             </Text>
           </View>
           <View style={styles.repIconWrap}>
@@ -308,32 +385,27 @@ export function MarketingPanel({ refreshKey = 0 }: { refreshKey?: number }) {
                       }`
                     : connection.status === 'error'
                       ? (connection.lastError ?? 'Last sync failed')
-                      : 'Not connected yet'}
+                      : 'Not connected'}
                 </Text>
               </View>
             </View>
 
-            <View style={styles.metricGrid}>
-              {PLATFORM_METRICS[platform].map((metric) => (
-                <View key={metric.key} style={styles.metricTile}>
-                  <Text style={styles.metricLabel}>{metric.label}</Text>
-                  <Text style={styles.metricValue} numberOfLines={1} adjustsFontSizeToFit>
-                    {formatMetric(bag[metric.key], metric.key)}
-                  </Text>
-                </View>
-              ))}
-            </View>
-
-            {connection.status !== 'connected' && isAdmin ? (
-              <Pressable
-                onPress={() => openNotice(connectExplanation(platform))}
-                style={({ pressed }) => [styles.connectButton, pressed && styles.pressed]}>
-                <Ionicons name="link" size={14} color={colors.ink} />
-                <Text style={styles.connectButtonText}>
-                  {`Connect ${PLATFORM_SHORT[platform]}`}
-                </Text>
-              </Pressable>
+            {/* A disconnected platform has no numbers to grid — showing six
+                em-dashes reads as broken rather than as "not set up". */}
+            {connection.status === 'connected' ? (
+              <View style={styles.metricGrid}>
+                {PLATFORM_METRICS[platform].map((metric) => (
+                  <View key={metric.key} style={styles.metricTile}>
+                    <Text style={styles.metricLabel}>{metric.label}</Text>
+                    <Text style={styles.metricValue} numberOfLines={1} adjustsFontSizeToFit>
+                      {formatMetric(bag[metric.key], metric.key)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
             ) : null}
+
+            {connection.status !== 'connected' && isAdmin ? connectButton(platform) : null}
           </View>
         );
       })}
@@ -344,7 +416,7 @@ export function MarketingPanel({ refreshKey = 0 }: { refreshKey?: number }) {
         <View style={styles.card}>
           <Text style={styles.emptyLead}>No reviews yet.</Text>
           <Text style={styles.emptyLeadHint}>
-            Once a platform is connected, its most recent reviews land here.
+            Reviews land here once a platform is connected.
           </Text>
         </View>
       ) : (
@@ -392,17 +464,13 @@ export function MarketingPanel({ refreshKey = 0 }: { refreshKey?: number }) {
         ))
       )}
 
-      <Text style={styles.footnote}>
-        Reach numbers are visible to everyone — they are not money. Replying and
-        connecting are admin-only, and enforced in the database, not here.
-      </Text>
-    </>
+      {footnote}
+    </>,
   );
 }
 
 const styles = StyleSheet.create({
   loading: { marginTop: spacing.xl },
-  empty: { color: colors.inkSoft, marginTop: spacing.lg },
   sectionTitle: {
     marginTop: spacing.md,
     fontSize: 13,
@@ -422,17 +490,12 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: colors.line },
   dash: { color: colors.inkSoft, fontSize: 14, fontWeight: '700' },
 
-  mockNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.amberSoft,
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs + 2,
-    marginTop: spacing.sm,
+  introCard: {
+    gap: spacing.sm,
+    marginTop: spacing.md,
   },
-  mockNoteText: { color: colors.ink, fontSize: 12, fontWeight: '700', flexShrink: 1 },
+  introTitle: { color: colors.ink, fontSize: 17, fontWeight: '800' },
+  introBody: { color: colors.inkSoft, fontSize: 13, lineHeight: 19, fontWeight: '600' },
 
   noticeCard: {
     backgroundColor: colors.skySoft,

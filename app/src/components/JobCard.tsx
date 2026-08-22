@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { StatusPill } from '@/components/StatusPill';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 import { labelForJob } from '@/lib/stages';
 
 export function JobCard({ job, subtitle }: { job: Job; subtitle?: string }) {

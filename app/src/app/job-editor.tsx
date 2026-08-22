@@ -98,7 +98,7 @@ export default function JobEditorScreen() {
     if (jobId) {
       fetchJob(jobId).then((result) => {
         if (cancelled) return;
-        if (!result || result.id.startsWith('mock-')) {
+        if (!result) {
           setNotFound(true);
           setLoading(false);
           return;

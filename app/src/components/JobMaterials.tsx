@@ -42,15 +42,7 @@ function formatQty(qty: number): string {
  * extractor (extract-materials edge function) whose results are reviewed
  * before saving. Crew sees the list read-only; admins manage everything.
  */
-export function JobMaterials({
-  jobId,
-  isAdmin,
-  isMock,
-}: {
-  jobId: string;
-  isAdmin: boolean;
-  isMock: boolean;
-}) {
+export function JobMaterials({ jobId, isAdmin }: { jobId: string; isAdmin: boolean }) {
   const [materials, setMaterials] = useState<MaterialRow[]>([]);
   const [docs, setDocs] = useState<JobDocument[]>([]);
   const [state, setState] = useState<'loading' | 'ok' | 'unavailable'>('loading');
@@ -79,10 +71,6 @@ export function JobMaterials({
   const [savingReview, setSavingReview] = useState(false);
 
   const load = useCallback(async () => {
-    if (isMock) {
-      setState('unavailable');
-      return;
-    }
     const [materialsResult, docsResult] = await Promise.all([
       fetchJobMaterials(jobId),
       fetchJobDocuments(jobId),
@@ -99,7 +87,7 @@ export function JobMaterials({
         ? docsResult.documents.filter((d) => d.doc_type === 'materials')
         : [],
     );
-  }, [jobId, isMock]);
+  }, [jobId]);
 
   useEffect(() => {
     load();
@@ -371,7 +359,7 @@ export function JobMaterials({
         <View style={styles.placeholderCard}>
           <Ionicons name="hammer" size={22} color={colors.inkSoft} />
           <Text style={styles.placeholderText}>
-            {isMock ? 'Materials are available on real jobs.' : 'Materials need the latest database migration.'}
+            Materials need the latest database migration.
           </Text>
         </View>
       ) : (

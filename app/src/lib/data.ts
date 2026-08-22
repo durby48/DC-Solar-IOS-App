@@ -1,5 +1,4 @@
 import { CUSTOMER_COLUMNS } from '@/lib/crm';
-import { MOCK_JOBS, MOCK_SCHEDULE_DATES } from '@/lib/mockData';
 import { supabase } from '@/lib/supabase';
 import { type Job, type ScheduleDate } from '@/lib/types';
 
@@ -24,12 +23,22 @@ function normalize(row: Record<string, unknown>): Job {
   };
 }
 
+/** Did the request reach the database, whatever it came back with? */
+export type FetchStatus = 'ok' | 'unavailable';
+
 /**
- * Fetch all jobs for DC Solar KC. Falls back to bundled mock data when the
- * request errors (network / RLS) or returns no rows, so the app is always
- * demo-able.
+ * Fetch all jobs for DC Solar KC.
+ *
+ * ZERO ROWS IS SUCCESS. `status: 'ok'` with an empty array means the query
+ * ran and the company genuinely has no jobs — a brand-new install, or a
+ * signed-out browser that RLS answers with nothing. `status: 'unavailable'`
+ * means the request itself failed (network, RLS error, missing table) and the
+ * screen should say "couldn't load", not "nothing here". Until 2026-08-22 both
+ * of those returned five bundled fake jobs instead; they no longer exist.
+ *
+ * Never throws.
  */
-export async function fetchJobs(): Promise<{ jobs: Job[]; isMock: boolean }> {
+export async function fetchJobs(): Promise<{ jobs: Job[]; status: FetchStatus }> {
   try {
     const { data, error } = await supabase
       .from('jobs')
@@ -37,12 +46,10 @@ export async function fetchJobs(): Promise<{ jobs: Job[]; isMock: boolean }> {
       .eq('company', COMPANY)
       .order('scheduled_for', { ascending: true });
 
-    if (error || !data || data.length === 0) {
-      return { jobs: MOCK_JOBS, isMock: true };
-    }
-    return { jobs: data.map(normalize), isMock: false };
+    if (error || !data) return { jobs: [], status: 'unavailable' };
+    return { jobs: data.map(normalize), status: 'ok' };
   } catch {
-    return { jobs: MOCK_JOBS, isMock: true };
+    return { jobs: [], status: 'unavailable' };
   }
 }
 
@@ -195,10 +202,8 @@ export async function uploadJobDocument(params: {
   }
 }
 
-/** Fetch a single job by id, falling back to mock data. */
+/** Fetch a single job by id. Null when it doesn't exist or can't be read. */
 export async function fetchJob(id: string): Promise<Job | null> {
-  const mock = MOCK_JOBS.find((j) => j.id === id);
-  if (mock) return mock;
   try {
     const { data, error } = await supabase
       .from('jobs')
@@ -369,16 +374,12 @@ export async function deleteJobPhoto(photo: JobPhoto): Promise<DeletePhotoResult
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch a job's scheduled work days, ascending. Falls back to mock schedule
- * rows (which only match mock job ids) on error or empty result.
+ * Fetch a job's scheduled work days, ascending. An empty array with
+ * `status: 'ok'` means the job simply has no days on the calendar yet.
  */
 export async function fetchJobScheduleDates(
   jobId: string,
-): Promise<{ dates: ScheduleDate[]; isMock: boolean }> {
-  const mock = MOCK_SCHEDULE_DATES.filter((d) => d.job_id === jobId).sort((a, b) =>
-    a.work_date.localeCompare(b.work_date),
-  );
-  if (jobId.startsWith('mock-')) return { dates: mock, isMock: true };
+): Promise<{ dates: ScheduleDate[]; status: FetchStatus }> {
   try {
     const { data, error } = await supabase
       .from('job_schedule_dates')
@@ -386,10 +387,10 @@ export async function fetchJobScheduleDates(
       .eq('company', COMPANY)
       .eq('job_id', jobId)
       .order('work_date', { ascending: true });
-    if (error) return { dates: mock, isMock: true };
-    return { dates: (data ?? []) as ScheduleDate[], isMock: false };
+    if (error) return { dates: [], status: 'unavailable' };
+    return { dates: (data ?? []) as ScheduleDate[], status: 'ok' };
   } catch {
-    return { dates: mock, isMock: true };
+    return { dates: [], status: 'unavailable' };
   }
 }
 
@@ -480,16 +481,12 @@ export interface ScheduleEntry extends ScheduleDate {
 
 /**
  * Fetch schedule days (past 7 days through next 60) joined with their jobs.
- * Falls back to joining the bundled mock data.
+ * `status: 'ok'` with no entries means nothing is scheduled in that window.
  */
 export async function fetchScheduleEntries(): Promise<{
   entries: ScheduleEntry[];
-  isMock: boolean;
+  status: FetchStatus;
 }> {
-  const mockEntries: ScheduleEntry[] = MOCK_SCHEDULE_DATES.flatMap((d) => {
-    const job = MOCK_JOBS.find((j) => j.id === d.job_id);
-    return job ? [{ ...d, job }] : [];
-  });
   try {
     const from = new Date();
     from.setDate(from.getDate() - 7);
@@ -507,9 +504,7 @@ export async function fetchScheduleEntries(): Promise<{
       .order('work_date', { ascending: true })
       .order('start_time', { ascending: true });
 
-    if (error || !data || data.length === 0) {
-      return { entries: mockEntries, isMock: true };
-    }
+    if (error || !data) return { entries: [], status: 'unavailable' };
     const entries: ScheduleEntry[] = [];
     for (const row of data as Record<string, unknown>[]) {
       const jobs = row.jobs;
@@ -525,9 +520,9 @@ export async function fetchScheduleEntries(): Promise<{
         job: normalize(jobRow as Record<string, unknown>),
       });
     }
-    return { entries, isMock: false };
+    return { entries, status: 'ok' };
   } catch {
-    return { entries: mockEntries, isMock: true };
+    return { entries: [], status: 'unavailable' };
   }
 }
 

@@ -43,12 +43,11 @@ function timeToDate(time: string): Date {
 
 /**
  * "Scheduled days" card for a job. All members see the list; admins can add
- * and remove days. In demo mode (mock data) the list is read-only.
+ * and remove days — RLS is the real barrier, `isAdmin` only draws the buttons.
  */
 export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: boolean }) {
   const [dates, setDates] = useState<ScheduleDate[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isMock, setIsMock] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Add-day form state
@@ -75,7 +74,6 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
     fetchJobScheduleDates(jobId).then((result) => {
       if (cancelled) return;
       setDates(sortDates(result.dates));
-      setIsMock(result.isMock);
       setLoading(false);
     });
     return () => {
@@ -83,7 +81,7 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
     };
   }, [jobId]);
 
-  const canEdit = isAdmin && !isMock;
+  const canEdit = isAdmin;
 
   const resetForm = useCallback(() => {
     setShowForm(false);

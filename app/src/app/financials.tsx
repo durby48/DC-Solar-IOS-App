@@ -28,7 +28,7 @@ import {
   fetchUnpaidWages,
   type CompanySettings,
 } from '@/lib/cashPosition';
-import { type Job } from '@/lib/mockData';
+import { type Job } from '@/lib/types';
 import { isCompanyJob } from '@/lib/stages';
 import {
   fetchCompanyTotals,
@@ -279,7 +279,7 @@ export default function FinancialsScreen() {
 
   const load = useCallback(async () => {
     if (role?.isAdmin) {
-      const [financials, { jobs, isMock }, labor] = await Promise.all([
+      const [financials, { jobs }, labor] = await Promise.all([
         fetchFinancials(),
         fetchPipelineJobs(),
         fetchLaborHoursByJob(),
@@ -290,22 +290,18 @@ export default function FinancialsScreen() {
       setData(financials);
       setLaborMap(labor);
       // Same math as the Pipeline header, fed by the same rows we just got.
-      setTotals(
-        financials && !isMock ? await fetchCompanyTotals(jobs, financials.allEntries) : null,
+      setTotals(financials ? await fetchCompanyTotals(jobs, financials.allEntries) : null);
+      setJobsFull(jobs);
+      const container =
+        jobs.find((j) => (j as unknown as { is_internal?: boolean }).is_internal) ?? null;
+      setCompanyJobId(container?.id ?? null);
+      // Keep the container out of the job list — it has its own chip.
+      setJobOptions(
+        jobs
+          .filter((j) => j.id !== container?.id)
+          .map((j) => ({ id: j.id, label: j.job_number ?? j.name })),
       );
-      if (!isMock) {
-        setJobsFull(jobs);
-        const container =
-          jobs.find((j) => (j as unknown as { is_internal?: boolean }).is_internal) ?? null;
-        setCompanyJobId(container?.id ?? null);
-        // Keep the container out of the job list — it has its own chip.
-        setJobOptions(
-          jobs
-            .filter((j) => j.id !== container?.id)
-            .map((j) => ({ id: j.id, label: j.job_number ?? j.name })),
-        );
-        setJobLabels(new Map(jobs.map((j) => [j.id, j.job_number ?? j.name])));
-      }
+      setJobLabels(new Map(jobs.map((j) => [j.id, j.job_number ?? j.name])));
     } else {
       setData(null);
       setTotals(null);

@@ -2,15 +2,24 @@
  * Marketing: reputation and reach across Google Business Profile, Facebook,
  * Instagram and Yelp.
  *
- * NOTHING IS CONNECTED YET. Google Business Profile API access must be
- * requested on a Google Cloud project and approved by Google, and Meta needs a
- * developer app Devon creates — docs/MARKETING_SETUP.md walks through both.
- * Until then this module returns a clearly-labelled MOCK dataset so the panel
- * is fully testable in the web build, and the UI says so on screen.
+ * NOTHING IS CONNECTED YET, AND THE APP NO LONGER PRETENDS OTHERWISE. This
+ * module used to answer every failure with a sample dataset — plausible view
+ * counts and three invented five-star reviews from named people, one of them
+ * carrying a fabricated reply signed by DC Solar. Reviews are the one thing a
+ * contractor cannot fake even in a demo, so all of it is gone. An empty
+ * overview is returned instead, and the panel says which kind of empty it is.
  *
- * DEGRADES, NEVER THROWS. Missing tables, an RLS refusal, a signed-out
- * session, or a dead network all resolve to the same thing: mock data with
- * `isMock: true`. A marketing dashboard is not worth a crash on a roof.
+ * THREE STATES, NOT A FLAG. `state` is the whole answer:
+ *   connected     — the query ran and at least one platform row exists.
+ *   not-connected — the query ran and `marketing_connections` is empty. The
+ *                   feature is simply not set up; four zeroed cards would read
+ *                   as "your marketing got no views", which is a different and
+ *                   false claim.
+ *   unavailable   — nobody is signed in, or the request itself failed
+ *                   (missing table, RLS refusal, dead network).
+ *
+ * DEGRADES, NEVER THROWS. Every one of those paths returns a valid overview.
+ * A marketing dashboard is not worth a crash on a roof.
  *
  * VISIBILITY. Every company member reads these numbers — profile views are not
  * money, and there is nothing here to leak the way finance_entries once did.
@@ -91,9 +100,14 @@ export interface MarketingReview {
  */
 export type MetricBag = Partial<Record<string, number>>;
 
+/**
+ * Why the overview looks the way it does. See the module docstring — the UI
+ * branches on this, and "no data" and "couldn't ask" are different sentences.
+ */
+export type MarketingState = 'connected' | 'not-connected' | 'unavailable';
+
 export interface MarketingOverview {
-  /** True when these numbers are sample data, not from a live connection. */
-  isMock: boolean;
+  state: MarketingState;
   period: MarketingPeriod;
   connections: MarketingConnection[];
   metrics: Record<MarketingPlatform, MetricBag>;
@@ -156,22 +170,24 @@ function isoDaysAgo(days: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Mock dataset
+// Empty overview
 // ---------------------------------------------------------------------------
 
 /**
- * Plausible numbers for a small Kansas City solar contractor, scaled by the
- * period so switching 7d → 90d visibly moves the flow metrics and leaves the
- * level metrics (followers, rating) alone. Deliberately NOT round numbers —
- * a demo full of 100s looks fake and gets mistaken for a bug.
+ * A real, honest nothing: every platform disconnected, no metrics, no
+ * reviews, no headline rating. `state` carries the reason, and the panel
+ * turns that into either "nothing is connected yet" or "marketing isn't
+ * available right now".
+ *
+ * `rating.count` is 0 but `rating.average` is null on purpose — zero reviews
+ * is a fact, an average of zero stars is not.
  */
-function mockOverview(period: MarketingPeriod): MarketingOverview {
-  const days = periodDays(period);
-  const scale = days / 28;
-  const flow = (perMonth: number) => Math.max(1, Math.round(perMonth * scale));
-
+export function emptyOverview(
+  period: MarketingPeriod,
+  state: MarketingState,
+): MarketingOverview {
   return {
-    isMock: true,
+    state,
     period,
     connections: MARKETING_PLATFORMS.map((platform) => ({
       platform,
@@ -182,66 +198,9 @@ function mockOverview(period: MarketingPeriod): MarketingOverview {
       lastSyncedAt: null,
       lastError: null,
     })),
-    metrics: {
-      google_business: {
-        profile_views_search: flow(842),
-        profile_views_maps: flow(1163),
-        website_clicks: flow(97),
-        calls: flow(41),
-        direction_requests: flow(58),
-        messages: flow(11),
-      },
-      facebook: {
-        page_reach: flow(2340),
-        followers: 486,
-        post_engagement: flow(214),
-      },
-      instagram: {
-        reach: flow(1712),
-        followers: 623,
-        profile_visits: flow(188),
-      },
-      yelp: {
-        rating: 4.5,
-        review_count: 12,
-      },
-    },
-    reviews: [
-      {
-        key: 'mock-1',
-        platform: 'google_business',
-        authorName: 'Marcus',
-        rating: 5,
-        comment:
-          'Crew pulled all 34 panels for our new roof and had them back up the next day. Showed up when they said they would, which is more than I can say for the roofer.',
-        createdAt: isoDaysAgo(4),
-        reply: null,
-        repliedAt: null,
-      },
-      {
-        key: 'mock-2',
-        platform: 'facebook',
-        authorName: 'Angela',
-        rating: 5,
-        comment:
-          'Devon walked me through the whole critter guard install and sent photos when it was done. Squirrels are officially evicted.',
-        createdAt: isoDaysAgo(12),
-        reply: 'Thanks Angela — glad the squirrels finally got the message!',
-        repliedAt: isoDaysAgo(11),
-      },
-      {
-        key: 'mock-3',
-        platform: 'yelp',
-        authorName: 'Trent',
-        rating: 4,
-        comment:
-          'Good work and fair price. Took a couple days longer than quoted because of the rain, but they kept me posted the whole time.',
-        createdAt: isoDaysAgo(23),
-        reply: null,
-        repliedAt: null,
-      },
-    ],
-    rating: { average: 4.8, count: 27 },
+    metrics: emptyMetrics(),
+    reviews: [],
+    rating: { average: null, count: 0 },
   };
 }
 
@@ -286,18 +245,18 @@ const isStatus = (value: string): value is ConnectionStatus =>
 /**
  * Everything the Marketing panel needs, for one period.
  *
- * Falls back to `mockOverview` — same shape, `isMock: true` — when the tables
- * are missing, RLS refuses, nobody is signed in, or no platform has ever been
- * connected. That last case matters: an empty connections table means the
- * feature has not been set up, and showing four zeroed cards would read as
- * "your marketing got no views" rather than "nothing is plugged in yet".
+ * Four ways out, and each one names itself. Signed out, a failed query, or a
+ * thrown exception are all `unavailable` — from the roof they are the same
+ * fact, "we couldn't ask". An empty `marketing_connections` table is
+ * `not-connected`, which is deliberately NOT the same answer: the query
+ * worked, the feature just isn't set up.
  */
 export async function fetchMarketingOverview(
   period: MarketingPeriod,
 ): Promise<MarketingOverview> {
   try {
     const { data: session } = await supabase.auth.getSession();
-    if (!session.session) return mockOverview(period);
+    if (!session.session) return emptyOverview(period, 'unavailable');
 
     const since = isoDaysAgo(periodDays(period));
 
@@ -325,10 +284,12 @@ export async function fetchMarketingOverview(
 
     // Any error at all — missing table (42P01), RLS refusal, network — is the
     // same answer to the person holding the phone.
-    if (connRes.error || metricRes.error || reviewRes.error) return mockOverview(period);
+    if (connRes.error || metricRes.error || reviewRes.error) {
+      return emptyOverview(period, 'unavailable');
+    }
 
     const connRows = (connRes.data ?? []) as unknown as ConnectionRow[];
-    if (connRows.length === 0) return mockOverview(period);
+    if (connRows.length === 0) return emptyOverview(period, 'not-connected');
 
     const connections: MarketingConnection[] = MARKETING_PLATFORMS.map((platform) => {
       const row = connRows.find((r) => r.platform === platform);
@@ -377,7 +338,7 @@ export async function fetchMarketingOverview(
       }));
 
     return {
-      isMock: false,
+      state: 'connected',
       period,
       connections,
       metrics,
@@ -390,7 +351,7 @@ export async function fetchMarketingOverview(
       },
     };
   } catch {
-    return mockOverview(period);
+    return emptyOverview(period, 'unavailable');
   }
 }
 
