@@ -251,7 +251,7 @@ export default function InboxScreen() {
               ))
             )}
             <Pressable
-              onPress={() => router.push('/crm')}
+              onPress={() => router.push('/customers')}
               style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}>
               <Ionicons name="person-add" size={15} color={colors.ocean} />
               <Text style={styles.addButtonText}>Add as customer</Text>

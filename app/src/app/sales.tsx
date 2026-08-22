@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect } from 'expo-router';
+import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -10,7 +10,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MarketingPanel } from '@/components/MarketingPanel';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
@@ -163,8 +162,13 @@ export default function SalesScreen() {
   const isAdmin = role?.isAdmin ?? false;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <>
+      {/* Root-stack header, same convention as every more/* screen: the
+          title is declared in the body, the back arrow comes from
+          app/_layout.tsx. */}
+      <Stack.Screen options={{ title: 'Sales' }} />
       <ScrollView
+        style={styles.safe}
         contentContainerStyle={styles.container}
         refreshControl={
           <RefreshControl
@@ -173,8 +177,6 @@ export default function SalesScreen() {
             tintColor={colors.ocean}
           />
         }>
-        <Text style={styles.title}>Sales</Text>
-
         <View style={styles.segmentRow}>
           {SEGMENTS.map((option) => {
             const active = option.key === segment;
@@ -283,7 +285,7 @@ export default function SalesScreen() {
           </>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </>
   );
 }
 
@@ -297,12 +299,6 @@ function statusTone(status: string) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.cream },
   container: { padding: spacing.lg, paddingBottom: spacing.xl * 2, gap: spacing.sm },
-  title: {
-    fontFamily: undefined,
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.ink,
-  },
   subtitle: { color: colors.inkSoft, fontSize: 14, marginBottom: spacing.sm },
   // Segmented control: a pill track with the active half filled, so it reads
   // as one control rather than two loose chips.

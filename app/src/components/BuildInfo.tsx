@@ -40,8 +40,17 @@ export default function BuildInfo() {
   const [busy, setBusy] = useState(false);
 
   const version = Constants.expoConfig?.version ?? '?';
-  // Native reports the real runtime; web/dev report '' or a policy object —
-  // the appVersion policy means runtime === version, so fall back to that.
+  /**
+   * `app.json` now pins `runtimeVersion` to the explicit string "2" (build 29
+   * set it; `version` stays 1.0.0 forever, decoupled from the marketing
+   * number). Native reports the real runtime it launched with; web and dev
+   * builds report '', so fall back to the configured value and then to
+   * `version` — which is only ever reached on a build predating the explicit
+   * runtime, where the old appVersion policy did make them equal.
+   *
+   * This line is the crew's proof of adoption: build 29 must read
+   * `runtime 2`, and a build-28 phone keeps reading `runtime 1.0.0`.
+   */
   const runtime = Updates.runtimeVersion || Constants.expoConfig?.runtimeVersion;
   const runtimeText = typeof runtime === 'string' && runtime ? runtime : version;
 

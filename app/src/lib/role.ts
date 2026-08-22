@@ -67,8 +67,62 @@ export async function getRole(): Promise<RoleInfo | null> {
 }
 
 /**
+ * The role WITH an explicit loading phase.
+ *
+ * `useRole()` returns `null` for two completely different situations — "still
+ * loading" and "signed out / not staff" — so a screen that gates on
+ * `role?.isAdmin` renders the viewer layout first and then pops the admin
+ * parts in a moment later. On a list that is a flicker; on the Home hub it is
+ * the whole page rearranging itself under your thumb.
+ *
+ * This separates them: `phase` is `'loading'` until we actually know, and
+ * `'ready'` afterwards — including when the answer is "nobody is signed in",
+ * which is a real answer and not a loading state.
+ *
+ * The session is read FIRST, so being signed out costs no query at all; the
+ * `employees` lookup only runs when there is somebody to look up.
+ */
+export function useRoleGate(): { phase: 'loading' | 'ready'; role: RoleInfo | null } {
+  const [phase, setPhase] = useState<'loading' | 'ready'>('loading');
+  const [role, setRole] = useState<RoleInfo | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const resolve = async () => {
+      const { data } = await supabase.auth.getSession();
+      const email = data.session?.user?.email ?? null;
+      if (cancelled) return;
+      if (!email) {
+        setRole(null);
+        setPhase('ready');
+        return;
+      }
+      const info = await getRole();
+      if (cancelled) return;
+      setRole(info);
+      setPhase('ready');
+    };
+    void resolve();
+    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+      if (cancelled) return;
+      clearRoleCache();
+      void resolve();
+    });
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
+
+  return { phase, role };
+}
+
+/**
  * React hook: current user's role info (null while loading / signed out).
  * Re-fetches on auth state changes.
+ *
+ * Prefer `useRoleGate()` when the layout differs by role — see the note there
+ * about why `null` is ambiguous.
  */
 export function useRole(): RoleInfo | null {
   const [role, setRole] = useState<RoleInfo | null>(null);

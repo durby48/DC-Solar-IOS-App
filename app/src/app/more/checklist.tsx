@@ -238,7 +238,7 @@ export default function ChecklistScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Truck Checklist' }} />
+      <Stack.Screen options={{ title: 'Vehicle Checklist' }} />
       <ScrollView
         style={styles.screen}
         contentContainerStyle={styles.container}

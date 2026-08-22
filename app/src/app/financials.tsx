@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -12,7 +12,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { formatShortDate, todayISO } from '@/lib/dates';
@@ -793,10 +792,6 @@ export default function FinancialsScreen() {
 
   const header = (
     <View>
-      <View style={styles.headerRow}>
-        <Text style={styles.title}>Financials</Text>
-      </View>
-
       {!loaded ? null : !role ? (
         placeholder('Sign in to see company financials.')
       ) : !role.isAdmin ? (
@@ -1078,8 +1073,13 @@ export default function FinancialsScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <>
+      {/* Root-stack header, same convention as every more/* screen: the
+          title is declared in the body, the back arrow comes from
+          app/_layout.tsx. */}
+      <Stack.Screen options={{ title: 'Financials' }} />
       <SectionList
+        style={styles.safe}
         sections={sections}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.container}
@@ -1125,7 +1125,7 @@ export default function FinancialsScreen() {
           ) : null
         }
       />
-    </SafeAreaView>
+    </>
   );
 }
 
@@ -1137,17 +1137,6 @@ const styles = StyleSheet.create({
   container: {
     padding: spacing.lg,
     paddingBottom: spacing.xl,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  title: {
-    color: colors.ink,
-    fontSize: 28,
-    fontWeight: '800',
   },
   newButton: {
     backgroundColor: colors.sun,

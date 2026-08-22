@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect } from 'expo-router';
+import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   Pressable,
@@ -9,7 +9,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import {
@@ -116,8 +115,13 @@ export default function HoursScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <>
+      {/* Root-stack header, same convention as every more/* screen: the
+          title is declared in the body, the back arrow comes from
+          app/_layout.tsx. */}
+      <Stack.Screen options={{ title: 'Hours' }} />
       <ScrollView
+        style={styles.safe}
         contentContainerStyle={styles.container}
         refreshControl={
           <RefreshControl
@@ -126,8 +130,6 @@ export default function HoursScreen() {
             tintColor={colors.ocean}
           />
         }>
-        <Text style={styles.title}>Hours</Text>
-
         {!loaded ? null : !role ? (
           placeholder('Sign in to see crew hours.')
         ) : !role.isAdmin ? (
@@ -300,7 +302,7 @@ export default function HoursScreen() {
           </>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </>
   );
 }
 
@@ -312,12 +314,6 @@ const styles = StyleSheet.create({
   container: {
     padding: spacing.lg,
     paddingBottom: spacing.xl,
-  },
-  title: {
-    color: colors.ink,
-    fontSize: 28,
-    fontWeight: '800',
-    marginBottom: spacing.md,
   },
   periodCard: {
     backgroundColor: colors.sunLight,

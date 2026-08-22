@@ -1,67 +1,49 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import BuildInfo from '@/components/BuildInfo';
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  ListRow,
+  Screen,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import { deleteOwnAccount } from '@/lib/account';
 import { fetchUnreadCount } from '@/lib/comms';
-import { clearRoleCache } from '@/lib/role';
+import { visibleGroups, visibleItems } from '@/lib/hub';
+import { clearRoleCache, useRoleGate } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
-type IconName = keyof typeof Ionicons.glyphMap;
-
-type MenuKey = 'customers' | 'messages';
-
-const ITEMS: {
-  href:
-    | '/more/time-off'
-    | '/more/paystubs'
-    | '/more/inventory'
-    | '/more/checklist'
-    | '/more/receipts'
-    | '/crm'
-    | '/crm/inbox'
-    | '/more/monitoring'
-    | '/more/employees'
-    | '/more/employee-of-month'
-    | '/security';
-  title: string;
-  icon: IconName;
-  /**
-   * Which live count, if any, rides on this row. The number itself comes from
-   * the unread query below — an unread text nobody has seen is the one thing
-   * in this menu that is genuinely time-sensitive.
-   */
-  badge?: MenuKey;
-}[] = [
-  { href: '/more/time-off', title: 'Time Off', icon: 'airplane' },
-  { href: '/more/paystubs', title: 'Paystubs', icon: 'cash' },
-  { href: '/more/inventory', title: 'Inventory', icon: 'cube' },
-  { href: '/more/checklist', title: 'Vehicle Checklist', icon: 'clipboard' },
-  { href: '/more/receipts', title: 'Receipts', icon: 'receipt' },
-  // /more/customers still exists as a redirect to /crm for old bundles and
-  // bookmarks; the menu points straight at the new screen.
-  { href: '/crm', title: 'Customers', icon: 'people', badge: 'customers' },
-  { href: '/crm/inbox', title: 'Messages', icon: 'chatbubbles', badge: 'messages' },
-  { href: '/more/monitoring', title: 'Monitoring Logins', icon: 'pulse' },
-  { href: '/security', title: 'Security & 2FA', icon: 'shield-checkmark' },
-  // Visible to everyone; the screen itself is admin-gated.
-  { href: '/more/employees', title: 'Employees', icon: 'id-card' },
-  { href: '/more/employee-of-month', title: 'Employee of the Month', icon: 'trophy' },
-];
-
-export default function MoreScreen() {
+/**
+ * Menu — every screen in the app as a dense list.
+ *
+ * The same `lib/hub.ts` data Home draws as tiles, drawn here as rows: Home is
+ * for finding the thing you use every day, this is for finding the thing you
+ * use twice a month. Keeping one list means a new screen appears in both
+ * places, gated the same way, from a single edit.
+ *
+ * WHAT CHANGED. This screen used to hand-maintain an `ITEMS` array with a
+ * literal union of every href, and it had NO role gating at all: every crew
+ * member was offered Employees, Employee of the Month, and (once they moved
+ * out of the tab bar) Financials and Sales — screens that then told them they
+ * couldn't look. `visibleItems` fixes that. The gate is a courtesy, not a
+ * boundary; the destinations still check for themselves and RLS still decides
+ * what any query returns.
+ *
+ * The file is still `more.tsx` and the route is still `/more`, because the
+ * `more/*` directory has to keep working alongside it. Only the label is
+ * "Menu".
+ */
+export default function MenuScreen() {
   const router = useRouter();
+  const gate = useRoleGate();
+  const isAdmin = gate.role?.isAdmin ?? false;
 
   const [deleting, setDeleting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -102,179 +84,116 @@ export default function MoreScreen() {
     try {
       await supabase.auth.signOut();
     } catch {
-      // Ignore — demo mode has no session.
+      // Signed out already, or no session to end — the destination is the
+      // same either way.
     }
+    clearRoleCache();
     router.replace('/');
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>More</Text>
-
-        <View style={styles.card}>
-          {ITEMS.map((item, i) => {
-            const count = item.badge && unread > 0 ? unread : 0;
-            return (
-              <Pressable
-                key={item.href}
-                onPress={() => router.push(item.href)}
-                style={({ pressed }) => [
-                  styles.row,
-                  i < ITEMS.length - 1 && styles.rowBorder,
-                  pressed && styles.pressed,
-                ]}>
-                <View style={styles.iconWrap}>
-                  <Ionicons name={item.icon} size={18} color={colors.ocean} />
-                </View>
-                <Text style={styles.rowText}>{item.title}</Text>
-                {count > 0 ? (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{count > 99 ? '99+' : count}</Text>
-                  </View>
-                ) : null}
-                <Ionicons name="chevron-forward" size={18} color={colors.inkSoft} />
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <View style={styles.card}>
-          <Pressable
-            onPress={signOut}
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
-            <View style={styles.iconWrap}>
-              <Ionicons name="log-out" size={18} color={colors.danger} />
+    <Screen header={<AppText variant="title">Menu</AppText>}>
+      {gate.phase === 'loading' ? (
+        <SkeletonList count={6} height={54} />
+      ) : (
+        visibleGroups(isAdmin).map((group) => {
+          const items = visibleItems(isAdmin, group.key);
+          return (
+            <View key={group.key} style={styles.section}>
+              <SectionHeader title={group.title} subtitle={group.subtitle} />
+              <Card padded={false}>
+                {items.map((item, i) => (
+                  <ListRow
+                    key={item.key}
+                    icon={item.icon}
+                    title={item.title}
+                    badge={item.badge === 'unread' ? unread : undefined}
+                    divider={i < items.length - 1}
+                    onPress={() => router.push(item.href)}
+                  />
+                ))}
+              </Card>
             </View>
-            <Text style={[styles.rowText, styles.signOutText]}>Sign out</Text>
-          </Pressable>
-        </View>
+          );
+        })
+      )}
 
-        {/* Required by App Store guideline 5.1.1(v) for any app with accounts. */}
-        {deleting ? (
-          <View style={styles.dangerCard}>
-            <Text style={styles.dangerTitle}>Delete your account?</Text>
-            <Text style={styles.dangerBody}>
-              This permanently removes your login and signs you out everywhere. It does not remove
-              your employment record, or the jobs and hours you&apos;ve logged — the office keeps
-              those. Ask Devon if you need those changed.
-            </Text>
-            {deleteError ? <Text style={styles.dangerError}>{deleteError}</Text> : null}
-            <View style={styles.dangerRow}>
-              <Pressable onPress={() => setDeleting(false)} disabled={busy} hitSlop={8}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
+      <Card padded={false} style={styles.section}>
+        <ListRow icon="log-out" title="Sign out" danger chevron={false} onPress={signOut} />
+      </Card>
+
+      {/* Required by App Store guideline 5.1.1(v) for any app with accounts. */}
+      {deleting ? (
+        <Card tone="danger" style={styles.dangerCard}>
+          <AppText variant="heading" color={colors.danger}>
+            Delete your account?
+          </AppText>
+          <AppText variant="body" color={colors.textSecondary}>
+            This permanently removes your login and signs you out everywhere. It does not remove
+            your employment record, or the jobs and hours you&apos;ve logged — the office keeps
+            those. Ask Devon if you need those changed.
+          </AppText>
+          {deleteError ? (
+            <AppText variant="bodyStrong" color={colors.danger}>
+              {deleteError}
+            </AppText>
+          ) : null}
+          <View style={styles.dangerRow}>
+            <Button
+              label="Cancel"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onPress={() => setDeleting(false)}
+            />
+            {busy ? (
+              <ActivityIndicator color={colors.danger} />
+            ) : (
+              <Button
+                label="Delete permanently"
+                variant="danger"
+                size="sm"
                 onPress={removeAccount}
-                disabled={busy}
-                style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}>
-                {busy ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.deleteText}>Delete permanently</Text>
-                )}
-              </Pressable>
-            </View>
+              />
+            )}
           </View>
-        ) : (
-          <Pressable onPress={() => setDeleting(true)} hitSlop={8} style={styles.deleteLinkWrap}>
-            <Text style={styles.deleteLink}>Delete my account</Text>
-          </Pressable>
-        )}
+        </Card>
+      ) : (
+        <AnimatedPressable
+          onPress={() => setDeleting(true)}
+          hitSlop={8}
+          accessibilityRole="button"
+          style={styles.deleteLinkWrap}>
+          <AppText variant="caption" color={colors.danger}>
+            Delete my account
+          </AppText>
+        </AnimatedPressable>
+      )}
 
-        {/* Which build + OTA update this device runs; tap to check for a newer one. */}
-        <BuildInfo />
-      </ScrollView>
-    </SafeAreaView>
+      {/* Which build + OTA update this device runs; tap to check for a newer one. */}
+      <BuildInfo />
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.cream,
+  section: {
+    marginTop: spacing.sm,
   },
-  container: {
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  title: {
-    color: colors.ink,
-    fontSize: 28,
-    fontWeight: '800',
-  },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    ...shadows.card,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-  },
-  rowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.tan,
-  },
-  pressed: {
-    backgroundColor: colors.skySoft,
-  },
-  iconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowText: {
-    flex: 1,
-    color: colors.ink,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  badge: {
-    minWidth: 22,
-    height: 22,
-    paddingHorizontal: 6,
-    borderRadius: radii.pill,
-    backgroundColor: colors.ocean,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeText: { color: colors.white, fontSize: 12, fontWeight: '800' },
-  deleteLinkWrap: { alignSelf: 'center', paddingVertical: spacing.sm },
-  deleteLink: { color: colors.danger, fontSize: 14, fontWeight: '700' },
   dangerCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
+    gap: spacing.sm,
     borderWidth: 1,
     borderColor: colors.danger,
-    padding: spacing.md,
-    gap: spacing.sm,
+    borderRadius: radii.md,
   },
-  dangerTitle: { color: colors.danger, fontSize: 15, fontWeight: '800' },
-  dangerBody: { color: colors.inkSoft, fontSize: 13, lineHeight: 19 },
-  dangerError: { color: colors.danger, fontSize: 13, fontWeight: '600' },
   dangerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: spacing.md,
   },
-  cancelText: { color: colors.inkSoft, fontSize: 14, fontWeight: '700' },
-  deleteButton: {
-    backgroundColor: colors.danger,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + 2,
-  },
-  deleteText: { color: colors.white, fontSize: 14, fontWeight: '800' },
-  signOutText: {
-    color: colors.danger,
+  deleteLinkWrap: {
+    alignSelf: 'center',
+    paddingVertical: spacing.sm,
   },
 });
