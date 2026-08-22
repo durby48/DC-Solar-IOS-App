@@ -14,10 +14,15 @@
  * the row afterwards would lose the message on exactly the failure that
  * matters.
  *
- * CONSENT IS ENFORCED HERE, NOT IN THE UI. `customers.sms_opt_out_at` is set by
- * twilio-inbound when someone replies STOP, and this function refuses to send
- * to that customer no matter what the client asks for. A2P 10DLC registration
- * is revocable and one text to someone who opted out is how that happens.
+ * CONSENT IS ENFORCED HERE, NOT IN THE UI. `customers.sms_opt_out_at` and
+ * `leads.sms_opt_out_at` are set by twilio-inbound when someone replies STOP,
+ * and this function refuses to send to them no matter what the client asks for.
+ * A2P 10DLC registration is revocable and one text to someone who opted out is
+ * how that happens.
+ *
+ * CONSENT ATTACHES TO THE NUMBER, NOT THE ROW. The destination is checked
+ * against EVERY customer holding that phone_e164 and one opt-out among them is
+ * enough to refuse — see customersSharingNumber() for what that fixes.
  *
  * Auth: verify_jwt ON plus a server-side admin re-check. Message threads carry
  * prices and addresses; `messages` is admin-only on all four verbs and this
@@ -35,7 +40,7 @@
  *   → { ok: true, messageId, twilioSid, status }
  */
 
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -79,6 +84,45 @@ interface Payload {
   body?: string;
   jobId?: string;
   templateKey?: string;
+}
+
+interface NumberMatch {
+  id: string;
+  name: string | null;
+  sms_opt_out_at: string | null;
+}
+
+/**
+ * EVERY customer holding this number — not one of them.
+ *
+ * This used to be `.maybeSingle()` with no `.limit(1)`. Two customers sharing a
+ * phone (a couple, a landlord and a tenant, the same person entered twice)
+ * makes PostgREST answer PGRST116 "more than one row", supabase-js turns that
+ * into data: null, and the caller read null as "nobody by that number" — so the
+ * opt-out check was skipped on exactly the numbers most likely to have one.
+ *
+ * The rule is ANY match opted out means we do not send. Consent belongs to the
+ * handset, not to the CRM row: the phone that received STOP is the phone that
+ * would receive this text.
+ */
+async function customersSharingNumber(
+  admin: SupabaseClient,
+  e164: string,
+): Promise<NumberMatch[]> {
+  const { data } = await admin
+    .from('customers')
+    .select('id, name, sms_opt_out_at')
+    .eq('company', COMPANY)
+    .eq('phone_e164', e164)
+    .order('created_at', { ascending: true });
+  return (data as NumberMatch[] | null) ?? [];
+}
+
+function optedOutMessage(who: string): string {
+  return (
+    `${who} replied STOP and is opted out of texts. They have to text START to this ` +
+    'number themselves before we can text them again.'
+  );
 }
 
 Deno.serve(async (req) => {
@@ -210,12 +254,7 @@ Deno.serve(async (req) => {
       customerId = customer.id;
       // Opt-out beats everything, including an explicit `to`.
       if (customer.sms_opt_out_at) {
-        return fail(
-          400,
-          'opted_out',
-          `${who} replied STOP and is opted out of texts. They have to text START to this ` +
-            'number themselves before we can text them again.',
-        );
+        return fail(400, 'opted_out', optedOutMessage(who));
       }
       to = payload.to ? toE164(payload.to) : customer.phone_e164;
       if (!to) {
@@ -230,7 +269,7 @@ Deno.serve(async (req) => {
     } else if (payload.leadId) {
       const { data: leadRow } = await admin
         .from('leads')
-        .select('id, name, phone, phone_e164')
+        .select('id, name, phone, phone_e164, sms_opt_out_at')
         .eq('id', payload.leadId)
         .maybeSingle();
       const lead = leadRow as {
@@ -238,10 +277,17 @@ Deno.serve(async (req) => {
         name: string | null;
         phone: string | null;
         phone_e164: string | null;
+        sms_opt_out_at: string | null;
       } | null;
       if (!lead) return fail(404, 'not_found', 'Lead not found.');
       who = lead.name ?? 'that lead';
       leadId = lead.id;
+      // Leads get the same consent rule as customers. Until 2026-08-22 the
+      // column did not exist, so a lead who replied STOP was recorded nowhere
+      // and could be texted again the next day.
+      if (lead.sms_opt_out_at) {
+        return fail(400, 'opted_out', optedOutMessage(who));
+      }
       to = payload.to ? toE164(payload.to) : lead.phone_e164;
       if (!to) {
         return fail(
@@ -256,28 +302,26 @@ Deno.serve(async (req) => {
       to = toE164(payload.to);
       if (!to) return fail(400, 'no_number', `"${payload.to}" is not a textable US number.`);
       who = to;
-      // A bare number might still belong to somebody who opted out — check.
-      const { data: matchRow } = await admin
-        .from('customers')
-        .select('id, name, sms_opt_out_at')
-        .eq('company', COMPANY)
-        .eq('phone_e164', to)
-        .maybeSingle();
-      const match = matchRow as { id: string; name: string | null; sms_opt_out_at: string | null } | null;
-      if (match) {
-        customerId = customerId ?? match.id;
-        who = match.name ?? who;
-        if (match.sms_opt_out_at) {
-          return fail(
-            400,
-            'opted_out',
-            `${who} replied STOP and is opted out of texts. They have to text START to this ` +
-              'number themselves before we can text them again.',
-          );
-        }
-      }
     } else {
       return fail(400, 'bad_request', 'Pass customerId, leadId or to.');
+    }
+
+    // --- consent on the NUMBER, whichever branch produced it -----------------
+    // One check for all three branches, because the hazard is the same in all
+    // three: the destination handset may belong to more than one CRM row, and
+    // it only takes ONE of them to have replied STOP. This also catches an
+    // explicit `to` that overrides a customer's number, and a lead whose number
+    // is also on a customer record.
+    const sharing = await customersSharingNumber(admin, to);
+    const optedOut = sharing.find((c) => c.sms_opt_out_at);
+    if (optedOut) {
+      return fail(400, 'opted_out', optedOutMessage(optedOut.name ?? who));
+    }
+    // First (oldest) match is the one we file the message under, so a bare
+    // number still lands in the right thread.
+    if (!customerId && sharing.length > 0) {
+      customerId = sharing[0].id;
+      who = sharing[0].name ?? who;
     }
 
     // --- write the row FIRST, then hand it to Twilio ------------------------

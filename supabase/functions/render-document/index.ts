@@ -326,6 +326,39 @@ Deno.serve(async (req) => {
     const storagePath = `${jobId}/${documentNumber}.pdf`;
     const archivePath = `${jobId}/revisions/${documentNumber}-r${revision}.pdf`;
 
+    // REVISION 1 ONLY EXISTS AS THE LIVING OBJECT UNTIL SOMETHING COPIES IT.
+    //
+    // The archive was introduced with revisions, so a document created before
+    // that has bytes at <job>/<doc>.pdf and nothing under revisions/. The
+    // upsert below overwrites those bytes, and rev 1 — the version the
+    // customer was actually sent — is gone. The native path already handles
+    // this (app/src/lib/documents.ts::uploadRevisionPdf); the web path did not,
+    // so the same document lost its history depending on which device saved it.
+    //
+    // Best effort by design: copy() refuses to overwrite, so an r1 that already
+    // exists is left alone, and a missing living object (legacy ops-console
+    // documents were filed elsewhere) is a normal state, not a failure. Neither
+    // is worth failing a save over.
+    if (revision >= 2) {
+      const firstArchive = `${jobId}/revisions/${documentNumber}-r1.pdf`;
+      const firstArchiveName = `${documentNumber}-r1.pdf`;
+      const { data: alreadyThere } = await admin.storage
+        .from(BUCKET)
+        .list(`${jobId}/revisions`, { limit: 1, search: firstArchiveName });
+      const haveFirst = (alreadyThere ?? []).some((o) => o.name === firstArchiveName);
+      if (!haveFirst) {
+        const { error: copyErr } = await admin.storage
+          .from(BUCKET)
+          .copy(storagePath, firstArchive);
+        if (copyErr) {
+          console.log(
+            `render-document: could not preserve ${firstArchive} (${copyErr.message}) — ` +
+              'continuing; the living document is what matters.',
+          );
+        }
+      }
+    }
+
     const { error: liveErr } = await admin.storage
       .from(BUCKET)
       .upload(storagePath, bytes, { contentType: 'application/pdf', upsert: true });

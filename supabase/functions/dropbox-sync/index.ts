@@ -14,7 +14,15 @@
  *   • same id, NEW rev → re-downloaded over the SAME storage path, so every
  *     signed URL already handed out keeps working;
  *   • the same bytes under a new filename (Dropbox's content_hash) → skipped
- *     and counted, not stored twice.
+ *     and counted, not stored twice, PROVIDED the row holding them is still
+ *     live. If only ARCHIVED rows hold that hash the photo was deleted from
+ *     Dropbox and put back, so the archived row is re-adopted and un-archived
+ *     rather than the file being skipped into permanent limbo.
+ *
+ * `limit` BOUNDS PAGES FETCHED, NOT ENTRIES APPLIED. Every entry that was
+ * fetched is applied before the cursor moves. Applying only the first `limit`
+ * of them (what this used to do) stored a cursor positioned AFTER entries that
+ * had never been looked at — they were skipped on every future run too.
  *
  * AUTH — two doors, because two callers:
  *   • `x-sync-secret: <DROPBOX_SYNC_SECRET>` for the scheduled run (pg_cron →
@@ -133,6 +141,14 @@ interface FileEntry {
       time_taken?: string;
     };
   };
+}
+
+/** The bits of a media_assets row this sync needs to decide what to do next. */
+interface MediaAssetRef {
+  id: string;
+  dropbox_rev: string | null;
+  storage_path: string;
+  archived_at: string | null;
 }
 
 interface FolderResult {
@@ -257,9 +273,14 @@ async function syncFolder(
     result.cursor = cursor;
 
     // --- apply --------------------------------------------------------------
-    for (let i = 0; i < entries.length && i < opts.limit; i++) {
-      const entry = entries[i];
-
+    // EVERY entry that was fetched gets applied. `opts.limit` bounds how many
+    // pages the loop above asks Dropbox for, and nothing else: it used to cap
+    // this loop as well, so a page could push `entries` past the limit and the
+    // tail went unapplied — while `result.cursor` was already the cursor from
+    // AFTER that page. Storing it meant those entries were never seen again on
+    // any later run. A page is at most PAGE_SIZE entries, so the real ceiling
+    // is limit + PAGE_SIZE and that is fine; skipping photos forever is not.
+    for (const entry of entries) {
       // A file removed from Dropbox is archived, never deleted. Deleted
       // entries carry no id, so they are matched on the path.
       if (entry['.tag'] === 'deleted') {
@@ -289,36 +310,67 @@ async function syncFolder(
         .eq('company', COMPANY)
         .eq('dropbox_id', entry.id)
         .maybeSingle();
-      const existing = existingRow as {
-        id: string;
-        dropbox_rev: string | null;
-        storage_path: string;
-        archived_at: string | null;
-      } | null;
+      let existing = existingRow as MediaAssetRef | null;
 
       // Nothing changed — the common case on every run after the first.
       if (existing && existing.dropbox_rev === entry.rev) {
-        result.skipped += 1;
+        if (existing.archived_at) {
+          // Same file, same revision, but the row is archived: it was removed
+          // from Dropbox and put back (or restored from the Dropbox trash).
+          // Bring it back without re-downloading — the storage object never
+          // went anywhere and every signed URL already issued still resolves.
+          const { error } = await admin
+            .from('media_assets')
+            .update({
+              archived_at: null,
+              file_name: entry.name,
+              dropbox_path: entry.path_lower ?? entry.path_display ?? null,
+            })
+            .eq('id', existing.id);
+          if (error) throw new Error(`Could not restore ${entry.name}: ${error.message}`);
+          result.updated += 1;
+        } else {
+          result.skipped += 1;
+        }
         continue;
       }
 
-      // The same bytes under a different name. Count it and move on rather
-      // than storing a second copy of the same photo.
+      // The same bytes under a different name — or the same photo deleted and
+      // re-added, which Dropbox gives a brand new id and rev.
       if (!existing && entry.content_hash) {
-        const { data: dupeRow } = await admin
+        const { data: dupeRows } = await admin
           .from('media_assets')
-          .select('id, dropbox_id')
+          .select('id, dropbox_id, dropbox_rev, storage_path, archived_at')
           .eq('company', COMPANY)
           .eq('content_hash', entry.content_hash)
-          .limit(1)
-          .maybeSingle();
-        const dupe = dupeRow as { id: string; dropbox_id: string | null } | null;
-        if (dupe && dupe.dropbox_id !== entry.id) {
+          // Live rows first (archived_at is null), so `live` below is found
+          // even when several archived copies share the hash.
+          .order('archived_at', { ascending: true, nullsFirst: true })
+          .limit(5);
+        const dupes = (dupeRows as (MediaAssetRef & { dropbox_id: string | null })[] | null) ?? [];
+        const live = dupes.find((d) => !d.archived_at);
+        const archived = dupes.find((d) => d.archived_at);
+
+        if (live && live.dropbox_id !== entry.id) {
+          // A LIVING row already holds these bytes. Genuinely a duplicate.
           console.log(
-            `dropbox-sync: ${entry.path_lower} duplicates media_asset ${dupe.id} by content hash — skipped`,
+            `dropbox-sync: ${entry.path_lower} duplicates media_asset ${live.id} by content hash — skipped`,
           );
           result.skipped += 1;
           continue;
+        }
+
+        if (!live && archived) {
+          // Only ARCHIVED rows hold these bytes, so this is a photo that came
+          // back. Skipping it (what this used to do) left it archived forever —
+          // deleted from the library with no way back short of a manual edit.
+          // Re-adopt the row instead: it keeps its id, its storage path and
+          // therefore every signed URL in circulation, and the code below
+          // re-downloads to that same path and clears archived_at.
+          console.log(
+            `dropbox-sync: ${entry.path_lower} matches ARCHIVED media_asset ${archived.id} by content hash — un-archiving`,
+          );
+          existing = archived;
         }
       }
 

@@ -212,16 +212,26 @@ Deno.serve(async (req) => {
       to = toE164(payload.to);
       if (!to) return fail(400, 'no_number', `"${payload.to}" is not a valid US number.`);
       who = to;
-      const { data: matchRow } = await admin
+      // ALL of them, not one. `.maybeSingle()` with no `.limit(1)` answers
+      // PGRST116 when two customers share a phone (a couple, a landlord and a
+      // tenant, the same person entered twice), supabase-js turns that into
+      // data: null, and the call was then logged against nobody — the thread
+      // on that customer's record simply had no record of it.
+      const { data: matchRows } = await admin
         .from('customers')
         .select('id, name')
         .eq('company', COMPANY)
         .eq('phone_e164', to)
-        .maybeSingle();
-      const match = matchRow as { id: string; name: string | null } | null;
-      if (match) {
-        customerId = customerId ?? match.id;
-        who = match.name ?? who;
+        .order('created_at', { ascending: true });
+      const matches = (matchRows as { id: string; name: string | null }[] | null) ?? [];
+      if (matches.length > 0) {
+        // Oldest match wins, so the call always lands in the same thread.
+        // NOTE: sms_opt_out_at is deliberately NOT consulted. STOP is a
+        // messaging opt-out; it does not mean "never phone me", and refusing to
+        // dial somebody who asked us to stop TEXTING would be a bug, not
+        // compliance. twilio-send-sms is where that flag decides anything.
+        customerId = customerId ?? matches[0].id;
+        who = matches[0].name ?? who;
       }
     } else {
       return fail(400, 'bad_request', 'Pass customerId or to.');

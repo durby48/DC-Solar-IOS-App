@@ -229,30 +229,36 @@ Deno.serve(async (req) => {
     let leadId: string | null = null;
     let who = prettyNumber(from);
 
-    const { data: custRow } = await admin
+    // EVERY row holding this number, customers AND leads. A number is commonly
+    // on more than one record — a couple, the same person entered twice, or a
+    // customer whose original lead was never cleaned up — and consent belongs
+    // to the handset, not to whichever row we happened to look up first. If
+    // STOP only reached one of them the next campaign texts the person who
+    // just opted out, which is how an A2P 10DLC registration gets revoked.
+    const { data: custRows } = await admin
       .from('customers')
       .select('id, name')
       .eq('company', COMPANY)
       .eq('phone_e164', from)
-      .limit(1)
-      .maybeSingle();
-    const customer = custRow as { id: string; name: string | null } | null;
-    if (customer) {
-      customerId = customer.id;
-      who = customer.name ?? who;
-    } else {
-      const { data: leadRow } = await admin
-        .from('leads')
-        .select('id, name')
-        .eq('company', COMPANY)
-        .eq('phone_e164', from)
-        .limit(1)
-        .maybeSingle();
-      const lead = leadRow as { id: string; name: string | null } | null;
-      if (lead) {
-        leadId = lead.id;
-        who = lead.name ?? who;
-      }
+      .order('created_at', { ascending: true });
+    const customers = (custRows as { id: string; name: string | null }[] | null) ?? [];
+
+    const { data: leadRows } = await admin
+      .from('leads')
+      .select('id, name')
+      .eq('company', COMPANY)
+      .eq('phone_e164', from)
+      .order('created_at', { ascending: true });
+    const leads = (leadRows as { id: string; name: string | null }[] | null) ?? [];
+
+    // Filing is unchanged: a customer record outranks the lead it came from, so
+    // the message lands in one thread, not two.
+    if (customers.length > 0) {
+      customerId = customers[0].id;
+      who = customers[0].name ?? who;
+    } else if (leads.length > 0) {
+      leadId = leads[0].id;
+      who = leads[0].name ?? who;
     }
 
     // --- consent -------------------------------------------------------------
@@ -261,16 +267,35 @@ Deno.serve(async (req) => {
     const isOptOut = OPT_OUT_WORDS.has(keyword);
     const isOptIn = OPT_IN_WORDS.has(keyword);
 
-    if (customerId && isOptOut) {
-      await admin
-        .from('customers')
-        .update({ sms_opt_out_at: new Date().toISOString() })
-        .eq('id', customerId);
-    } else if (customerId && isOptIn) {
-      await admin
-        .from('customers')
-        .update({ sms_opt_out_at: null, sms_opt_in_source: 'sms-start-reply' })
-        .eq('id', customerId);
+    // Stamp EVERY match, customers and leads alike — not just the one row the
+    // message got filed under. Leads only grew sms_opt_out_at on 2026-08-22;
+    // before that a lead who replied STOP was recorded nowhere at all.
+    if (isOptOut || isOptIn) {
+      const optOutAt = isOptOut ? new Date().toISOString() : null;
+
+      if (customers.length > 0) {
+        await admin
+          .from('customers')
+          .update(
+            isOptOut
+              ? { sms_opt_out_at: optOutAt }
+              : { sms_opt_out_at: null, sms_opt_in_source: 'sms-start-reply' },
+          )
+          .in(
+            'id',
+            customers.map((c) => c.id),
+          );
+      }
+
+      if (leads.length > 0) {
+        await admin
+          .from('leads')
+          .update({ sms_opt_out_at: optOutAt })
+          .in(
+            'id',
+            leads.map((l) => l.id),
+          );
+      }
     }
 
     // --- log it --------------------------------------------------------------
