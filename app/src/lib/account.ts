@@ -189,6 +189,10 @@ export interface CustomerDocument {
   status: string | null;
   document_number: string | null;
   document_path: string | null;
+  /** Revision counter from my_documents() v2 (1 for never-revised rows). */
+  revision?: number | null;
+  /** "current" | "stale" — stale means the PDF is being regenerated. */
+  pdf_state?: string | null;
 }
 
 export interface CustomerBalance {

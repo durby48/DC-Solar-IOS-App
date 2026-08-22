@@ -19,10 +19,14 @@ import { shareDocument, viewDocument } from '@/lib/pdf';
 import { formatShortDate, todayISO } from '@/lib/dates';
 import {
   deleteFinanceEntry,
+  duplicateDocument,
+  fetchEntryRevisions,
   fetchJobFinanceEntries,
   recordPayment,
+  revisionStoragePath,
   splitPayment,
   updateFinanceEntry,
+  type EntryRevision,
   type FinanceEntry,
   type SplitAllocation,
 } from '@/lib/documents';
@@ -54,12 +58,31 @@ function amountStyle(entry: FinanceEntry) {
 }
 
 function entryTitle(entry: FinanceEntry): string {
-  if (entry.type === 'invoice') return entry.document_number ?? 'Invoice';
-  if (entry.type === 'estimate') return entry.document_number ?? 'Estimate';
+  // The document NUMBER never changes across revisions — the revision counter
+  // is what tells two versions of DC-26012-Estimate apart.
+  const rev = (entry.revision ?? 1) > 1 ? ` · rev ${entry.revision}` : '';
+  if (entry.type === 'invoice') return `${entry.document_number ?? 'Invoice'}${rev}`;
+  if (entry.type === 'estimate') return `${entry.document_number ?? 'Estimate'}${rev}`;
   if (entry.type === 'contract') return entry.description ?? 'Contract signed';
   if (entry.type === 'payment') return 'Payment';
   if (entry.type === 'investment') return entry.description ?? 'Investment';
   return entry.description ?? 'Expense';
+}
+
+/**
+ * Is this row a real DOCUMENT — something with line items and a PDF to
+ * re-render — as opposed to a payment, an expense, an owner contribution or
+ * the document-less "Contract value" adjustment row? Only documents open in
+ * the builder; everything else keeps the inline amount/date/description editor.
+ */
+function isRevisable(entry: FinanceEntry): boolean {
+  return (
+    (entry.type === 'estimate' || entry.type === 'invoice') && entry.document_number != null
+  );
+}
+
+function isStale(entry: FinanceEntry): boolean {
+  return entry.document_meta?.pdf_state === 'stale';
 }
 
 /**
@@ -102,6 +125,11 @@ export function JobInvoices({
   const [splitRows, setSplitRows] = useState<{ jobId: string | null; amount: string }[]>([]);
   const [splitJobs, setSplitJobs] = useState<{ id: string; label: string }[]>([]);
   const [savingSplit, setSavingSplit] = useState(false);
+  // Revision history (admin SELECT only; empty when the table isn't readable).
+  const [historyId, setHistoryId] = useState<string | null>(null);
+  const [history, setHistory] = useState<EntryRevision[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const result = await fetchJobFinanceEntries(job.id);
@@ -135,9 +163,12 @@ export function JobInvoices({
   const paid = entries.filter((e) => e.type === 'payment').reduce((sum, e) => sum + e.amount, 0);
   const defaultPayment = Math.max(0, invoiced - paid);
 
+  // `entry.revision` rides along as a cache-buster: a revision overwrites the
+  // same storage object, and both the CDN and Safari will otherwise serve the
+  // bytes they cached under the previous signed URL.
   const openEntry = async (entry: FinanceEntry) => {
     if (!entry.document_path) return;
-    const url = await getDocumentUrl(entry.document_path);
+    const url = await getDocumentUrl(entry.document_path, entry.revision);
     if (!url || !(await viewDocument(url))) {
       setStatus({ kind: 'error', message: 'Could not open the document. Please try again.' });
     }
@@ -147,7 +178,7 @@ export function JobInvoices({
     if (!entry.document_path) return;
     setSharingId(entry.id);
     try {
-      const url = await getDocumentUrl(entry.document_path);
+      const url = await getDocumentUrl(entry.document_path, entry.revision);
       const fileName = `${entry.document_number ?? 'document'}.pdf`;
       if (!url || !(await shareDocument(url, fileName))) {
         setStatus({ kind: 'error', message: 'Could not share the document. Please try again.' });
@@ -155,6 +186,73 @@ export function JobInvoices({
     } finally {
       setSharingId(null);
     }
+  };
+
+  /**
+   * Open one archived revision.
+   *
+   * revise_document() snapshots a pre-existing document as its own revision 1,
+   * and all it has to record is the LIVING path — which by then serves the
+   * newest bytes. So when a superseded revision points at the living object,
+   * prefer the archive copy we know uploadRevisionPdf() made
+   * (`revisions/<docnum>-r<N>.pdf`). If that object never existed the browser
+   * shows a 404, which beats quietly handing somebody rev 3 labelled rev 1.
+   */
+  const openRevision = async (entry: FinanceEntry, revision: EntryRevision) => {
+    const stored = revision.document_path;
+    if (!stored) {
+      setStatus({ kind: 'error', message: 'That revision has no stored PDF.' });
+      return;
+    }
+    const supersededLivingPath =
+      stored === entry.document_path && revision.revision < (entry.revision ?? 1);
+    const path =
+      supersededLivingPath && revision.document_number
+        ? revisionStoragePath(job.id, revision.document_number, revision.revision)
+        : stored;
+    const url = await getDocumentUrl(path, revision.revision);
+    if (!url || !(await viewDocument(url))) {
+      setStatus({ kind: 'error', message: 'Could not open that revision.' });
+    }
+  };
+
+  const toggleHistory = async (entry: FinanceEntry) => {
+    if (historyId === entry.id) {
+      setHistoryId(null);
+      return;
+    }
+    setStatus(null);
+    setHistoryId(entry.id);
+    setHistory([]);
+    setHistoryLoading(true);
+    const rows = await fetchEntryRevisions(entry.id);
+    setHistoryLoading(false);
+    setHistory(rows);
+  };
+
+  /** Estimate → invoice without retyping a single line. */
+  const duplicateAsInvoice = async (entry: FinanceEntry) => {
+    setStatus(null);
+    setDuplicatingId(entry.id);
+    const result = await duplicateDocument({ sourceEntryId: entry.id, asType: 'invoice' });
+    setDuplicatingId(null);
+    if (!result.ok) {
+      setStatus({ kind: 'error', message: result.message });
+      return;
+    }
+    await load();
+    onEntriesChanged?.();
+    router.push({
+      pathname: '/document-builder',
+      params: { jobId: job.id, entryId: result.entryId },
+    });
+  };
+
+  const openBuilder = (entry: FinanceEntry) => {
+    router.push({
+      pathname: '/document-builder',
+      params: { jobId: job.id, entryId: entry.id },
+    });
   };
 
   const startSplit = async (entry: FinanceEntry) => {
@@ -322,6 +420,7 @@ export function JobInvoices({
     const confirming = confirmDeleteId === entry.id;
     const busyDelete = deletingId === entry.id;
     const editing = editingId === entry.id;
+    const revisable = isRevisable(entry);
     return (
       <View key={entry.id} style={index > 0 ? styles.rowBorderTop : undefined}>
         <Pressable
@@ -341,6 +440,14 @@ export function JobInvoices({
               {entry.status ? (
                 <View style={styles.statusChip}>
                   <Text style={styles.statusChipText}>{entry.status}</Text>
+                </View>
+              ) : null}
+              {isStale(entry) ? (
+                <View style={styles.staleChip}>
+                  <Ionicons name="warning" size={11} color={colors.ink} />
+                  <Text style={styles.staleChipText}>
+                    {entry.document_path ? 'PDF out of date' : 'No PDF yet'}
+                  </Text>
                 </View>
               ) : null}
               <Text style={styles.metaText} numberOfLines={1}>
@@ -377,8 +484,35 @@ export function JobInvoices({
                   <Ionicons name="git-branch" size={15} color={colors.ocean} />
                 </Pressable>
               ) : null}
+              {revisable && (entry.revision ?? 1) > 1 ? (
+                <Pressable
+                  onPress={() => void toggleHistory(entry)}
+                  hitSlop={6}
+                  style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
+                  <Ionicons name="time-outline" size={15} color={colors.ocean} />
+                </Pressable>
+              ) : null}
+              {entry.type === 'estimate' && entry.document_number ? (
+                <Pressable
+                  onPress={() => void duplicateAsInvoice(entry)}
+                  disabled={duplicatingId !== null}
+                  hitSlop={6}
+                  style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
+                  {duplicatingId === entry.id ? (
+                    <ActivityIndicator size="small" color={colors.ocean} />
+                  ) : (
+                    <Ionicons name="copy-outline" size={15} color={colors.ocean} />
+                  )}
+                </Pressable>
+              ) : null}
+              {/* Documents go to the builder, where the line items, the notes
+                  and the PDF all move together. Payments, expenses,
+                  investments and the document-less "Contract value" row have
+                  nothing to re-render, so they keep the inline editor. */}
               <Pressable
-                onPress={() => (editing ? cancelEdit() : startEdit(entry))}
+                onPress={() =>
+                  revisable ? openBuilder(entry) : editing ? cancelEdit() : startEdit(entry)
+                }
                 hitSlop={6}
                 style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
                 <Ionicons name="pencil" size={15} color={colors.ocean} />
@@ -407,6 +541,35 @@ export function JobInvoices({
         </Pressable>
         {confirming ? (
           <Text style={styles.confirmHint}>Tap the trash again to delete this entry.</Text>
+        ) : null}
+        {historyId === entry.id ? (
+          <View style={styles.editCard}>
+            <Text style={styles.splitTitle}>Revision history</Text>
+            {historyLoading ? (
+              <ActivityIndicator color={colors.ocean} />
+            ) : history.length === 0 ? (
+              <Text style={styles.splitHint}>
+                No archived revisions yet — this document was written before revisions were
+                tracked.
+              </Text>
+            ) : (
+              history.map((revision) => (
+                <View key={revision.id} style={styles.historyRow}>
+                  <Text style={styles.historyText} numberOfLines={1}>
+                    rev {revision.revision} · {formatShortDate(revision.occurred_on)} ·{' '}
+                    {formatMoney(revision.amount)}
+                  </Text>
+                  {revision.document_path ? (
+                    <Pressable onPress={() => void openRevision(entry, revision)} hitSlop={8}>
+                      <Text style={styles.historyLink}>view</Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={styles.historyMuted}>no PDF</Text>
+                  )}
+                </View>
+              ))
+            )}
+          </View>
         ) : null}
         {splitId === entry.id ? (
           <View style={styles.editCard}>
@@ -756,6 +919,43 @@ const styles = StyleSheet.create({
     color: colors.inkSoft,
     fontSize: 12,
     fontWeight: '600',
+  },
+  staleChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: colors.sunLight,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  staleChipText: {
+    color: colors.ink,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  historyText: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  historyLink: {
+    color: colors.ocean,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  historyMuted: {
+    color: colors.inkSoft,
+    fontSize: 12,
+    fontWeight: '700',
   },
   amountText: {
     color: colors.ink,

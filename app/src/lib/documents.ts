@@ -10,7 +10,10 @@
  * (zero rows affected) and surface a friendly message instead of throwing.
  */
 
+import { Platform } from 'react-native';
+
 import { LOGO_DATA_URI } from '../assets/images/logo-base64';
+import { readFunctionError } from '@/lib/artwork';
 import {
   COMPANY_EMAIL,
   COMPANY_LEGAL_NAME,
@@ -35,6 +38,53 @@ export interface LineItem {
   rate: number;
 }
 
+/**
+ * The money breakdown a document prints. INVARIANT (asserted server-side by
+ * revise_document): `finance_entries.amount` === `total`.
+ */
+export interface DocumentTotals {
+  subtotal: number;
+  /** Absolute dollars taken off the subtotal, never a percentage. */
+  discount: number;
+  tax: number;
+  total: number;
+}
+
+/**
+ * The customer as they were WHEN THE DOCUMENT WAS WRITTEN.
+ *
+ * A PDF is a statement about a moment. Re-rendering revision 1 from today's
+ * `customers` row would silently rewrite history the first time somebody
+ * fixes a typo in an address, so the builder freezes these four fields into
+ * `document_meta` and offers to adopt the live record explicitly.
+ */
+export interface CustomerSnapshot {
+  name: string;
+  address?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}
+
+/** `finance_entries.document_meta` — everything the PDF needs beyond line items. */
+export interface DocumentMeta {
+  customer_snapshot?: CustomerSnapshot | null;
+  /** YYYY-MM-DD; estimates only, printed under the document number. */
+  valid_until?: string | null;
+  totals?: DocumentTotals | null;
+  /** Sales tax RATE as a percentage (8.5 = 8.5 %), not an amount. */
+  tax?: number | null;
+  /** Discount AMOUNT in dollars, not a percentage. */
+  discount?: number | null;
+  /**
+   * 'stale' means the row moved but the stored PDF did not — the save
+   * succeeded and the render did not. Every surface that offers the PDF says
+   * so, and the builder offers Retry PDF.
+   */
+  pdf_state?: 'current' | 'stale';
+  /** Double-tap / retry guard; revise_document() returns early on a repeat. */
+  last_client_token?: string | null;
+}
+
 /** A finance_entries row (subset used by the app). */
 export interface FinanceEntry {
   id: string;
@@ -48,6 +98,52 @@ export interface FinanceEntry {
   document_number: string | null;
   document_path: string | null;
   line_items: LineItem[] | null;
+  /** The document's notes / terms block (persisted since 2026-08-22). */
+  notes: string | null;
+  /** 1 = as first created. The document NUMBER never changes; this does. */
+  revision: number | null;
+  revised_at: string | null;
+  document_meta: DocumentMeta | null;
+  job_id: string | null;
+  customer_id: string | null;
+}
+
+/** One row of `finance_entry_revisions` — the append-only history. */
+export interface EntryRevision {
+  id: string;
+  created_at: string;
+  entry_id: string;
+  revision: number;
+  type: string | null;
+  amount: number;
+  occurred_on: string | null;
+  description: string | null;
+  notes: string | null;
+  line_items: LineItem[] | null;
+  document_meta: DocumentMeta | null;
+  document_number: string | null;
+  /** The IMMUTABLE archive copy for this revision, not the living path. */
+  document_path: string | null;
+  created_by: string | null;
+}
+
+/**
+ * Every column the app reads off a document row. Kept in one place because
+ * three call sites (job card, builder, history) must agree or a revision
+ * loads with half its fields missing.
+ */
+// Deliberately ONE string literal: supabase-js parses the select list at the
+// type level, and a concatenated string widens to `string`, which makes every
+// row come back as GenericStringError.
+const ENTRY_COLUMNS =
+  'id, type, amount, counterparty, description, occurred_on, status, document_number, document_path, line_items, notes, revision, revised_at, document_meta, job_id, customer_id';
+
+function normalizeEntry(row: Record<string, unknown>): FinanceEntry {
+  return {
+    ...(row as unknown as FinanceEntry),
+    amount: Number(row.amount) || 0,
+    revision: row.revision == null ? 1 : Number(row.revision) || 1,
+  };
 }
 
 export type FinanceEntriesResult =
@@ -66,21 +162,62 @@ export async function fetchJobFinanceEntries(jobId: string): Promise<FinanceEntr
   try {
     const { data, error } = await supabase
       .from('finance_entries')
-      .select(
-        'id, type, amount, counterparty, description, occurred_on, status, document_number, document_path, line_items',
-      )
+      .select(ENTRY_COLUMNS)
       .eq('company', COMPANY)
       .eq('job_id', jobId)
       .in('type', ['invoice', 'estimate', 'contract', 'payment', 'expense', 'investment'])
       .order('occurred_on', { ascending: false });
     if (error) return { status: 'unavailable' };
-    const entries = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
-      ...row,
-      amount: Number(row.amount) || 0,
-    })) as FinanceEntry[];
+    const entries = ((data ?? []) as Record<string, unknown>[]).map(normalizeEntry);
     return { status: 'ok', entries };
   } catch {
     return { status: 'unavailable' };
+  }
+}
+
+/**
+ * Load one document row by id — everything the builder needs to reopen it.
+ * Null on any failure (RLS / offline / gone), never throws.
+ */
+export async function fetchFinanceEntry(id: string): Promise<FinanceEntry | null> {
+  try {
+    const { data, error } = await supabase
+      .from('finance_entries')
+      .select(ENTRY_COLUMNS)
+      .eq('company', COMPANY)
+      .eq('id', id)
+      .limit(1);
+    const row = (data ?? [])[0] as Record<string, unknown> | undefined;
+    if (error || !row) return null;
+    return normalizeEntry(row);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A document's revision history, newest first. Admin SELECT only, and the
+ * table has no write policy at all — rows only ever arrive via
+ * revise_document(). Returns [] when the query fails so the history section
+ * simply doesn't appear.
+ */
+export async function fetchEntryRevisions(entryId: string): Promise<EntryRevision[]> {
+  try {
+    const { data, error } = await supabase
+      .from('finance_entry_revisions')
+      .select(
+        'id, created_at, entry_id, revision, type, amount, occurred_on, description, notes, line_items, document_meta, document_number, document_path, created_by',
+      )
+      .eq('entry_id', entryId)
+      .order('revision', { ascending: false });
+    if (error || !data) return [];
+    return (data as Record<string, unknown>[]).map((row) => ({
+      ...(row as unknown as EntryRevision),
+      amount: Number(row.amount) || 0,
+      revision: Number(row.revision) || 1,
+    }));
+  } catch {
+    return [];
   }
 }
 
@@ -209,6 +346,41 @@ export function lineItemsTotal(items: LineItem[]): number {
   return items.reduce((sum, item) => sum + item.qty * item.rate, 0);
 }
 
+function roundCents(value: number): number {
+  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+}
+
+/**
+ * The one place subtotal / discount / tax / total are computed.
+ *
+ * `discount` is DOLLARS off the subtotal, `taxRate` is a PERCENTAGE applied
+ * after the discount. Everything is rounded to cents here, once, because the
+ * PDF and the finance row are rendered from different sides of the app and
+ * revise_document() rejects a save where they disagree by more than half a
+ * cent. A discount larger than the subtotal is clamped rather than refused —
+ * a negative document is never what anybody meant.
+ */
+export function computeTotals(
+  items: LineItem[],
+  discount?: number | null,
+  taxRate?: number | null,
+): DocumentTotals {
+  const subtotal = roundCents(lineItemsTotal(items));
+  const rawDiscount = Number(discount);
+  const safeDiscount = Number.isFinite(rawDiscount) && rawDiscount > 0 ? rawDiscount : 0;
+  const appliedDiscount = roundCents(Math.min(safeDiscount, subtotal));
+  const taxable = roundCents(subtotal - appliedDiscount);
+  const rawRate = Number(taxRate);
+  const safeRate = Number.isFinite(rawRate) && rawRate > 0 ? rawRate : 0;
+  const tax = roundCents((taxable * safeRate) / 100);
+  return {
+    subtotal,
+    discount: appliedDiscount,
+    tax,
+    total: roundCents(taxable + tax),
+  };
+}
+
 export interface DocumentHtmlParams {
   type: DocumentType | 'contract';
   documentNumber: string;
@@ -223,18 +395,70 @@ export interface DocumentHtmlParams {
   jobAddress?: string | null;
   lineItems: LineItem[];
   notes?: string | null;
+  /** Prints "· Rev N" beside the document number, but only when N > 1. */
+  revision?: number | null;
+  /** YYYY-MM-DD; prints a "Valid until" line when set. */
+  validUntil?: string | null;
+  /** Discount AMOUNT in dollars. */
+  discount?: number | null;
+  /** Sales tax RATE as a percentage. */
+  tax?: number | null;
 }
 
-/** Build the branded, print-friendly HTML for an invoice or estimate. */
+/**
+ * Build the branded, print-friendly HTML for an invoice or estimate.
+ *
+ * PURE — no storage, no network, no clock. The web renderer posts this exact
+ * string to an edge function while native hands it to expo-print, so both
+ * platforms must be able to produce the same bytes from the same row.
+ *
+ * The revision / valid-until / discount / tax parameters are all additive and
+ * emit NOTHING when absent: the output for a document written before
+ * 2026-08-22 is byte-for-byte what it always was, right down to the literal
+ * "No tax applied" note.
+ */
 export function buildDocumentHtml(params: DocumentHtmlParams): string {
   const title =
     params.type === 'invoice' ? 'Invoice' : params.type === 'contract' ? 'Contract' : 'Estimate';
-  const total = lineItemsTotal(params.lineItems);
+  const totals = computeTotals(params.lineItems, params.discount, params.tax);
+  const total = totals.total;
   const date = new Date(`${params.dateISO}T12:00:00`).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   });
+  const revision = Number(params.revision) || 0;
+  const revisionSuffix = revision > 1 ? ` · Rev ${revision}` : '';
+  const validUntil = params.validUntil
+    ? `\n    <div class="doc-meta">Valid until ${escapeHtml(
+        new Date(`${params.validUntil}T12:00:00`).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        }),
+      )}</div>`
+    : '';
+  const discountRow =
+    totals.discount > 0
+      ? `\n    <tr>
+      <td class="label">Discount</td>
+      <td class="value">−${formatMoney(totals.discount)}</td>
+    </tr>`
+      : '';
+  const taxRate = Number(params.tax) || 0;
+  const taxRow =
+    totals.tax > 0
+      ? `\n    <tr>
+      <td class="label">Tax (${taxRate.toLocaleString('en-US', { maximumFractionDigits: 3 })}%)</td>
+      <td class="value">${formatMoney(totals.tax)}</td>
+    </tr>`
+      : '';
+  const taxNote =
+    totals.tax > 0
+      ? `<div class="tax-note">Includes ${taxRate.toLocaleString('en-US', {
+          maximumFractionDigits: 3,
+        })}% sales tax</div>`
+      : '<div class="tax-note">No tax applied</div>';
 
   const rows = params.lineItems
     .map((item) => {
@@ -343,7 +567,7 @@ export function buildDocumentHtml(params: DocumentHtmlParams): string {
 
   <div class="title-block">
     <div class="doc-title">${title}</div>
-    <div class="doc-meta"><strong>${escapeHtml(params.documentNumber)}</strong> · ${date}</div>
+    <div class="doc-meta"><strong>${escapeHtml(params.documentNumber)}</strong> · ${date}${revisionSuffix}</div>${validUntil}
   </div>
   <div class="accent-bar"></div>
 
@@ -376,14 +600,14 @@ export function buildDocumentHtml(params: DocumentHtmlParams): string {
   <table class="totals">
     <tr>
       <td class="label">Subtotal</td>
-      <td class="value">${formatMoney(total)}</td>
-    </tr>
+      <td class="value">${formatMoney(totals.subtotal)}</td>
+    </tr>${discountRow}${taxRow}
     <tr class="grand">
       <td class="label">Total</td>
       <td class="value">${formatMoney(total)}</td>
     </tr>
   </table>
-  <div class="tax-note">No tax applied</div>
+  ${taxNote}
 
   ${params.notes ? `<div class="notes"><div class="block-label">Notes / terms</div><p>${escapeHtml(params.notes)}</p></div>` : ''}
 
@@ -400,12 +624,20 @@ export type UploadPdfResult =
  * Upload a generated PDF to the private `contracts` bucket at
  * `<job_id>/<document_number>.pdf` and record it in `job_documents` so it
  * appears in the job's Documents section. Never throws.
+ *
+ * The registry insert is GUARDED (2026-08-22): it used to fire
+ * unconditionally, so regenerating a document left a second job_documents row
+ * pointing at the same object — the duplicate pair the revisions migration had
+ * to clean up. `generateContractPdf` had this guard from the start; now they
+ * match. `financeEntryId` links the registry row to the money row instead of
+ * relying on the path-naming convention.
  */
 export async function uploadGeneratedPdf(params: {
   jobId: string;
   documentNumber: string;
   type: DocumentType;
   localUri: string;
+  financeEntryId?: string | null;
 }): Promise<UploadPdfResult> {
   try {
     const response = await fetch(params.localUri);
@@ -419,18 +651,15 @@ export async function uploadGeneratedPdf(params: {
       .upload(storagePath, body, { contentType: 'application/pdf', upsert: true });
     if (uploadError) return { ok: false, message: uploadError.message };
 
-    const { data: userData } = await supabase.auth.getUser();
-    const { error: insertError } = await supabase.from('job_documents').insert({
-      company: COMPANY,
-      job_id: params.jobId,
-      doc_type: params.type,
-      storage_path: storagePath,
-      file_name: fileName,
-      content_type: 'application/pdf',
-      size_bytes: body.byteLength,
-      uploaded_by: userData?.user?.email ?? null,
+    const registered = await registerJobDocument({
+      jobId: params.jobId,
+      docType: params.type,
+      storagePath,
+      fileName,
+      sizeBytes: body.byteLength,
+      financeEntryId: params.financeEntryId ?? null,
     });
-    if (insertError) return { ok: false, message: insertError.message };
+    if (!registered.ok) return registered;
 
     return { ok: true, storagePath };
   } catch (e) {
@@ -438,9 +667,67 @@ export async function uploadGeneratedPdf(params: {
   }
 }
 
-export type InsertEntryResult = { ok: true } | { ok: false; message: string };
+/**
+ * Point the job_documents registry at a stored PDF exactly once.
+ *
+ * The table now carries `unique (company, storage_path)`, so a blind insert on
+ * a regenerated document is a constraint violation rather than a duplicate
+ * row. Update first (the admin UPDATE policy landed with the revisions
+ * migration), insert only when nothing was there.
+ */
+async function registerJobDocument(params: {
+  jobId: string;
+  docType: string;
+  storagePath: string;
+  fileName: string;
+  sizeBytes: number | null;
+  financeEntryId: string | null;
+}): Promise<MutateEntryResult> {
+  try {
+    const { data: updated, error: updateError } = await supabase
+      .from('job_documents')
+      .update({
+        size_bytes: params.sizeBytes,
+        doc_type: params.docType,
+        ...(params.financeEntryId ? { finance_entry_id: params.financeEntryId } : {}),
+      })
+      .eq('company', COMPANY)
+      .eq('storage_path', params.storagePath)
+      .select('id');
+    if (!updateError && updated && updated.length > 0) return { ok: true };
 
-/** Insert the finance_entries row for a created invoice/estimate. */
+    const { data: userData } = await supabase.auth.getUser();
+    const { error: insertError } = await supabase.from('job_documents').insert({
+      company: COMPANY,
+      job_id: params.jobId,
+      doc_type: params.docType,
+      storage_path: params.storagePath,
+      file_name: params.fileName,
+      content_type: 'application/pdf',
+      size_bytes: params.sizeBytes,
+      uploaded_by: userData?.user?.email ?? null,
+      ...(params.financeEntryId ? { finance_entry_id: params.financeEntryId } : {}),
+    });
+    // 23505 = the unique key caught a race; the row we wanted exists already.
+    if (insertError && insertError.code !== '23505') {
+      return { ok: false, message: insertError.message };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not record the PDF.' };
+  }
+}
+
+export type InsertEntryResult = { ok: true; id: string | null } | { ok: false; message: string };
+
+/**
+ * Insert the finance_entries row for a created invoice/estimate.
+ *
+ * `notes` and `documentMeta` persist since 2026-08-22 — they used to be typed
+ * into the builder, rendered into the PDF and then thrown away, which is why
+ * reopening a document could not show them back. The row starts at revision 1
+ * (the column default); revise_document() owns every number after that.
+ */
 export async function insertDocumentEntry(params: {
   type: DocumentType;
   amount: number;
@@ -452,28 +739,481 @@ export async function insertDocumentEntry(params: {
   documentNumber: string;
   documentPath: string | null;
   lineItems: LineItem[];
+  notes?: string | null;
+  documentMeta?: DocumentMeta | null;
 }): Promise<InsertEntryResult> {
   try {
-    const { error } = await supabase.from('finance_entries').insert({
-      company: COMPANY,
-      type: params.type,
-      direction: 'in',
-      amount: params.amount,
-      currency: 'USD',
-      counterparty: params.counterparty,
-      description: params.description,
-      occurred_on: params.occurredOn,
-      status: 'draft',
-      job_id: params.jobId,
-      customer_id: params.customerId,
-      document_number: params.documentNumber,
-      document_path: params.documentPath,
-      line_items: params.lineItems,
-    });
+    const { data, error } = await supabase
+      .from('finance_entries')
+      .insert({
+        company: COMPANY,
+        type: params.type,
+        direction: 'in',
+        amount: params.amount,
+        currency: 'USD',
+        counterparty: params.counterparty,
+        description: params.description,
+        occurred_on: params.occurredOn,
+        status: 'draft',
+        job_id: params.jobId,
+        customer_id: params.customerId,
+        document_number: params.documentNumber,
+        document_path: params.documentPath,
+        line_items: params.lineItems,
+        notes: params.notes ?? null,
+        document_meta: params.documentMeta ?? null,
+      })
+      .select('id');
     if (error) return { ok: false, message: error.message };
-    return { ok: true };
+    return { ok: true, id: ((data ?? [])[0] as { id?: string } | undefined)?.id ?? null };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not save the entry.' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Revisions (2026-08-22) — revise in place, keep the history
+// ---------------------------------------------------------------------------
+
+/** The LIVING object: overwritten in place on every revision. */
+export function documentStoragePath(jobId: string, documentNumber: string): string {
+  return `${jobId}/${documentNumber}.pdf`;
+}
+
+/** The IMMUTABLE archive copy of one revision. Never overwritten. */
+export function revisionStoragePath(
+  jobId: string,
+  documentNumber: string,
+  revision: number,
+): string {
+  return `${jobId}/revisions/${documentNumber}-r${revision}.pdf`;
+}
+
+/**
+ * A UUID for the save's idempotency token.
+ *
+ * `crypto.randomUUID` exists on web and on modern Hermes, but this bundle
+ * ships to a phone that may not have it and the RPC parameter is typed `uuid`,
+ * so a malformed fallback would be rejected outright. Hence the ladder:
+ * randomUUID → getRandomValues → Math.random. The token only has to be unique
+ * against ONE row's `last_client_token`, so the weakest rung is still safe.
+ */
+export function newClientToken(): string {
+  const cryptoRef = (globalThis as { crypto?: Crypto }).crypto;
+  try {
+    if (cryptoRef && typeof cryptoRef.randomUUID === 'function') return cryptoRef.randomUUID();
+  } catch {
+    // fall through
+  }
+  const bytes = new Uint8Array(16);
+  try {
+    if (cryptoRef && typeof cryptoRef.getRandomValues === 'function') {
+      cryptoRef.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+  } catch {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
+  const hex: string[] = [];
+  for (let i = 0; i < 16; i++) hex.push(bytes[i].toString(16).padStart(2, '0'));
+  return (
+    `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-` +
+    `${hex.slice(8, 10).join('')}-${hex.slice(10, 16).join('')}`
+  );
+}
+
+export type UploadRevisionResult =
+  | {
+      ok: true;
+      storagePath: string;
+      /** null when the archive copy failed — see RenderDocumentResult. */
+      archivePath: string | null;
+      sizeBytes: number;
+      warning?: string;
+    }
+  | { ok: false; message: string };
+
+/**
+ * Store one revision's PDF: overwrite the living object AND keep an immutable
+ * archive copy at `revisions/<docnum>-r<N>.pdf`.
+ *
+ * Deliberately does NOT touch job_documents — revise_document() owns the
+ * registry, and a second writer racing it is exactly how the duplicate rows
+ * appeared in the first place.
+ *
+ * On the first revision (N = 2) the CURRENT object is copied to `-r1` so
+ * revision 1 stays openable. That copy is best-effort on purpose: 24 of the 35
+ * legacy document rows point at ops-console paths with no object in this
+ * bucket at all, so a missing source is normal and must not fail the save.
+ */
+export async function uploadRevisionPdf(params: {
+  jobId: string;
+  documentNumber: string;
+  revision: number;
+  localUri: string;
+}): Promise<UploadRevisionResult> {
+  try {
+    const storagePath = documentStoragePath(params.jobId, params.documentNumber);
+    const archivePath = revisionStoragePath(
+      params.jobId,
+      params.documentNumber,
+      params.revision,
+    );
+
+    if (params.revision === 2) {
+      const legacyArchive = revisionStoragePath(params.jobId, params.documentNumber, 1);
+      try {
+        await supabase.storage.from(DOCUMENTS_BUCKET).copy(storagePath, legacyArchive);
+      } catch {
+        // No object at the living path (or -r1 already there). Both fine.
+      }
+    }
+
+    const response = await fetch(params.localUri);
+    const body = await response.arrayBuffer();
+
+    const { error: liveError } = await supabase.storage
+      .from(DOCUMENTS_BUCKET)
+      .upload(storagePath, body, { contentType: 'application/pdf', upsert: true });
+    if (liveError) return { ok: false, message: liveError.message };
+
+    const { error: archiveError } = await supabase.storage
+      .from(DOCUMENTS_BUCKET)
+      .upload(archivePath, body, { contentType: 'application/pdf', upsert: true });
+
+    return {
+      ok: true,
+      storagePath,
+      // The living PDF is right, which is what everybody looks at; only the
+      // history link for this one revision is missing, so the history row
+      // falls back to the living path rather than a phantom archive object.
+      archivePath: archiveError ? null : archivePath,
+      sizeBytes: body.byteLength,
+      ...(archiveError
+        ? { warning: `The revision archive copy failed to save: ${archiveError.message}` }
+        : {}),
+    };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not store the PDF.' };
+  }
+}
+
+export const WEB_PDF_NOT_CONFIGURED =
+  "PDF generation on the web isn't set up yet — the revision was saved; regenerate from the " +
+  'iPhone app or ask Devon to finish PDF setup.';
+
+export type RenderDocumentResult =
+  | {
+      ok: true;
+      storagePath: string;
+      /**
+       * null when the archive copy could not be written — the history row then
+       * falls back to the living path rather than pointing at nothing.
+       */
+      archivePath: string | null;
+      sizeBytes: number | null;
+      /** Native only — the printer's temp file, for Share / Preview. */
+      localUri?: string;
+      warning?: string;
+    }
+  | { ok: false; message: string; code?: 'not_configured' };
+
+/** Peek at a failed invoke()'s JSON body without consuming it. */
+async function readFunctionPayload(error: unknown): Promise<Record<string, unknown> | null> {
+  const context = (error as { context?: unknown })?.context;
+  if (!context || typeof context !== 'object') return null;
+  const response = context as Response;
+  try {
+    if (typeof response.clone === 'function') {
+      return (await response.clone().json()) as Record<string, unknown>;
+    }
+  } catch {
+    // not JSON
+  }
+  return null;
+}
+
+/**
+ * Render a document's HTML to a stored PDF, on whichever platform we are.
+ *
+ * Native uses expo-print and uploads the bytes itself. Web has no printer that
+ * can produce a FILE (window.print() opens a dialog and stores nothing), so it
+ * posts the same HTML to the `render-document` edge function, which renders it
+ * server-side and writes both objects with the service role. Either way the
+ * caller then calls reviseDocument() — one save path, two renderers.
+ *
+ * Never throws. A failure here is not a failed save: the caller records the
+ * revision with pdf_state 'stale' and offers Retry PDF.
+ */
+export async function renderDocumentPdf(params: {
+  html: string;
+  entryId: string;
+  jobId: string;
+  documentNumber: string;
+  revision: number;
+}): Promise<RenderDocumentResult> {
+  if (Platform.OS === 'web') {
+    try {
+      const { data, error } = await supabase.functions.invoke('render-document', {
+        body: {
+          entryId: params.entryId,
+          jobId: params.jobId,
+          documentNumber: params.documentNumber,
+          revision: params.revision,
+          html: params.html,
+        },
+      });
+      if (error) {
+        const payload = await readFunctionPayload(error);
+        if (payload?.code === 'not_configured') {
+          return { ok: false, code: 'not_configured', message: WEB_PDF_NOT_CONFIGURED };
+        }
+        const detail = await readFunctionError(error);
+        return { ok: false, message: detail ?? error.message ?? 'The PDF service failed.' };
+      }
+      const result = data as {
+        ok?: boolean;
+        code?: string;
+        error?: string;
+        warning?: string;
+        storagePath?: string;
+        archivePath?: string | null;
+        sizeBytes?: number;
+      } | null;
+      if (result?.code === 'not_configured') {
+        return { ok: false, code: 'not_configured', message: WEB_PDF_NOT_CONFIGURED };
+      }
+      if (!result?.ok || !result.storagePath) {
+        return { ok: false, message: result?.error ?? 'The PDF service failed.' };
+      }
+      return {
+        ok: true,
+        storagePath: result.storagePath,
+        // The function returns archivePath: null when only the archive copy
+        // failed. Honour that instead of inventing a path to an object that
+        // isn't there.
+        archivePath: result.archivePath ?? null,
+        sizeBytes: typeof result.sizeBytes === 'number' ? result.sizeBytes : null,
+        ...(result.warning ? { warning: result.warning } : {}),
+      };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : 'The PDF service failed.' };
+    }
+  }
+
+  try {
+    const Print = await import('expo-print');
+    const { uri } = await Print.printToFileAsync({ html: params.html });
+    const stored = await uploadRevisionPdf({
+      jobId: params.jobId,
+      documentNumber: params.documentNumber,
+      revision: params.revision,
+      localUri: uri,
+    });
+    if (!stored.ok) return stored;
+    return { ...stored, localUri: uri };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not create the PDF.' };
+  }
+}
+
+export type ReviseResult =
+  | { ok: true; revision: number; entryId: string }
+  | { ok: false; message: string };
+
+const REVISE_MIGRATION_MESSAGE =
+  'Revising documents needs the latest database migration.';
+
+/**
+ * Revise an estimate / invoice / contract in place through the RPC.
+ *
+ * ONE call does all four writes (bump the entry, append the history row,
+ * re-point the registry, keep the number) because PostgREST has no
+ * multi-statement transaction and this codebase has already paid for that
+ * twice — document creation is three independent writes whose failures are all
+ * downgraded to warnings.
+ *
+ * Pass the SAME `clientToken` on a retry: the function returns the revision
+ * that already happened instead of burning a second one, which is also what
+ * makes a double-tapped Save harmless. Never throws.
+ */
+export async function reviseDocument(params: {
+  entryId: string;
+  lineItems: LineItem[];
+  amount: number;
+  notes?: string | null;
+  occurredOn?: string | null;
+  description?: string | null;
+  documentMeta?: DocumentMeta | null;
+  /** Only set when the render succeeded — null leaves the living path alone. */
+  documentPath?: string | null;
+  archivePath?: string | null;
+  pdfState?: 'current' | 'stale';
+  fileSize?: number | null;
+  clientToken?: string | null;
+}): Promise<ReviseResult> {
+  try {
+    const { data, error } = await supabase.rpc('revise_document', {
+      p_entry_id: params.entryId,
+      p_line_items: params.lineItems,
+      p_amount: params.amount,
+      p_notes: params.notes ?? null,
+      p_occurred_on: params.occurredOn ?? null,
+      p_description: params.description ?? null,
+      p_document_meta: params.documentMeta ?? {},
+      p_document_path: params.documentPath ?? null,
+      p_archive_path: params.archivePath ?? null,
+      p_pdf_state: params.pdfState ?? 'current',
+      p_file_size: params.fileSize ?? null,
+      p_client_token: params.clientToken ?? null,
+    });
+    if (error) {
+      if (error.code === '42501') {
+        return { ok: false, message: 'Only owners and operators can revise documents.' };
+      }
+      if (error.code === 'P0002') {
+        return { ok: false, message: 'That document no longer exists.' };
+      }
+      if (error.code === 'PGRST202' || error.code === '42883') {
+        return { ok: false, message: REVISE_MIGRATION_MESSAGE };
+      }
+      return { ok: false, message: error.message };
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as
+      | { revision?: unknown; entry_id?: unknown }
+      | null
+      | undefined;
+    if (!row || row.revision == null) return { ok: false, message: REVISE_MIGRATION_MESSAGE };
+    return {
+      ok: true,
+      revision: Number(row.revision) || 1,
+      entryId: String(row.entry_id ?? params.entryId),
+    };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not save the revision.' };
+  }
+}
+
+/**
+ * Clear a 'stale' PDF flag after a successful Retry PDF.
+ *
+ * The revision itself already happened — its history row is written and its
+ * `document_path` already names the archive object the retry just uploaded.
+ * Nothing about the DOCUMENT changed, only whether its bytes exist, so this
+ * deliberately does not go through revise_document(): appending a second,
+ * identical revision would make the counter lie about how many times the
+ * document was actually revised.
+ */
+export async function attachRenderedPdf(params: {
+  entryId: string;
+  jobId: string;
+  documentNumber: string;
+  documentType: string;
+  documentMeta: DocumentMeta;
+  storagePath: string;
+  sizeBytes: number | null;
+}): Promise<MutateEntryResult> {
+  try {
+    const meta: DocumentMeta = { ...params.documentMeta, pdf_state: 'current' };
+    const { data, error } = await supabase
+      .from('finance_entries')
+      .update({ document_meta: meta, document_path: params.storagePath })
+      .eq('company', COMPANY)
+      .eq('id', params.entryId)
+      .select('id');
+    if (error) {
+      if (error.code === 'PGRST116' || error.code === '42501') {
+        return { ok: false, message: MIGRATION_MESSAGE };
+      }
+      return { ok: false, message: error.message };
+    }
+    if (!data || data.length === 0) return { ok: false, message: MIGRATION_MESSAGE };
+
+    await registerJobDocument({
+      jobId: params.jobId,
+      docType: ['estimate', 'invoice', 'contract'].includes(params.documentType)
+        ? params.documentType
+        : 'other',
+      storagePath: params.storagePath,
+      fileName: `${params.documentNumber}.pdf`,
+      sizeBytes: params.sizeBytes,
+      financeEntryId: params.entryId,
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not update the PDF.' };
+  }
+}
+
+export type DuplicateDocumentResult =
+  | { ok: true; entryId: string; documentNumber: string }
+  | { ok: false; message: string };
+
+/**
+ * Copy an existing document into a NEW one of the given type — the
+ * "accepted estimate → invoice" move, which today means retyping every line.
+ *
+ * The copy gets its own document number, its own finance row and no PDF: the
+ * builder opens on it next and renders the first one. Amount and line items
+ * come across verbatim, as do notes and document_meta, minus the bookkeeping
+ * fields (pdf_state / last_client_token) which belong to the source's save.
+ */
+export async function duplicateDocument(params: {
+  sourceEntryId: string;
+  asType: DocumentType;
+}): Promise<DuplicateDocumentResult> {
+  try {
+    const source = await fetchFinanceEntry(params.sourceEntryId);
+    if (!source) return { ok: false, message: 'That document could not be loaded.' };
+    if (!source.job_id) {
+      return { ok: false, message: 'Only documents attached to a job can be duplicated.' };
+    }
+    const lineItems = source.line_items ?? [];
+    if (lineItems.length === 0) {
+      return { ok: false, message: 'That document has no line items to copy.' };
+    }
+
+    const { data: jobRow } = await supabase
+      .from('jobs')
+      .select('job_number')
+      .eq('id', source.job_id)
+      .limit(1);
+    const jobNumber =
+      ((jobRow ?? [])[0] as { job_number?: string | null } | undefined)?.job_number ??
+      source.job_id.slice(0, 8);
+
+    const documentNumber = await nextDocumentNumber(source.job_id, jobNumber, params.asType);
+    const typeLabel = params.asType === 'invoice' ? 'Invoice' : 'Estimate';
+    const { pdf_state: _ignoredState, last_client_token: _ignoredToken, ...meta } =
+      source.document_meta ?? {};
+
+    const inserted = await insertDocumentEntry({
+      type: params.asType,
+      amount: source.amount,
+      counterparty: source.counterparty ?? 'Customer',
+      description: `${typeLabel} ${documentNumber}`,
+      occurredOn: todayISO(),
+      jobId: source.job_id,
+      customerId: source.customer_id,
+      documentNumber,
+      documentPath: null,
+      lineItems,
+      notes: source.notes,
+      documentMeta: { ...meta, pdf_state: 'stale' },
+    });
+    if (!inserted.ok) return { ok: false, message: inserted.message };
+    if (!inserted.id) {
+      return { ok: false, message: 'The copy was saved but could not be opened. Reload the job.' };
+    }
+    return { ok: true, entryId: inserted.id, documentNumber };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : 'Could not duplicate that document.',
+    };
   }
 }
 
@@ -673,7 +1413,7 @@ export async function recordPayment(params: {
       customer_id: params.customerId,
     });
     if (error) return { ok: false, message: error.message };
-    return { ok: true };
+    return { ok: true, id: null };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not record the payment.' };
   }

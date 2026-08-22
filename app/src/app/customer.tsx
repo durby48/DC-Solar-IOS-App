@@ -12,6 +12,8 @@ import {
   type CustomerDocument,
   type CustomerProject,
 } from '@/lib/account';
+import { getDocumentUrl } from '@/lib/data';
+import { viewDocument } from '@/lib/pdf';
 import { clearRoleCache } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
@@ -30,6 +32,8 @@ export default function CustomerScreen() {
   const [name, setName] = useState<string | null>(null);
   const [projects, setProjects] = useState<CustomerProject[]>([]);
   const [documents, setDocuments] = useState<CustomerDocument[]>([]);
+  const [docError, setDocError] = useState<string | null>(null);
+  const [openingDoc, setOpeningDoc] = useState<string | null>(null);
   const [balance, setBalance] = useState<{ invoiced: number; paid: number; balance: number } | null>(
     null,
   );
@@ -61,7 +65,7 @@ export default function CustomerScreen() {
           return;
         }
         setProjects(portal.projects);
-        setDocuments(portal.documents);
+        setDocuments(portal.documents as CustomerDocument[]);
         setBalance(portal.balance);
         setLoaded(true);
       });
@@ -70,6 +74,31 @@ export default function CustomerScreen() {
       cancelled = true;
     };
   }, [router]);
+
+  /**
+   * Open one of the customer's own PDFs.
+   *
+   * `revision` goes on the signed URL as a cache-buster because a revised
+   * document overwrites the same storage object. Two thirds of the legacy
+   * document rows point at ops-console paths with NO object in the bucket, so
+   * the signed URL mints fine and the fetch 404s — hence the explicit
+   * "isn't available yet" message rather than a silent dead tap.
+   */
+  const openDocument = async (doc: CustomerDocument) => {
+    if (!doc.document_path) return;
+    setDocError(null);
+    setOpeningDoc(doc.entry_id);
+    try {
+      const url = await getDocumentUrl(doc.document_path, doc.revision ?? null);
+      if (!url || !(await viewDocument(url))) {
+        setDocError("This PDF isn't available yet — ask the office.");
+      }
+    } catch {
+      setDocError("This PDF isn't available yet — ask the office.");
+    } finally {
+      setOpeningDoc(null);
+    }
+  };
 
   const signOut = async () => {
     await supabase.auth.signOut();
@@ -148,22 +177,51 @@ export default function CustomerScreen() {
             {documents.length > 0 ? (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Estimates, invoices &amp; payments</Text>
-                {documents.map((d) => (
-                  <View key={d.entry_id} style={styles.listRow}>
-                    <View style={styles.listBody}>
-                      <Text style={styles.listTitle}>
-                        {d.document_number ??
-                          d.type.charAt(0).toUpperCase() + d.type.slice(1)}
+                {documents.map((d) => {
+                  const stale = d.pdf_state === 'stale';
+                  const revision = d.revision ?? 1;
+                  const hasPdf = Boolean(d.document_path);
+                  return (
+                    <Pressable
+                      key={d.entry_id}
+                      onPress={() => (hasPdf ? void openDocument(d) : undefined)}
+                      disabled={!hasPdf || openingDoc !== null}
+                      style={({ pressed }) => [
+                        styles.listRow,
+                        pressed && hasPdf && styles.rowPressed,
+                      ]}>
+                      <View style={styles.listBody}>
+                        <Text style={styles.listTitle}>
+                          {d.document_number ??
+                            d.type.charAt(0).toUpperCase() + d.type.slice(1)}
+                          {revision > 1 ? ` · rev ${revision}` : ''}
+                        </Text>
+                        <Text style={styles.listMeta}>
+                          {[
+                            d.job_number,
+                            d.occurred_on,
+                            // Shown, not hidden: the numbers below are current
+                            // even when the stored PDF hasn't caught up.
+                            stale && hasPdf ? '(PDF being updated)' : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </Text>
+                      </View>
+                      <Text style={[styles.listAmount, d.type === 'payment' && styles.paidAmount]}>
+                        {`$${Math.round(d.amount).toLocaleString('en-US')}`}
                       </Text>
-                      <Text style={styles.listMeta}>
-                        {[d.job_number, d.occurred_on].filter(Boolean).join(' · ')}
-                      </Text>
-                    </View>
-                    <Text style={[styles.listAmount, d.type === 'payment' && styles.paidAmount]}>
-                      {`$${Math.round(d.amount).toLocaleString('en-US')}`}
-                    </Text>
-                  </View>
-                ))}
+                      {hasPdf ? (
+                        openingDoc === d.entry_id ? (
+                          <ActivityIndicator size="small" color={colors.ocean} />
+                        ) : (
+                          <Ionicons name="chevron-forward" size={18} color={colors.ocean} />
+                        )
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+                {docError ? <Text style={styles.error}>{docError}</Text> : null}
               </View>
             ) : null}
           </>
@@ -297,6 +355,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.line,
   },
+  rowPressed: { opacity: 0.6 },
   listBody: { flex: 1, gap: 2 },
   listTitle: { color: colors.ink, fontSize: 14, fontWeight: '700' },
   listMeta: { color: colors.inkSoft, fontSize: 12, fontWeight: '600' },

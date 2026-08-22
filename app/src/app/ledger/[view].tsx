@@ -240,13 +240,28 @@ export default function LedgerScreen() {
       ? contractedJobs.length
       : groups.reduce((sum, g) => sum + g.entries.length, 0);
 
+  // `entry.revision` busts the CDN / Safari cache: a revision overwrites the
+  // same storage object, so the previous signed URL's bytes are still valid.
   const openPdf = async (entry: LedgerEntry) => {
     if (!entry.document_path) return;
     setError(null);
-    const url = await getDocumentUrl(entry.document_path);
+    const url = await getDocumentUrl(entry.document_path, entry.revision);
     if (!url || !(await viewDocument(url))) {
       setError('Could not open the PDF. Please try again.');
     }
+  };
+
+  /**
+   * Estimates and invoices with a document number are real paperwork: they
+   * open in the builder, where the numbers and the PDF move together. Payments
+   * and the document-less "Contract value" rows have nothing to re-render and
+   * keep the editors they already had.
+   */
+  const reviseEntry = (entry: LedgerEntry) => {
+    router.push({
+      pathname: '/document-builder',
+      params: { entryId: entry.id, ...(entry.job_id ? { jobId: entry.job_id } : {}) },
+    });
   };
 
   const saveContractValue = async (job: JobInfo) => {
@@ -298,7 +313,7 @@ export default function LedgerScreen() {
     setError(null);
     setBusyId(entry.id);
     try {
-      const url = await getDocumentUrl(entry.document_path);
+      const url = await getDocumentUrl(entry.document_path, entry.revision);
       if (!url || !(await shareDocument(url, `${entry.document_number ?? 'document'}.pdf`))) {
         setError('Could not share the PDF. Please try again.');
       }
@@ -331,43 +346,59 @@ export default function LedgerScreen() {
     </ScrollView>
   );
 
-  const renderEntry = (entry: LedgerEntry, index: number) => (
-    <View key={entry.id} style={[styles.entryRow, index > 0 && styles.rowBorderTop]}>
-      <Pressable
-        onPress={() => void openPdf(entry)}
-        disabled={!entry.document_path}
-        style={({ pressed }) => [
-          styles.entryBody,
-          pressed && entry.document_path != null && styles.rowPressed,
-        ]}>
-        <View style={styles.entryText}>
-          <Text style={styles.entryTitle} numberOfLines={1}>
-            {entry.document_number ??
-              entry.description ??
-              (entry.type === 'payment' ? 'Payment' : 'Entry')}
-          </Text>
-          <Text style={styles.entryMeta}>
-            {formatShortDate(entry.occurred_on)}
-            {view === 'paid' && entry.counterparty ? ` · ${entry.counterparty}` : ''}
-          </Text>
-        </View>
-        <Text style={styles.entryAmount}>{formatMoney(entry.amount)}</Text>
-      </Pressable>
-      {entry.document_path ? (
+  const renderEntry = (entry: LedgerEntry, index: number) => {
+    const revision = entry.revision ?? 1;
+    const revisable =
+      (entry.type === 'estimate' || entry.type === 'invoice') && entry.document_number != null;
+    const stale = entry.document_meta?.pdf_state === 'stale';
+    return (
+      <View key={entry.id} style={[styles.entryRow, index > 0 && styles.rowBorderTop]}>
         <Pressable
-          onPress={() => void sharePdf(entry)}
-          disabled={busyId !== null}
-          hitSlop={6}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
-          {busyId === entry.id ? (
-            <ActivityIndicator size="small" color={colors.ocean} />
-          ) : (
-            <Ionicons name="share-outline" size={15} color={colors.ocean} />
-          )}
+          onPress={() => void openPdf(entry)}
+          disabled={!entry.document_path}
+          style={({ pressed }) => [
+            styles.entryBody,
+            pressed && entry.document_path != null && styles.rowPressed,
+          ]}>
+          <View style={styles.entryText}>
+            <Text style={styles.entryTitle} numberOfLines={1}>
+              {entry.document_number ??
+                entry.description ??
+                (entry.type === 'payment' ? 'Payment' : 'Entry')}
+              {revision > 1 ? ` · rev ${revision}` : ''}
+            </Text>
+            <Text style={styles.entryMeta}>
+              {formatShortDate(entry.occurred_on)}
+              {view === 'paid' && entry.counterparty ? ` · ${entry.counterparty}` : ''}
+              {stale ? ' · ⚠ PDF out of date' : ''}
+            </Text>
+          </View>
+          <Text style={styles.entryAmount}>{formatMoney(entry.amount)}</Text>
         </Pressable>
-      ) : null}
-    </View>
-  );
+        {revisable ? (
+          <Pressable
+            onPress={() => reviseEntry(entry)}
+            hitSlop={6}
+            style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
+            <Ionicons name="pencil" size={15} color={colors.ocean} />
+          </Pressable>
+        ) : null}
+        {entry.document_path ? (
+          <Pressable
+            onPress={() => void sharePdf(entry)}
+            disabled={busyId !== null}
+            hitSlop={6}
+            style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
+            {busyId === entry.id ? (
+              <ActivityIndicator size="small" color={colors.ocean} />
+            ) : (
+              <Ionicons name="share-outline" size={15} color={colors.ocean} />
+            )}
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  };
 
   const body = () => {
     if (!loaded) {

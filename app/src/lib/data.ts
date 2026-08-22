@@ -76,6 +76,11 @@ export interface JobDocument {
   content_type: string | null;
   size_bytes: number | null;
   uploaded_by: string | null;
+  /**
+   * The money row this PDF belongs to. Until 2026-08-22 the link was only the
+   * naming convention `finance_entries.document_path === storage_path`.
+   */
+  finance_entry_id?: string | null;
 }
 
 export type JobDocumentsResult =
@@ -105,14 +110,29 @@ export async function fetchJobDocuments(jobId: string): Promise<JobDocumentsResu
   }
 }
 
-/** Create a short-lived signed URL for viewing a stored document. */
-export async function getDocumentUrl(storagePath: string): Promise<string | null> {
+/**
+ * Create a short-lived signed URL for viewing a stored document.
+ *
+ * `version` (pass `entry.revision`) is appended as `&v=<n>` AFTER signing. The
+ * signature covers the object and the expiry, not arbitrary query parameters,
+ * so this is safe — and necessary: a revised document overwrites the same
+ * object in place, and both the Supabase CDN and Safari will happily serve the
+ * bytes they cached under the previous URL. The avatar and EOM uploads dodge
+ * the same trap by timestamping their filenames; a document number has to stay
+ * stable, so it gets a cache-buster instead.
+ */
+export async function getDocumentUrl(
+  storagePath: string,
+  version?: number | null,
+): Promise<string | null> {
   try {
     const { data, error } = await supabase.storage
       .from(DOCUMENTS_BUCKET)
       .createSignedUrl(storagePath, 3600);
     if (error || !data?.signedUrl) return null;
-    return data.signedUrl;
+    const url = data.signedUrl;
+    if (version == null) return url;
+    return `${url}${url.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(version))}`;
   } catch {
     return null;
   }
@@ -578,7 +598,7 @@ export async function fetchJobFinance(jobId: string): Promise<JobFinanceSummary 
   try {
     const { data: finance, error: financeError } = await supabase
       .from('finance_entries')
-      .select('type, amount, occurred_on')
+      .select('type, amount, occurred_on, created_at')
       .eq('company', COMPANY)
       .eq('job_id', jobId);
     if (financeError || !finance) return null;
@@ -610,17 +630,34 @@ export async function fetchJobFinance(jobId: string): Promise<JobFinanceSummary 
 
     let estimate: number | null = null;
     let estimateDate = '';
+    let estimateCreated = '';
     let invoiced = 0;
     let paid = 0;
     let expenses = 0;
-    for (const entry of finance as { type: string; amount: unknown; occurred_on: string | null }[]) {
+    for (const entry of finance as {
+      type: string;
+      amount: unknown;
+      occurred_on: string | null;
+      created_at?: string | null;
+    }[]) {
       const amount = num(entry.amount);
       switch (entry.type) {
         case 'estimate': {
+          // Newest estimate wins, by occurred_on and then created_at — the
+          // same two keys as isNewerEstimate in lib/pipeline.ts. Without the
+          // tie-break, two estimates dated the same day (which is exactly what
+          // a same-afternoon revision produces) resolved to whichever row
+          // PostgREST happened to return last, and this header flipped between
+          // refreshes with no data change at all.
           const when = entry.occurred_on ?? '';
-          if (estimate === null || when >= estimateDate) {
+          const created = entry.created_at ?? '';
+          const newer =
+            estimate === null ||
+            (when !== estimateDate ? when > estimateDate : created >= estimateCreated);
+          if (newer) {
             estimate = amount;
             estimateDate = when;
+            estimateCreated = created;
           }
           break;
         }

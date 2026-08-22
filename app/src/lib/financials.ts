@@ -57,6 +57,15 @@ export interface LedgerEntry {
   job_id: string | null;
   document_number: string | null;
   document_path: string | null;
+  /** 1 = as first created; the document NUMBER never changes, this does. */
+  revision?: number | null;
+  /**
+   * `finance_entries.document_meta` — carries `pdf_state`, so the ledger can
+   * warn that a PDF's bytes are older than the row beside them. Typed loosely
+   * here on purpose: lib/documents.ts owns the shape, and importing it would
+   * point the money layer at the document layer.
+   */
+  document_meta?: { pdf_state?: string | null } | null;
 }
 
 /** Company money overview + the full expense ledger. */
@@ -107,7 +116,7 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       supabase
         .from('finance_entries')
         .select(
-          'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path',
+          'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path, revision, document_meta',
         )
         .eq('company', COMPANY),
       // Wages live here, not in finance_entries. Fetched alongside so `net`

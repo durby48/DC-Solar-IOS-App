@@ -102,7 +102,7 @@ export type GenerateResult =
  * `error.context` (a Response). Without this, a missing API key, a Street View
  * coverage miss and a Gemini rejection all look identical to the user.
  */
-async function readFunctionError(error: unknown): Promise<string | null> {
+export async function readFunctionError(error: unknown): Promise<string | null> {
   const context = (error as { context?: unknown })?.context;
   if (!context || typeof context !== 'object') return null;
   const response = context as Response;
