@@ -1,0 +1,14 @@
+{
+  "name": "dc-solar-tcg-import",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "One-off importer that loads the DC Solar trading card deck into Supabase. Kept out of app/package.json on purpose — sharp is a native build the Expo app must never depend on.",
+  "scripts": {
+    "import": "node import.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "sharp": "^0.34.0"
+  }
+}
