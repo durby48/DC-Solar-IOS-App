@@ -29,6 +29,26 @@ export const colors = {
   danger: '#C0564A',
   success: '#3E8E5E',
 
+  // ---- olive core (2026-08 brand evolution) ----
+  // Dark olive green joins cream / sun / ocean / ink as a core brand color.
+  // Contrast figures are measured against `cream` (#FFF3E6):
+  //   olive     #4D5C2B — 6.21:1, AA for body text and icons on cream
+  //   oliveMid  #66783A — 4.45:1, icons and large (18pt+/14pt bold) text only
+  //   oliveDeep #3A461F — 9.26:1, AAA; also the safe ground for cream/white text
+  //   oliveSoft #E7EDD8 — tinted chip/background fill
+  //   oliveTint #F2F5E9 — faintest wash, for full-bleed sections
+  //   oliveLine rgba(255,243,230,0.18) — hairline/divider *on top of* olive
+  // Header rule: cream/white on olive; olive/oliveDeep on cream; never white on sun.
+  // olive / oliveDeep / oliveSoft are mirrored in targets/widget/index.swift
+  // (Theme enum) and targets/widget/expo-target.config.js — the widget is Swift
+  // and cannot import this file, so change those three in all three places.
+  olive: '#4D5C2B',
+  oliveMid: '#66783A',
+  oliveDeep: '#3A461F',
+  oliveSoft: '#E7EDD8',
+  oliveTint: '#F2F5E9',
+  oliveLine: 'rgba(255,243,230,0.18)',
+
   // ---- accent ramp (new) ----
   teal: '#2F9C95',
   tealSoft: '#D6F0EE',

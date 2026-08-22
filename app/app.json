@@ -11,6 +11,7 @@
       "bundleIdentifier": "com.dcsolarkc.fieldapp",
       "appleTeamId": "E4B2Y6BWCH",
       "supportsTablet": false,
+      "usesAppleSignIn": true,
       "entitlements": {
         "com.apple.security.application-groups": ["group.com.dcsolarkc.fieldapp"]
       },
@@ -47,7 +48,22 @@
       "@react-native-community/datetimepicker",
       "expo-sharing",
       "expo-notifications",
-      "@bacons/apple-targets"
+      "@bacons/apple-targets",
+      "expo-apple-authentication",
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": false,
+          "supportsPictureInPicture": false
+        }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "DC Solar uses device motion for the holographic card tilt effect."
+        }
+      ],
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -76,9 +92,7 @@
         }
       }
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "2",
     "updates": {
       "url": "https://u.expo.dev/c1bf33f2-33a6-4730-9fb3-4b98405c2c82"
     }

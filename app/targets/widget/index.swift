@@ -13,6 +13,9 @@ private enum Theme {
   static let ocean = Color(red: 0.353, green: 0.659, blue: 0.812) // #5AA8CF
   static let ink = Color(red: 0.239, green: 0.208, blue: 0.180) // #3D352E
   static let inkSoft = Color(red: 0.420, green: 0.365, blue: 0.310) // #6B5D4F
+  static let olive = Color(red: 77 / 255, green: 92 / 255, blue: 43 / 255) // #4D5C2B
+  static let oliveDeep = Color(red: 58 / 255, green: 70 / 255, blue: 31 / 255) // #3A461F
+  static let oliveSoft = Color(red: 231 / 255, green: 237 / 255, blue: 216 / 255) // #E7EDD8
 }
 
 struct WidgetState {
@@ -98,7 +101,7 @@ struct ClockRow: View {
   var body: some View {
     HStack(spacing: 5) {
       Circle()
-        .fill(state.isClockedIn ? Theme.ocean : Theme.inkSoft.opacity(0.45))
+        .fill(state.isClockedIn ? Theme.olive : Theme.inkSoft.opacity(0.45))
         .frame(width: 7, height: 7)
       if state.isClockedIn {
         Text(state.timerStart, style: .timer)
