@@ -40,19 +40,34 @@ export function Ticker({
   items,
   speed = 38,
   style,
+  paused = false,
 }: {
   /** Rendered twice — keep them cheap. */
   items: ReactNode[];
   /** Pixels per second. Slow enough to read. */
   speed?: number;
   style?: StyleProp<ViewStyle>;
+  /**
+   * Stop the marquee without unmounting it. Pass `!isFocused` — an infinite
+   * `withRepeat` keeps its UI-thread frame callback alive on a screen nobody
+   * is looking at, and the pipeline hero already parks its own animation the
+   * same way. Restarting from 0 rather than resuming mid-scroll is deliberate:
+   * the track's two copies are identical, so frame 0 is visually the same
+   * place as any repetition boundary and nothing appears to jump.
+   */
+  paused?: boolean;
 }) {
   const [trackWidth, setTrackWidth] = useState(0);
   const { enabled } = useMotion();
   const translateX = useSharedValue(0);
 
   useEffect(() => {
-    if (trackWidth <= 0 || !enabled) return;
+    if (trackWidth <= 0 || !enabled || paused) {
+      cancelAnimation(translateX);
+      // Park on the frame where copy one starts, not wherever it stopped.
+      translateX.value = 0;
+      return;
+    }
     translateX.value = 0;
     translateX.value = withRepeat(
       withTiming(-trackWidth, {
@@ -67,7 +82,7 @@ export function Ticker({
     return () => {
       cancelAnimation(translateX);
     };
-  }, [trackWidth, enabled, speed, translateX]);
+  }, [trackWidth, enabled, speed, paused, translateX]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],

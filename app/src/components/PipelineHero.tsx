@@ -237,6 +237,9 @@ export function PipelineHero() {
       {tiles.length > 0 ? (
         <Ticker
           style={styles.ticker}
+          // Same reason the frame animation parks above: an infinite
+          // `withRepeat` keeps running on a tab nobody is looking at.
+          paused={!focused}
           items={tiles.map((tile, i) => (
             <MetricTile
               label={tile.label}

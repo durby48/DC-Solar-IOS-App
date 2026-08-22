@@ -256,7 +256,14 @@ function formatAppleName(name: AppleAuthentication.AppleAuthenticationFullName |
  * "Cancelled" is the one result whose contract is *do nothing* — anything else
  * would have the caller navigate or paint an error over a page that is on its
  * way out. The real outcome lands on the next load of `/`, where
- * `detectSessionInUrl` creates the session and `landingRoute()` routes it.
+ * `detectSessionInUrl` creates the session and the LOGIN SCREEN routes it.
+ *
+ * That last hop is `app/index.tsx`'s mount effect + its `onAuthStateChange`
+ * subscription, added 2026-08-22. Before then nothing on `/` looked at the
+ * session at all, so a completed Google or Apple round-trip landed the
+ * customer back on the staff login form with their new session sitting unused
+ * in storage. The fragment is consumed asynchronously, which is why the
+ * subscription is needed and a one-shot `getSession()` on mount is not enough.
  *
  * `redirectTo` must be in the project's `uri_allow_list` (Workstream D1 set it
  * to app.dcsolarkc.com plus the localhost dev ports) or GoTrue silently sends
@@ -290,8 +297,14 @@ async function startWebOAuth(provider: 'google' | 'apple'): Promise<OAuthResult>
  * lookup fails (offline, RLS hiccup), and we let `'unknown'` through on
  * purpose — the server-side triggers are the real gate, and signing a
  * legitimate customer out over a flaky connection would be the worse bug.
+ *
+ * Exported since 2026-08-22 so `app/index.tsx` can run the same check on the
+ * session the WEB redirect drops on it. The native paths call it inline, but
+ * the web flow unloads the page mid-call — the session materialises on the
+ * next load of `/`, where this file is no longer in the conversation and the
+ * login screen has to make the refusal itself.
  */
-async function refuseStaff(): Promise<OAuthResult | null> {
+export async function refuseStaff(): Promise<OAuthResult | null> {
   try {
     const account = await getAccountInfo();
     if (account.kind !== 'employee') return null;

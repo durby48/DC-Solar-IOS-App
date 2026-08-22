@@ -834,7 +834,7 @@ export type UploadRevisionResult =
       sizeBytes: number;
       warning?: string;
     }
-  | { ok: false; message: string };
+  | { ok: false; message: string; code?: 'conflict' };
 
 /**
  * Store one revision's PDF: overwrite the living object AND keep an immutable
@@ -854,6 +854,10 @@ export async function uploadRevisionPdf(params: {
   documentNumber: string;
   revision: number;
   localUri: string;
+  /** When given, the upload is refused if this entry has already moved past
+   *  `revision - 1` — so a stale client never overwrites the living PDF or a
+   *  newer revision's archive before revise_document() can raise 40001. */
+  entryId?: string;
 }): Promise<UploadRevisionResult> {
   try {
     const storagePath = documentStoragePath(params.jobId, params.documentNumber);
@@ -862,6 +866,22 @@ export async function uploadRevisionPdf(params: {
       params.documentNumber,
       params.revision,
     );
+
+    if (params.entryId) {
+      // Pre-flight revision check (review finding: the archive object used to
+      // be written BEFORE the RPC, so the loser of a race clobbered the
+      // winner's bytes). Best-effort: a read failure falls through and the
+      // RPC's own expected-revision check still protects the row.
+      const { data: current } = await supabase
+        .from('finance_entries')
+        .select('revision')
+        .eq('id', params.entryId)
+        .maybeSingle();
+      const liveRevision = (current as { revision?: number | null } | null)?.revision ?? null;
+      if (liveRevision != null && liveRevision + 1 !== params.revision) {
+        return { ok: false, code: 'conflict', message: REVISE_CONFLICT_MESSAGE };
+      }
+    }
 
     if (params.revision === 2) {
       const legacyArchive = revisionStoragePath(params.jobId, params.documentNumber, 1);
@@ -919,7 +939,7 @@ export type RenderDocumentResult =
       localUri?: string;
       warning?: string;
     }
-  | { ok: false; message: string; code?: 'not_configured' };
+  | { ok: false; message: string; code?: 'not_configured' | 'conflict' };
 
 /** Peek at a failed invoke()'s JSON body without consuming it. */
 async function readFunctionPayload(error: unknown): Promise<Record<string, unknown> | null> {
@@ -1011,6 +1031,7 @@ export async function renderDocumentPdf(params: {
       jobId: params.jobId,
       documentNumber: params.documentNumber,
       revision: params.revision,
+      entryId: params.entryId,
       localUri: uri,
     });
     if (!stored.ok) return stored;
@@ -1022,10 +1043,34 @@ export async function renderDocumentPdf(params: {
 
 export type ReviseResult =
   | { ok: true; revision: number; entryId: string }
-  | { ok: false; message: string };
+  /**
+   * `code: 'conflict'` is the ONE failure a retry cannot fix — somebody else
+   * revised this document while it was open here, so the render, the archive
+   * object and the revision number this client computed all describe a
+   * document that no longer exists. The caller has to reload, not re-fire.
+   */
+  | { ok: false; code?: 'conflict'; message: string };
 
 const REVISE_MIGRATION_MESSAGE =
   'Revising documents needs the latest database migration.';
+
+const REVISE_CONFLICT_MESSAGE =
+  'This document was revised elsewhere. Reload it and try again.';
+
+/**
+ * Did `revise_document()` refuse because our expected revision was stale?
+ *
+ * SQLSTATE 40001 (serialization_failure) is what the function raises, and
+ * PostgREST passes the code through untouched. The message is checked too
+ * because a 40001 can in principle reach here from a genuine serialization
+ * failure in some future wrapping — the text ("revised elsewhere") is raised
+ * by nothing else in this schema, so matching either is safe in both
+ * directions.
+ */
+function isRevisionConflict(error: { code?: string | null; message?: string | null }): boolean {
+  if (error.code === '40001') return true;
+  return /revised elsewhere/i.test(error.message ?? '');
+}
 
 /**
  * Revise an estimate / invoice / contract in place through the RPC.
@@ -1039,6 +1084,23 @@ const REVISE_MIGRATION_MESSAGE =
  * Pass the SAME `clientToken` on a retry: the function returns the revision
  * that already happened instead of burning a second one, which is also what
  * makes a double-tapped Save harmless. Never throws.
+ *
+ * OPTIMISTIC CONCURRENCY (2026-08-22)
+ *
+ * `expectedRevision` is the revision number this client RENDERED and archived
+ * under — `entry.revision + 1`, computed when Save was pressed. The function
+ * compares it with the one it is about to write and raises SQLSTATE 40001 if
+ * they differ. Without it, two people revising the same estimate both computed
+ * rev 3, both rendered a PDF called `…-r3.pdf` into the same storage path, and
+ * the second save silently overwrote the first one's numbers while the archive
+ * kept only the second one's bytes — a revision that existed in the history
+ * table and nowhere else.
+ *
+ * REQUIRES the matching migration: PostgREST resolves overloads by argument
+ * NAME, so an older `revise_document()` without `p_expected_revision` answers
+ * PGRST202 and `REVISE_MIGRATION_MESSAGE` is what the user sees. That is the
+ * honest failure — better than dropping the parameter and quietly restoring
+ * the race.
  */
 export async function reviseDocument(params: {
   entryId: string;
@@ -1054,6 +1116,11 @@ export async function reviseDocument(params: {
   pdfState?: 'current' | 'stale';
   fileSize?: number | null;
   clientToken?: string | null;
+  /**
+   * The revision this save is FOR (`entry.revision + 1`). Omit only where the
+   * caller genuinely has no rendered revision to defend.
+   */
+  expectedRevision?: number | null;
 }): Promise<ReviseResult> {
   try {
     const { data, error } = await supabase.rpc('revise_document', {
@@ -1069,8 +1136,15 @@ export async function reviseDocument(params: {
       p_pdf_state: params.pdfState ?? 'current',
       p_file_size: params.fileSize ?? null,
       p_client_token: params.clientToken ?? null,
+      p_expected_revision: params.expectedRevision ?? null,
     });
     if (error) {
+      // FIRST: a stale expectation is not a permissions problem, a missing
+      // row or a missing migration, and it must not be retried with the same
+      // token — that would just fail the same way.
+      if (isRevisionConflict(error)) {
+        return { ok: false, code: 'conflict', message: REVISE_CONFLICT_MESSAGE };
+      }
       if (error.code === '42501') {
         return { ok: false, message: 'Only owners and operators can revise documents.' };
       }

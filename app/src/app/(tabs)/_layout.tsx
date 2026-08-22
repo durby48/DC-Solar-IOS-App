@@ -5,20 +5,13 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { TabIcon } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
 import { getAccountInfo } from '@/lib/account';
+import {
+  clearBounceToLogin,
+  hasBouncedToLogin,
+  markBouncedToLogin,
+} from '@/lib/authGate';
 import { fetchUnreadCount } from '@/lib/comms';
 import { supabase } from '@/lib/supabase';
-
-/**
- * Fires the bounce to the login screen at most ONCE per app session.
- *
- * It is module scope, not a `useRef`, and that is the whole point. See the
- * loop note in `useStaffGate` — the layout is UNMOUNTED and REMOUNTED by the
- * very navigation it triggers, so any guard living inside the component is
- * reset before it can do its job. It goes back to `false` the moment a
- * session exists again, so signing out twice in one session still bounces
- * twice.
- */
-let bouncedToLogin = false;
 
 /**
  * Staff-only gate.
@@ -46,9 +39,10 @@ let bouncedToLogin = false;
  *      resolves back into `(tabs)` and replaces that stack entry with a FRESH
  *      one — so this layout unmounts, remounts, re-runs the gate, and
  *      replaces again. Instrumented, it ran ~9,000 times in a few seconds and
- *      the login screen never rendered once. `bouncedToLogin` above breaks
- *      the cycle: the navigation happens once and is not repeated on the
- *      remount.
+ *      the login screen never rendered once. `navigation.reset()` on the ROOT
+ *      stack is what fixes it: it names the `index` ROUTE rather than the `/`
+ *      URL, so it cannot resolve back into `(tabs)`, and it tears this layout
+ *      down instead of replacing one entry underneath it.
  *
  *   2. The gate called `getAccountInfo()` first, and that returns `'unknown'`
  *      on ANY query error — which deliberately fails OPEN into the tabs. Now
@@ -56,6 +50,24 @@ let bouncedToLogin = false;
  *      a fact, so it short-circuits without a single REST call.
  *      `getAccountInfo()` only runs when a session exists, which is the only
  *      case its offline-tolerant `'unknown'` was ever written for.
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * THE PERMANENT SPINNER THIS FIXES (2026-08-22, second pass)
+ * ────────────────────────────────────────────────────────────────────────
+ * The first fix also latched a module-scope `bouncedToLogin` that was only
+ * ever cleared when a session existed. So the bounce was strictly once per app
+ * session: the SECOND signed-out visit to a tab route (tap a tab link, browser
+ * back, type `/more` again in an SPA history navigation) set the state to
+ * `'out'`, skipped the navigation entirely, and left the spinner up forever.
+ *
+ * `leave()` now ALWAYS navigates. `navigation.reset({ routes: [index] })` is
+ * idempotent — resetting the root stack to `index` when it is already `index`
+ * is a no-op, not a loop — so there is nothing to gain by suppressing it. The
+ * flag moved to `lib/authGate.ts` and now means only "a bounce was fired that
+ * the login screen has not acknowledged". The login screen clears it on mount,
+ * so a `true` reading here means the login never rendered, and that is the one
+ * case where the `router.replace('/')` FALLBACK below must stay holstered — it
+ * is the call that caused (1).
  *
  * While the bounce is in flight the layout renders its spinner rather than
  * the tab bar, so nobody sees a flash of an app they are not signed in to.
@@ -70,9 +82,22 @@ function useStaffGate() {
 
     const leave = () => {
       setState('out');
-      if (bouncedToLogin) return;
-      bouncedToLogin = true;
-      navigation.reset({ index: 0, routes: [{ name: 'index' as never }] });
+      // Was a previous bounce never acknowledged by the login screen? Then we
+      // are looping, and the fallback below must not fire.
+      const unacknowledged = hasBouncedToLogin();
+      markBouncedToLogin();
+      try {
+        // Idempotent: naming the ROUTE `index` rather than the `/` URL means
+        // this cannot resolve back into `(tabs)`, and re-running it when the
+        // root stack is already `[index]` changes nothing.
+        navigation.reset({ index: 0, routes: [{ name: 'index' as never }] });
+      } catch {
+        // Only if the root navigator has no `index` route to reset to — which
+        // should never happen, but stranding someone on a spinner would be
+        // worse than one `replace`. Once, and never while a bounce is already
+        // unaccounted for: this is the exact call that looped ~9,000 times.
+        if (!unacknowledged) router.replace('/');
+      }
     };
 
     void (async () => {
@@ -83,8 +108,9 @@ function useStaffGate() {
         leave();
         return;
       }
-      // Somebody is signed in, so the next sign-out gets its own bounce.
-      bouncedToLogin = false;
+      // Somebody is signed in, so the next sign-out gets a clean slate even if
+      // the login screen never mounted to clear it.
+      clearBounceToLogin();
 
       const account = await getAccountInfo();
       if (cancelled) return;

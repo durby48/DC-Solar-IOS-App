@@ -181,6 +181,24 @@ export default function DocumentBuilderScreen() {
   const [committed, setCommitted] = useState<PendingRevise | null>(null);
   const tokenRef = useRef<string | null>(null);
 
+  /**
+   * Set when revise_document() refuses because somebody else revised this
+   * document first (SQLSTATE 40001). Deliberately NOT `error`: every other
+   * failure offers Retry save, and a retry is the one thing that cannot work
+   * here — the same token would carry the same stale expected revision and be
+   * refused identically. The only way forward is Reload.
+   */
+  const [conflict, setConflict] = useState<string | null>(null);
+  /** Bumped by Reload to re-run the load effect against the same document. */
+  const [reloadKey, setReloadKey] = useState(0);
+  /**
+   * The entry this screen actually settled on. Matters only for the
+   * `fromEntryId` deep link: `paramEntryId` is empty there, and a reload that
+   * fell back to the params would duplicate the source document a SECOND time
+   * rather than re-reading the copy.
+   */
+  const loadedEntryIdRef = useRef<string | null>(null);
+
   const entryId = entry?.id ?? paramEntryId;
   const mode: 'create' | 'revise' = entryId ? 'revise' : 'create';
   const type: DocumentType =
@@ -237,7 +255,10 @@ export default function DocumentBuilderScreen() {
       // "Duplicate as invoice" can also arrive as a deep link: copy first,
       // then revise the copy. JobInvoices normally does the copy itself and
       // pushes entryId straight away.
-      let targetEntryId = paramEntryId;
+      //
+      // `loadedEntryIdRef` first on a RELOAD: the copy has already been made
+      // and re-running duplicateDocument() would make a third document.
+      let targetEntryId = paramEntryId || loadedEntryIdRef.current || '';
       if (!targetEntryId && fromEntryId) {
         const copied = await duplicateDocument({ sourceEntryId: fromEntryId, asType: paramType });
         if (cancelled) return;
@@ -257,6 +278,7 @@ export default function DocumentBuilderScreen() {
           setLoading(false);
           return;
         }
+        loadedEntryIdRef.current = row.id;
         setEntry(row);
         hydrateFromEntry(row);
         if (row.job_id) {
@@ -302,7 +324,35 @@ export default function DocumentBuilderScreen() {
     return () => {
       cancelled = true;
     };
-  }, [paramJobId, paramType, paramEntryId, fromEntryId, hydrateFromEntry]);
+    // `reloadKey` is the whole point of the Reload button: it re-runs this
+    // effect, which re-reads the entry (and therefore its CURRENT revision) so
+    // the next Save is numbered against what the server actually holds.
+  }, [paramJobId, paramType, paramEntryId, fromEntryId, hydrateFromEntry, reloadKey]);
+
+  /**
+   * Throw away this screen's state and re-read the document.
+   *
+   * The client token goes with it: it was minted for a revision number that no
+   * longer applies, and revise_document() would match it against the LAST
+   * token stored on the row — which, after somebody else's revision, is
+   * theirs. Everything the editor shows is replaced by the server's copy, so
+   * any edits made here have to be made again on top of the newer revision.
+   * That is the honest outcome of a conflict: the alternative is silently
+   * reapplying them over work we never saw.
+   */
+  const reload = useCallback(() => {
+    tokenRef.current = null;
+    setConflict(null);
+    setError(null);
+    setWarnings([]);
+    setPendingRevise(null);
+    setCommitted(null);
+    setSavedRevision(null);
+    setSavedArchivePath(null);
+    setSavedStale(false);
+    setPhase('editing');
+    setReloadKey((key) => key + 1);
+  }, []);
 
   const lineItems = useMemo<LineItem[]>(
     () =>
@@ -564,14 +614,28 @@ export default function DocumentBuilderScreen() {
       pdfState: args.pdfState,
       fileSize: args.fileSize,
       clientToken: args.token,
+      // The revision this screen RENDERED and archived under. If the server
+      // is about to write a different number, somebody else got here first
+      // and our archive object name already belongs to their PDF.
+      expectedRevision: args.revision,
     });
     if (!result.ok) {
+      if (result.code === 'conflict') {
+        // No Retry save: the same token carries the same stale expectation and
+        // would be refused identically. Reload is the only way forward.
+        setPendingRevise(null);
+        setError(null);
+        setConflict(result.message);
+        setPhase('editing');
+        return;
+      }
       setPendingRevise(args);
       setError(result.message);
       setPhase('editing');
       return;
     }
     setPendingRevise(null);
+    setConflict(null);
     // The token is spent. Keeping it would make the NEXT Save on this screen
     // an idempotent no-op — revise_document() would hand back the revision
     // that already happened and silently drop the new edits.
@@ -611,6 +675,14 @@ export default function DocumentBuilderScreen() {
       if (render.ok) {
         if (render.localUri) setLocalPdfUri(render.localUri);
         if (render.warning) setWarnings((prev) => [...prev, render.warning as string]);
+      } else if (render.code === 'conflict') {
+        // The pre-flight revision check refused the upload: somebody else
+        // already saved this revision number. Nothing was written, so skip
+        // the RPC (it would raise 40001 anyway) and go straight to Reload.
+        tokenRef.current = null;
+        setConflict(render.message);
+        setPhase('editing');
+        return;
       } else {
         setWarnings((prev) => [...prev, render.message]);
       }
@@ -1178,6 +1250,30 @@ export default function DocumentBuilderScreen() {
               />
             </Card>
 
+            {conflict ? (
+              <Card style={styles.conflictCard}>
+                <View style={styles.conflictHeader}>
+                  <Ionicons name="git-branch" size={20} color={colors.danger} />
+                  <AppText variant="bodyStrong" color={colors.danger}>
+                    {conflict}
+                  </AppText>
+                </View>
+                <AppText variant="caption" color={colors.textMuted}>
+                  Someone else saved a revision of {docNumber} while this was open, so revision{' '}
+                  {currentRevision + 1} is already taken. Reloading fetches their version — the
+                  changes on this screen are not saved and will need making again.
+                </AppText>
+                <Button
+                  label="Reload"
+                  icon="refresh"
+                  onPress={reload}
+                  disabled={saving}
+                  fullWidth
+                  style={styles.stackedButton}
+                />
+              </Card>
+            ) : null}
+
             {error ? (
               <AppText variant="caption" color={colors.danger} align="center">
                 {error}
@@ -1189,6 +1285,8 @@ export default function DocumentBuilderScreen() {
               </AppText>
             ))}
 
+            {/* Never both: a conflict clears pendingRevise, because the same
+                token would be refused for the same reason. */}
             {pendingRevise ? (
               <Button
                 label="Retry save"
@@ -1220,7 +1318,11 @@ export default function DocumentBuilderScreen() {
               icon="document-text"
               onPress={() => void (mode === 'revise' ? saveRevision() : create())}
               loading={saving}
-              disabled={saving || !docNumber}
+              // Blocked while a conflict stands: this screen's revision number
+              // is known-stale, so pressing Save would render a PDF, upload it
+              // over someone else's archive object, and be refused for exactly
+              // the same reason. Reload first.
+              disabled={saving || !docNumber || conflict !== null}
               size="lg"
               fullWidth
             />
@@ -1246,6 +1348,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     padding: spacing.lg,
+  },
+  conflictCard: {
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.danger,
+  },
+  conflictHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   stackedButton: {
     marginTop: spacing.xs,
