@@ -64,7 +64,7 @@ before the Phase-3 login UI works): Services ID `com.dcsolarkc.fieldapp.web`,
 plus a `.p8` key pasted into the Supabase dashboard. **That secret expires every
 6 months — put a calendar reminder on it.**
 
-### 2. Google — iOS + Web OAuth client IDs  ⛔ blocking
+### 2. Google — iOS + Web OAuth client IDs  ✅ DONE 2026-08-22 (clients created by Devon; Supabase provider enabled; ids on .env/EAS/Vercel — see GOOGLE_SIGNIN_TODO.md)
 
 See **`GOOGLE_SIGNIN_TODO.md`** in this folder for the full walkthrough. Short
 version: Google Cloud → OAuth consent screen (External; `email`, `profile`,
@@ -72,7 +72,7 @@ version: Google Cloud → OAuth consent screen (External; `email`, `profile`,
 `https://kjamxfezsathrsbztiln.supabase.co/auth/v1/callback` → an **iOS** client
 for `com.dcsolarkc.fieldapp`. About 15 minutes.
 
-### 3. Add the Google Sign-In plugin entry  ⛔ blocking
+### 3. Add the Google Sign-In plugin entry  ✅ DONE 2026-08-22 (in app.json with the reversed iOS client id; expo config parses)
 
 `@react-native-google-signin/google-signin@16.1.4` is installed and locked, but
 **its plugin is deliberately absent from `app.json`** because it needs the

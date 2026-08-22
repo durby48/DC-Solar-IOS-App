@@ -13,7 +13,9 @@
       "supportsTablet": false,
       "usesAppleSignIn": true,
       "entitlements": {
-        "com.apple.security.application-groups": ["group.com.dcsolarkc.fieldapp"]
+        "com.apple.security.application-groups": [
+          "group.com.dcsolarkc.fieldapp"
+        ]
       },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "DC Solar uses your location to stamp clock-in and clock-out punches for accurate job records.",
@@ -63,7 +65,13 @@
           "motionPermission": "DC Solar uses device motion for the holographic card tilt effect."
         }
       ],
-      "expo-image"
+      "expo-image",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.746927911368-kq2d49b1amnetvh3q1tu1eo7ir74m8cc"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
