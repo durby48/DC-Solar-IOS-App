@@ -4,6 +4,7 @@
  * gracefully (never throw); RLS decides what each user can see.
  */
 
+import { compressForUpload } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
@@ -120,6 +121,12 @@ export type UploadReceiptPhotoResult =
 /**
  * Upload a receipt photo to the private `receipts` bucket at
  * `<email-localpart>/<timestamp>-<name>.jpg`.
+ *
+ * Compressed to 1920px first. A receipt is photographed to be READ, so the
+ * long edge matters more than the file size — 1920 keeps the total on a
+ * printed receipt legible when zoomed while turning a 6 MB camera JPEG into
+ * a few hundred kilobytes. Crews file these from driveways on cell data, and
+ * that difference is the difference between "sent" and "still uploading".
  */
 export async function uploadReceiptPhoto(params: {
   email: string;
@@ -128,7 +135,8 @@ export async function uploadReceiptPhoto(params: {
   contentType?: string | null;
 }): Promise<UploadReceiptPhotoResult> {
   try {
-    const response = await fetch(params.uri);
+    const compressed = await compressForUpload(params.uri);
+    const response = await fetch(compressed.uri);
     const body = await response.arrayBuffer();
 
     const localPart = (params.email.split('@')[0] || 'user').replace(/[^A-Za-z0-9._-]+/g, '_');
@@ -136,9 +144,16 @@ export async function uploadReceiptPhoto(params: {
     const base = rawName.replace(/\.[A-Za-z0-9]+$/, '').replace(/[^A-Za-z0-9._-]+/g, '_');
     const storagePath = `${localPart}/${Date.now()}-${base || 'receipt'}.jpg`;
 
+    // Compression re-encodes as JPEG, so a picker that reported image/png
+    // would otherwise label JPEG bytes as a PNG — the object key has always
+    // been `.jpg`, and now the content type agrees with it.
+    const contentType = compressed.compressed
+      ? 'image/jpeg'
+      : (params.contentType ?? 'image/jpeg');
+
     const { error } = await supabase.storage
       .from(RECEIPTS_BUCKET)
-      .upload(storagePath, body, { contentType: params.contentType ?? 'image/jpeg' });
+      .upload(storagePath, body, { contentType });
     if (error) return { ok: false, message: error.message };
     return { ok: true, storagePath };
   } catch (e) {

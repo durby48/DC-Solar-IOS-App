@@ -1,4 +1,5 @@
 import { CUSTOMER_COLUMNS } from '@/lib/crm';
+import { compressForUpload } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 import { type Job, type ScheduleDate } from '@/lib/types';
 
@@ -274,6 +275,12 @@ export type UploadPhotoResult =
 /**
  * Upload one picked image to the private `job-photos` bucket and record it
  * in `job_photos`. Never throws.
+ *
+ * The file is compressed to 1920px/JPEG first (`lib/images.ts`). Job photos
+ * are the highest-volume upload in the app — a crew documents a roof from
+ * eight angles at a time — and they are only ever viewed as a grid thumbnail
+ * or in the lightbox, neither of which can show 4 000 px. Compression never
+ * throws; a device that can't run it uploads the original.
  */
 export async function uploadJobPhoto(params: {
   jobId: string;
@@ -281,8 +288,11 @@ export async function uploadJobPhoto(params: {
   fileName?: string | null;
   contentType?: string | null;
 }): Promise<UploadPhotoResult> {
-  const { jobId, uri } = params;
+  const { jobId } = params;
   try {
+    const compressed = await compressForUpload(params.uri);
+    const uri = compressed.uri;
+
     // Reading the picked file and pushing it to storage can both hit
     // transient network timeouts on cell connections — retry each once
     // automatically before surfacing an error.
@@ -299,7 +309,11 @@ export async function uploadJobPhoto(params: {
 
     const rawName = params.fileName ?? 'photo.jpg';
     const base = rawName.replace(/\.[A-Za-z0-9]+$/, '').replace(/[^A-Za-z0-9._-]+/g, '_');
-    const contentType = params.contentType ?? 'image/jpeg';
+    // The object key has always ended `.jpg`; once the bytes have actually
+    // been re-encoded, the content type has to say so too.
+    const contentType = compressed.compressed
+      ? 'image/jpeg'
+      : (params.contentType ?? 'image/jpeg');
 
     // Fresh path per attempt (the bucket is insert-only; a retry must not
     // collide with a partially-written first attempt).

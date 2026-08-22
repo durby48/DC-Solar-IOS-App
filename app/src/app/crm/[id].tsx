@@ -426,8 +426,8 @@ export default function CustomerDetailScreen() {
 
   /**
    * Same options as the old Customers screen: `allowsEditing` with a 1:1
-   * aspect makes the OS crop it square, which is the only sizing lever we
-   * have — there is no image-processing library in the bundle.
+   * aspect makes the OS crop it square. `uploadCustomerPhoto` then compresses
+   * it (`lib/images.ts`), so the picker's job is framing and nothing else.
    */
   const pickPhoto = async () => {
     if (!customer) return;

@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 
+import { DropboxStatusCard, MediaGrid } from '@/components/MediaGrid';
 import { accentCycle, colors, radii, shadows, spacing } from '@/constants/theme';
 import {
   currentMonthISO,
@@ -24,6 +25,7 @@ import {
   upsertEmployeeOfMonth,
   type EmployeeOfMonthEntry,
 } from '@/lib/eom';
+import { fetchMediaAssets, fetchMediaUrls, type MediaAsset } from '@/lib/media';
 import { getRole, type RoleInfo } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
@@ -39,6 +41,15 @@ import { supabase } from '@/lib/supabase';
  * chooses from the roster every time, and saving without a choice is refused
  * by `upsertEmployeeOfMonth`.
  *
+ * TWO PHOTO SOURCES (2026-08-22). "From this phone" is the original picker.
+ * "From Dropbox" is the shared library the sync mirrors into
+ * `job-photos/eom/library/…` — Devon drops a photo in a Dropbox folder and it
+ * is here, with no upload from anybody's phone at all. Picking from the
+ * library COPIES NOTHING: `upsertEmployeeOfMonth({photoPath})` stores the
+ * existing path, which is why two months are free to share one photo — and
+ * why `deleteEmployeeOfMonth` refuses to remove an `eom/library/*` object.
+ * Removing August must never destroy a file Devon still has in Dropbox.
+ *
  * The admin gate below is cosmetic. RLS is the real barrier: insert/update/
  * delete on `employee_of_month` require public.is_company_admin('dc-solar').
  */
@@ -47,6 +58,8 @@ interface RosterEntry {
   email: string;
   name: string;
 }
+
+type PhotoSource = 'device' | 'library';
 
 /** Auth + role with an explicit loading phase (mirrors more/employees.tsx). */
 function useGate(): { state: 'loading' | 'out' | 'in'; role: RoleInfo | null } {
@@ -115,6 +128,14 @@ export default function EmployeeOfMonthScreen() {
   const [status, setStatus] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [deletingMonth, setDeletingMonth] = useState<string | null>(null);
 
+  // Photo source: the phone's library, or the Dropbox-mirrored EOM library.
+  const [photoSource, setPhotoSource] = useState<PhotoSource>('device');
+  const [libraryAssets, setLibraryAssets] = useState<MediaAsset[]>([]);
+  const [libraryUrls, setLibraryUrls] = useState<Map<string, string>>(new Map());
+  const [libraryState, setLibraryState] = useState<'loading' | 'ok' | 'unavailable'>('loading');
+  const [libraryKey, setLibraryKey] = useState(0);
+  const [libraryPick, setLibraryPick] = useState<MediaAsset | null>(null);
+
   const load = useCallback(async () => {
     const result = await listEmployeeOfMonth();
     if (result.status === 'ok') {
@@ -149,11 +170,42 @@ export default function EmployeeOfMonthScreen() {
     };
   }, [gate.state, isAdmin, load]);
 
+  /**
+   * The Dropbox-mirrored EOM library. Loaded only once the editor is open on
+   * the "From Dropbox" tab — a screen most often used to fix a caption should
+   * not sign two dozen URLs it may never show.
+   */
+  useEffect(() => {
+    if (!open || photoSource !== 'library' || !isAdmin) return;
+    let cancelled = false;
+    setLibraryState((prev) => (prev === 'ok' ? prev : 'loading'));
+    void (async () => {
+      const result = await fetchMediaAssets('eom', { limit: 120 });
+      if (cancelled) return;
+      if (result.status !== 'ok') {
+        setLibraryAssets([]);
+        setLibraryUrls(new Map());
+        setLibraryState('unavailable');
+        return;
+      }
+      const urls = await fetchMediaUrls(result.assets);
+      if (cancelled) return;
+      setLibraryAssets(result.assets);
+      setLibraryUrls(urls);
+      setLibraryState('ok');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, photoSource, isAdmin, libraryKey]);
+
   const resetForm = useCallback(() => {
     setMonth(currentMonthISO().slice(0, 7));
     setEmail('');
     setCaption('');
     setPhotoUri(null);
+    setPhotoSource('device');
+    setLibraryPick(null);
   }, []);
 
   const startEdit = useCallback((entry: EmployeeOfMonthEntry) => {
@@ -162,13 +214,15 @@ export default function EmployeeOfMonthScreen() {
     setEmail(entry.employee_email);
     setCaption(entry.caption ?? '');
     setPhotoUri(null);
+    setPhotoSource('device');
+    setLibraryPick(null);
     setOpen(true);
   }, []);
 
   /**
-   * Pick this month's photo. `allowsEditing` with a 4:5 aspect makes the OS
-   * crop it to a portrait frame, so the card is always framed right without
-   * any image processing on our side — there is no resizing library bundled.
+   * Pick this month's photo off the phone. `allowsEditing` with a 4:5 aspect
+   * makes the OS crop it to a portrait frame so the card is framed right;
+   * `upsertEmployeeOfMonth` compresses it on the way up (`lib/images.ts`).
    */
   const pickPhoto = useCallback(async () => {
     try {
@@ -180,9 +234,18 @@ export default function EmployeeOfMonthScreen() {
       });
       if (result.canceled || !result.assets?.length) return;
       setPhotoUri(result.assets[0].uri);
+      setLibraryPick(null);
     } catch {
       setStatus({ tone: 'error', text: 'Could not open the photo library.' });
     }
+  }, []);
+
+  const chooseSource = useCallback((next: PhotoSource) => {
+    setPhotoSource(next);
+    // Only one photo can win, so switching tabs drops the other tab's choice
+    // rather than leaving an invisible one armed.
+    if (next === 'device') setLibraryPick(null);
+    else setPhotoUri(null);
   }, []);
 
   const save = useCallback(async () => {
@@ -197,7 +260,9 @@ export default function EmployeeOfMonthScreen() {
       month: normalized,
       employeeEmail: email,
       caption,
-      photo: photoUri,
+      photo: photoSource === 'device' ? photoUri : null,
+      // No copy: the library file already lives in `job-photos`.
+      photoPath: photoSource === 'library' ? (libraryPick?.storagePath ?? null) : null,
     });
     setSaving(false);
     if (result.ok) {
@@ -208,7 +273,7 @@ export default function EmployeeOfMonthScreen() {
     } else {
       setStatus({ tone: 'error', text: result.message });
     }
-  }, [month, email, caption, photoUri, load, resetForm]);
+  }, [month, email, caption, photoSource, photoUri, libraryPick, load, resetForm]);
 
   const remove = useCallback(
     async (entry: EmployeeOfMonthEntry) => {
@@ -391,25 +456,117 @@ export default function EmployeeOfMonthScreen() {
                 )}
 
                 <Text style={styles.fieldLabel}>Photo</Text>
-                <View style={styles.photoRow}>
-                  {photoUri ? (
-                    <Image source={{ uri: photoUri }} style={styles.preview} contentFit="cover" />
-                  ) : (
-                    <View style={[styles.preview, styles.previewEmpty]}>
-                      <Ionicons name="image" size={20} color={colors.inkSoft} />
-                    </View>
-                  )}
-                  <Pressable
-                    onPress={pickPhoto}
-                    style={({ pressed }) => [styles.secondaryButton, pressed && styles.rowPressed]}>
-                    <Text style={styles.secondaryButtonText}>
-                      {photoUri ? 'Choose a different photo' : 'Choose photo'}
-                    </Text>
-                  </Pressable>
+                <View style={styles.sourceRow}>
+                  {(
+                    [
+                      { key: 'device' as PhotoSource, label: 'From this phone' },
+                      { key: 'library' as PhotoSource, label: 'From Dropbox' },
+                    ]
+                  ).map((option) => {
+                    const active = photoSource === option.key;
+                    return (
+                      <Pressable
+                        key={option.key}
+                        onPress={() => chooseSource(option.key)}
+                        style={({ pressed }) => [
+                          styles.sourceTab,
+                          active && styles.sourceTabActive,
+                          pressed && styles.rowPressed,
+                        ]}>
+                        <Text
+                          style={[styles.sourceTabText, active && styles.sourceTabTextActive]}>
+                          {option.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
-                <Text style={styles.hintText}>
-                  Leave the photo alone when editing and the existing one is kept.
-                </Text>
+
+                {photoSource === 'device' ? (
+                  <>
+                    <View style={styles.photoRow}>
+                      {photoUri ? (
+                        <Image
+                          source={{ uri: photoUri }}
+                          style={styles.preview}
+                          contentFit="cover"
+                        />
+                      ) : (
+                        <View style={[styles.preview, styles.previewEmpty]}>
+                          <Ionicons name="image" size={20} color={colors.inkSoft} />
+                        </View>
+                      )}
+                      <Pressable
+                        onPress={pickPhoto}
+                        style={({ pressed }) => [
+                          styles.secondaryButton,
+                          pressed && styles.rowPressed,
+                        ]}>
+                        <Text style={styles.secondaryButtonText}>
+                          {photoUri ? 'Choose a different photo' : 'Choose photo'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    <Text style={styles.hintText}>
+                      Leave the photo alone when editing and the existing one is kept.
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.photoRow}>
+                      {libraryPick && libraryUrls.get(libraryPick.id) ? (
+                        <Image
+                          source={{ uri: libraryUrls.get(libraryPick.id) as string }}
+                          style={styles.preview}
+                          contentFit="cover"
+                        />
+                      ) : (
+                        <View style={[styles.preview, styles.previewEmpty]}>
+                          <Ionicons name="images" size={20} color={colors.inkSoft} />
+                        </View>
+                      )}
+                      <View style={styles.libraryHint}>
+                        <Text style={styles.hintText}>
+                          {libraryPick
+                            ? (libraryPick.caption ??
+                              libraryPick.fileName ??
+                              'Selected from the Dropbox library.')
+                            : 'Tap a photo below to use it. Nothing is copied — the file stays where the sync put it.'}
+                        </Text>
+                      </View>
+                    </View>
+                    <MediaGrid
+                      assets={libraryAssets}
+                      urls={libraryUrls}
+                      loading={libraryState === 'loading'}
+                      scrollable={false}
+                      showTagFilter={false}
+                      selectedIds={libraryPick ? [libraryPick.id] : undefined}
+                      header={
+                        <DropboxStatusCard
+                          usage="eom"
+                          compact
+                          onSynced={() => setLibraryKey((n) => n + 1)}
+                        />
+                      }
+                      emptyTitle={
+                        libraryState === 'unavailable'
+                          ? 'Library unavailable'
+                          : 'Nothing in the library yet'
+                      }
+                      emptyBody={
+                        libraryState === 'unavailable'
+                          ? 'The photo library needs the latest database migration.'
+                          : 'Photos dropped into the EOM folder in Dropbox appear here after the next sync.'
+                      }
+                      onPress={(index, visible) => {
+                        const picked = visible[index] ?? null;
+                        setLibraryPick(picked);
+                        setPhotoUri(null);
+                      }}
+                    />
+                  </>
+                )}
 
                 <Text style={styles.fieldLabel}>Caption (optional)</Text>
                 <TextInput
@@ -635,6 +792,35 @@ const styles = StyleSheet.create({
   personChipTextActive: {
     color: colors.amberDeep,
     fontWeight: '800',
+  },
+  sourceRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.skySoft,
+    borderRadius: radii.pill,
+    padding: 3,
+    gap: 3,
+  },
+  sourceTab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    paddingVertical: spacing.xs + 3,
+  },
+  sourceTabActive: {
+    backgroundColor: colors.white,
+    ...shadows.card,
+  },
+  sourceTabText: {
+    color: colors.inkSoft,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  sourceTabTextActive: {
+    color: colors.ink,
+  },
+  libraryHint: {
+    flex: 1,
   },
   photoRow: {
     flexDirection: 'row',

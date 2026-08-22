@@ -1,8 +1,10 @@
 import { Image } from 'expo-image';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
 
-import { AppText, Card, SectionHeader, Skeleton } from '@/components/ui';
+import { MediaLightbox, type LightboxItem } from '@/components/MediaLightbox';
+import { AnimatedPressable, AppText, Card, SectionHeader, Skeleton } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
 import { fetchMarketingPhotos, type MarketingPhoto } from '@/lib/marketingPhotos';
 
@@ -20,10 +22,15 @@ import { fetchMarketingPhotos, type MarketingPhoto } from '@/lib/marketingPhotos
  * member who has never heard of the sync should not be told its folder is
  * empty. `unavailable` gets one quiet line, because that one is a fault.
  *
- * "See all" is a PLACEHOLDER. The full gallery (lightbox, captions, tags)
- * ships with the Dropbox workstream; until then the action says so inline
- * rather than pushing a route that doesn't exist yet. Replace this handler —
- * not the strip — when the gallery lands.
+ * "See all" now goes to `/marketing-photos` — the full gallery, with the tag
+ * filter, the Dropbox status header and the admin "Sync now". Tapping a
+ * thumbnail here opens the same `MediaLightbox` in place, so the strip is a
+ * usable viewer on its own and the route is for browsing everything.
+ *
+ * These items carry no `assetId`: the strip's own query
+ * (`lib/marketingPhotos.ts`) does not select the columns the edit sheet
+ * writes, so captions and tags are edited in the gallery rather than half-
+ * edited from here.
  */
 
 const THUMB = 104;
@@ -33,7 +40,7 @@ export function MarketingPhotos({ refreshKey = 0 }: { refreshKey?: number }) {
     'loading',
   );
   const [photos, setPhotos] = useState<MarketingPhoto[]>([]);
-  const [note, setNote] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +60,7 @@ export function MarketingPhotos({ refreshKey = 0 }: { refreshKey?: number }) {
     };
   }, [refreshKey]);
 
-  const showNote = useCallback(() => setNote(true), []);
+  const seeAll = useCallback(() => router.push('/marketing-photos'), []);
 
   if (state === 'not-configured') return null;
 
@@ -87,34 +94,53 @@ export function MarketingPhotos({ refreshKey = 0 }: { refreshKey?: number }) {
     <View style={styles.wrap}>
       <SectionHeader
         title="Installation photos"
-        action={{ label: 'See all', onPress: showNote }}
+        action={{ label: 'See all', onPress: seeAll, icon: 'chevron-forward' }}
       />
-      {note ? (
-        <Card tone="sunk" style={styles.note}>
-          <AppText variant="body" color={colors.textMuted}>
-            Gallery coming with the Dropbox sync.
-          </AppText>
-        </Card>
-      ) : null}
       <FlatList
         data={photos}
         keyExtractor={(item) => item.id}
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.list}
-        renderItem={({ item }) => (
-          <Image
-            source={{ uri: item.url }}
-            style={styles.thumb}
-            contentFit="cover"
-            transition={150}
-            cachePolicy="memory-disk"
-            accessibilityLabel={item.caption ?? 'Installation photo'}
-          />
+        renderItem={({ item, index }) => (
+          <AnimatedPressable
+            onPress={() => setViewerIndex(index)}
+            haptic="tapLight"
+            scaleTo={0.96}
+            accessibilityRole="imagebutton"
+            accessibilityLabel={item.caption ?? 'Installation photo'}>
+            <Image
+              source={{ uri: item.url }}
+              style={styles.thumb}
+              contentFit="cover"
+              transition={150}
+              cachePolicy="memory-disk"
+            />
+          </AnimatedPressable>
         )}
       />
+
+      {viewerIndex !== null ? (
+        <MediaLightbox
+          items={photos.map(toLightboxItem)}
+          index={viewerIndex}
+          visible
+          onClose={() => setViewerIndex(null)}
+        />
+      ) : null}
     </View>
   );
+}
+
+/** A strip photo as a viewer item. The job number becomes the caption when
+ *  there isn't one, because "DC-26012" tells a crew member more than nothing. */
+function toLightboxItem(photo: MarketingPhoto): LightboxItem {
+  return {
+    id: photo.id,
+    url: photo.url,
+    caption: photo.caption ?? photo.jobNumber,
+    takenAt: photo.takenAt,
+  };
 }
 
 const styles = StyleSheet.create({
@@ -129,9 +155,6 @@ const styles = StyleSheet.create({
   list: {
     gap: spacing.sm,
     paddingRight: spacing.sm,
-  },
-  note: {
-    marginBottom: spacing.xs,
   },
   thumb: {
     width: THUMB,

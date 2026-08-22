@@ -1,11 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -13,6 +12,7 @@ import {
   View,
 } from 'react-native';
 
+import { MediaLightbox, type LightboxItem } from '@/components/MediaLightbox';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import {
   deleteJobPhoto,
@@ -39,11 +39,24 @@ function notify(
   }
 }
 
+/**
+ * A job's photos.
+ *
+ * Tapping a thumbnail opens `MediaLightbox` — pinch-zoom, paging, share.
+ * Until 2026-08-22 it called `Linking.openURL` on the signed Supabase URL,
+ * which THREW THE CREW OUT OF THE APP: Safari opened, the photo loaded again
+ * over cell data, and coming back re-mounted the job screen. Photos live where
+ * you tapped them now. Upload and the two-tap delete are unchanged.
+ *
+ * These are `job_photos` rows, not `media_assets`, so the viewer gets no
+ * `assetId` and draws no caption/tag editor — there is no row for it to write.
+ */
 export function JobPhotos({ jobId }: { jobId: string }) {
   const role = useRole();
   const [photos, setPhotos] = useState<JobPhoto[]>([]);
   const [photosState, setPhotosState] = useState<'loading' | 'ok' | 'unavailable'>('loading');
   const [urls, setUrls] = useState<Record<string, string>>({});
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [uploading, setUploading] = useState(false);
   // Two-tap delete confirm (admins): first tap arms the red badge, second deletes.
@@ -98,13 +111,37 @@ export function JobPhotos({ jobId }: { jobId: string }) {
     loadPhotos();
   }, [loadPhotos, signedIn]);
 
+  /**
+   * The photos the viewer can actually show, in grid order. A photo whose URL
+   * has not been signed yet is skipped rather than paged onto a black screen,
+   * so the tapped index is resolved against THIS list, not `photos`.
+   */
+  const viewerItems = useMemo<LightboxItem[]>(
+    () =>
+      photos
+        .filter((photo) => Boolean(urls[photo.id]))
+        .map((photo) => ({
+          id: photo.id,
+          url: urls[photo.id],
+          caption: photo.caption ?? null,
+          fileName: photo.storage_path.split('/').pop() ?? 'photo.jpg',
+        })),
+    [photos, urls],
+  );
+
   const openPhoto = async (photo: JobPhoto) => {
     const url = urls[photo.id] ?? (await getPhotoUrl(photo.storage_path));
     if (!url) {
       notify(setStatus, 'error', 'Could not open photo', 'Please try again.');
       return;
     }
-    Linking.openURL(url).catch(() => {});
+    // A photo signed only now is not in `viewerItems` yet, so the index is
+    // computed against the list the NEXT render will build — opening on the
+    // wrong photo is worse than a frame of delay.
+    const nextUrls = urls[photo.id] ? urls : { ...urls, [photo.id]: url };
+    if (!urls[photo.id]) setUrls(nextUrls);
+    const visible = photos.filter((p) => Boolean(nextUrls[p.id]));
+    setViewerIndex(Math.max(0, visible.findIndex((p) => p.id === photo.id)));
   };
 
   const pressDelete = async (photo: JobPhoto) => {
@@ -311,6 +348,15 @@ export function JobPhotos({ jobId }: { jobId: string }) {
           ]}>
           {status.message}
         </Text>
+      ) : null}
+
+      {viewerIndex !== null && viewerItems.length > 0 ? (
+        <MediaLightbox
+          items={viewerItems}
+          index={Math.min(viewerIndex, viewerItems.length - 1)}
+          visible
+          onClose={() => setViewerIndex(null)}
+        />
       ) : null}
     </>
   );

@@ -18,12 +18,22 @@
  * policies to get wrong. Display URLs are signed for an hour.
  */
 
+import { compressForUpload } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
 const PHOTO_BUCKET = 'job-photos';
 /** Seconds a display URL stays valid. */
 const SIGNED_URL_TTL = 3600;
+
+/**
+ * Where the Dropbox sync puts the shared Employee-of-the-Month library.
+ *
+ * A file under this prefix is NOT owned by the month that points at it — the
+ * same photo can be picked for two months, and it exists whether or not any
+ * month uses it. See `isLibraryPath` and the guard in `deleteEmployeeOfMonth`.
+ */
+export const EOM_LIBRARY_PREFIX = 'eom/library/';
 
 /** Row shape as stored. `month` is always the first day of the month. */
 export interface EmployeeOfMonthRow {
@@ -199,17 +209,51 @@ function friendlyMessage(raw: string | undefined, fallback: string): string {
 }
 
 /**
- * Create or replace a month's award, optionally uploading a new photo first.
+ * Is this a file in the shared Dropbox library rather than one month's own
+ * upload?
  *
- * The upload mirrors lib/customers.ts::uploadCustomerPhoto exactly: fetch the
- * picked URI into a blob (which is how the content type is discovered on both
- * web and native — expo-image-picker hands back a file:// URI on the phone and
- * a blob: URI in the browser, and `fetch` normalises both), then upload the
- * blob with its own type. The caller crops via the picker's `allowsEditing`;
- * there is no image-processing library in the bundle.
+ * Defensive on purpose: a leading slash, a stray upper-case folder name and a
+ * bit of whitespace all still mean the same object, and the ONE thing this
+ * predicate must never do is answer "no" for a library file (see
+ * `deleteEmployeeOfMonth`).
  *
- * The path is timestamped so replacing a month's photo can never collide with
- * a signed URL still cached on somebody's phone.
+ * The cases it is expected to get right, all verified by hand:
+ *   'eom/library/abc.jpg'   → true    'EOM/Library/abc.JPG'   → true
+ *   '/eom/library/abc.jpg'  → true    '  eom/library/a.jpg '  → true
+ *   'eom/2026-08-1755.jpg'  → false   'eom/library'           → false
+ *   'customers/x.jpg'       → false   null / undefined / ''   → false
+ * `'eom/library'` (the folder itself, with no trailing slash) is false on
+ * purpose: it is not an object, so it can never be a `photo_path`, and the
+ * prefix test is about files.
+ */
+export function isLibraryPath(path: string | null | undefined): boolean {
+  if (typeof path !== 'string') return false;
+  return path.trim().replace(/^\/+/, '').toLowerCase().startsWith(EOM_LIBRARY_PREFIX);
+}
+
+/**
+ * Create or replace a month's award, optionally attaching a photo.
+ *
+ * TWO PHOTO SOURCES, AND ONLY ONE OF THEM COPIES BYTES:
+ *
+ *   `photoPath` — an object already in `job-photos`, picked from the Dropbox
+ *                 library (`eom/library/<id>.<ext>`). The path is stored as-is
+ *                 and NOTHING is copied: the file is already in the right
+ *                 bucket, and duplicating it would mean two objects to keep in
+ *                 step and a second copy nobody knows about. Two months are
+ *                 allowed to point at the same library file.
+ *   `photo`     — a local URI from `expo-image-picker`, uploaded here. It is
+ *                 compressed first (`lib/images.ts` — 1920px/q0.75; a modern
+ *                 phone JPEG is 4–8 MB and the card renders it at 64pt), then
+ *                 fetched into a blob, which is how the content type is
+ *                 discovered on both platforms: the picker hands back a
+ *                 `file://` URI on the phone and a `blob:` URI in the browser
+ *                 and `fetch` normalises both.
+ *
+ * `photoPath` wins if both are passed. Omit both to keep the existing photo.
+ *
+ * An uploaded path is timestamped so replacing a month's photo can never
+ * collide with a signed URL still cached on somebody's phone.
  */
 export async function upsertEmployeeOfMonth(params: {
   month: string;
@@ -217,6 +261,11 @@ export async function upsertEmployeeOfMonth(params: {
   caption?: string | null;
   /** Local URI from expo-image-picker. Omit to keep the existing photo. */
   photo?: string | null;
+  /**
+   * A storage path already in `job-photos` — normally an `eom/library/…` file
+   * mirrored from Dropbox. Stored directly, with NO copy.
+   */
+  photoPath?: string | null;
 }): Promise<EomMutationResult> {
   const month = normalizeMonth(params.month);
   if (!month) return { ok: false, message: 'Use a month in YYYY-MM form, e.g. 2026-08.' };
@@ -224,9 +273,10 @@ export async function upsertEmployeeOfMonth(params: {
   if (!email) return { ok: false, message: 'Pick an employee first.' };
 
   try {
-    let photoPath: string | null = null;
-    if (params.photo) {
-      const response = await fetch(params.photo);
+    let photoPath: string | null = params.photoPath?.trim() ? params.photoPath.trim() : null;
+    if (!photoPath && params.photo) {
+      const compressed = await compressForUpload(params.photo);
+      const response = await fetch(compressed.uri);
       const blob = await response.blob();
       const ext = blob.type.includes('png') ? 'png' : 'jpg';
       const path = `eom/${month.slice(0, 7)}-${Date.now()}.${ext}`;
@@ -264,7 +314,25 @@ export async function upsertEmployeeOfMonth(params: {
   }
 }
 
-/** Remove a month's award (and best-effort its photo file). */
+/**
+ * Remove a month's award, and best-effort the photo file it uploaded.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * NEVER REMOVE AN `eom/library/*` OBJECT. READ THIS BEFORE CHANGING IT.
+ * ─────────────────────────────────────────────────────────────────────────
+ * Since the Dropbox picker landed, `photo_path` is one of two completely
+ * different things: a file this screen uploaded for this month alone
+ * (`eom/2026-08-1755…​.jpg`), or a pointer at the SHARED library mirrored
+ * from Dropbox (`eom/library/<id>.jpg`) that a second month may also be using
+ * and that the sync considers its own. Deleting a month is a small,
+ * reversible act; deleting a library file destroys the original Devon dropped
+ * in Dropbox, and the next sync would simply re-download it — so the "clean
+ * up" would also mean re-downloading the file every night forever.
+ *
+ * `isLibraryPath` is the guard. It is deliberately generous about leading
+ * slashes and case: the only failure mode that matters is answering "no" for
+ * a library file, so anything that even looks like one is left alone.
+ */
 export async function deleteEmployeeOfMonth(month: string): Promise<EomMutationResult> {
   const normalized = normalizeMonth(month);
   if (!normalized) return { ok: false, message: 'Unknown month.' };
@@ -282,7 +350,7 @@ export async function deleteEmployeeOfMonth(month: string): Promise<EomMutationR
       return { ok: false, message: 'Could not remove that month.' };
     }
     const path = (data[0] as { photo_path: string | null }).photo_path;
-    if (path) {
+    if (path && !isLibraryPath(path)) {
       // Best effort: an orphaned object is invisible, a failed delete is not
       // worth failing the whole action over.
       try {

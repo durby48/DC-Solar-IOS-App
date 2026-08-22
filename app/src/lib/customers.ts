@@ -10,6 +10,7 @@ import {
   updateCustomer as crmUpdateCustomer,
   type CustomerInput,
 } from '@/lib/crm';
+import { compressForUpload } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
@@ -218,16 +219,20 @@ export type PhotoUploadResult =
 
 /**
  * Upload a picked image as a customer's contact photo and record the path.
- * The caller should have already square-cropped/downscaled it via the image
- * picker's own editing options — we don't resize here because there is no
- * image-processing library in the bundle.
+ *
+ * The caller square-crops via the picker's `allowsEditing`; `compressForUpload`
+ * then caps it at 1920px and re-encodes as JPEG. An avatar is rendered at
+ * about 48pt, so the 6 MB original a phone camera hands over is roughly two
+ * hundred times more picture than the screen can show. Compression never
+ * throws — a device that can't run it uploads the original.
  */
 export async function uploadCustomerPhoto(params: {
   customerId: string;
   uri: string;
 }): Promise<PhotoUploadResult> {
   try {
-    const response = await fetch(params.uri);
+    const compressed = await compressForUpload(params.uri);
+    const response = await fetch(compressed.uri);
     const blob = await response.blob();
     const ext = blob.type.includes('png') ? 'png' : 'jpg';
     // Timestamped so a replacement never collides with a cached signed URL.

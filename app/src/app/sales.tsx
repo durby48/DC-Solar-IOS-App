@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { MarketingPanel } from '@/components/MarketingPanel';
+import { MediaGallery } from '@/components/MediaGrid';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { useRole } from '@/lib/role';
 import { fetchSalesData, type SalesData, type SalesFunnel } from '@/lib/sales';
@@ -30,14 +31,25 @@ import { fetchSalesData, type SalesData, type SalesFunnel } from '@/lib/sales';
  * Business Profile, Facebook, Instagram and Yelp. It lives here rather than in
  * its own tab because reach without conversion is a vanity number; the two
  * belong side by side. See components/MarketingPanel.tsx.
+ *
+ * PHOTOS (added 2026-08-22) is the Dropbox photo library — the same
+ * `MediaGallery` the `/marketing-photos` route mounts, embedded here so a rep
+ * looking at reach numbers can reach the roofs those numbers are about without
+ * leaving the tab. It is the SAME component rather than a second grid, so the
+ * two can never drift; the only differences are that this copy scrolls inside
+ * the page's `ScrollView` and asks for a shorter page.
  */
 
-type SalesSegment = 'leads' | 'marketing';
+type SalesSegment = 'leads' | 'marketing' | 'photos';
 
 const SEGMENTS: { key: SalesSegment; label: string }[] = [
   { key: 'leads', label: 'Leads' },
   { key: 'marketing', label: 'Marketing' },
+  { key: 'photos', label: 'Photos' },
 ];
+
+/** How many photos the embedded segment asks for. The route shows everything. */
+const PHOTOS_IN_SEGMENT = 60;
 
 function formatMoney(amount: number): string {
   return `$${Math.round(amount).toLocaleString('en-US')}`;
@@ -197,7 +209,16 @@ export default function SalesScreen() {
           })}
         </View>
 
-        {segment === 'marketing' ? (
+        {segment === 'photos' ? (
+          <MediaGallery
+            usage="marketing"
+            compact
+            scrollable={false}
+            limit={PHOTOS_IN_SEGMENT}
+            refreshKey={refreshKey}
+            emptyBody="Photos dropped into the Marketing folder in Dropbox appear here after the next sync."
+          />
+        ) : segment === 'marketing' ? (
           <MarketingPanel refreshKey={refreshKey} />
         ) : (
           <>

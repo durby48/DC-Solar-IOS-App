@@ -82,9 +82,7 @@ export const HUB_ITEMS: readonly HubItem[] = [
   { key: 'checklist', title: 'Vehicle Checklist', icon: 'clipboard', href: '/more/checklist', group: 'work', tone: 2, gate: 'all' },
   { key: 'receipts', title: 'Receipts', icon: 'receipt', href: '/more/receipts', group: 'work', tone: 4, gate: 'all' },
   { key: 'monitoring', title: 'Monitoring Logins', icon: 'pulse', href: '/more/monitoring', group: 'work', tone: 3, gate: 'all' },
-  // TODO(dropbox): Marketing Photos /marketing-photos — Workstream H builds the
-  // route; add the entry here (group 'work') once it exists, not before, or the
-  // typed-routes check fails the build.
+  { key: 'marketing-photos', title: 'Marketing Photos', icon: 'images', href: '/marketing-photos', group: 'work', tone: 6, gate: 'all' },
 
   // ---- Money (admin) ----
   { key: 'financials', title: 'Financials', icon: 'wallet', href: '/financials', group: 'money', tone: 'olive', gate: 'admin' },
