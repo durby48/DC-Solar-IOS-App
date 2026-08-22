@@ -1,19 +1,22 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Alert, Platform, StyleSheet, TextInput, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  FadeInUp,
+  Pill,
+  Screen,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import {
   addChecklistItem,
   deactivateChecklistItem,
@@ -26,11 +29,9 @@ import {
   type Vehicle,
 } from '@/lib/checklist';
 import { formatShortDate, todayISO } from '@/lib/dates';
+import { haptics } from '@/lib/haptics';
 import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
-
-// Danger tint for "missing" rows, derived from the theme danger color.
-const DANGER_TINT = `${colors.danger}1A`;
 
 /** Session email + loading state (role.ts returns null both while loading and signed out). */
 function useAuthEmail(): { state: 'loading' | 'out' | 'in'; email: string | null } {
@@ -171,6 +172,10 @@ export default function ChecklistScreen() {
         return fresh;
       });
       setNote('');
+      // A clean truck is a success; a truck missing tools worked, but the
+      // person needs to read the number — hence `warn` rather than `success`.
+      if (missingCount === 0) haptics.success();
+      else haptics.warn();
       notify(
         setStatus,
         'success',
@@ -201,6 +206,7 @@ export default function ChecklistScreen() {
       setResults((prev) => ({ ...prev, [result.item.id]: true }));
       setItemsState('ok');
       setNewItemName('');
+      haptics.success();
     } else {
       notify(setStatus, 'error', 'Could not add item', result.message);
     }
@@ -239,161 +245,149 @@ export default function ChecklistScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Vehicle Checklist' }} />
-      <ScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled">
+      <Screen edges={[]}>
         {auth.state === 'loading' ? (
-          <View style={styles.centerCard}>
-            <ActivityIndicator color={colors.ocean} />
-          </View>
+          <SkeletonList count={3} height={72} />
         ) : auth.state === 'out' ? (
-          <View style={styles.centerCard}>
-            <View style={styles.badge}>
-              <Ionicons name="clipboard" size={26} color={colors.ocean} />
-            </View>
-            <Text style={styles.promptTitle}>Sign in to run a vehicle check</Text>
-            <Text style={styles.promptText}>
-              Daily tool checks are recorded per crew member, so sign in first.
-            </Text>
-          </View>
+          <Card>
+            <EmptyState
+              icon="clipboard"
+              title="Sign in to run a vehicle check"
+              body="Daily tool checks are recorded per crew member, so sign in first."
+            />
+          </Card>
         ) : vehiclesState === 'loading' ? (
-          <View style={styles.centerCard}>
-            <ActivityIndicator color={colors.ocean} />
-          </View>
+          <SkeletonList count={3} height={72} />
         ) : vehicles.length === 0 ? (
-          <View style={styles.centerCard}>
-            <Ionicons name="car" size={22} color={colors.inkSoft} />
-            <Text style={styles.promptText}>No vehicles are set up yet.</Text>
-          </View>
+          <Card>
+            <EmptyState
+              icon="car"
+              title="No vehicles are set up yet."
+              body="Once the office adds a truck or van it shows up here with its own tool list."
+            />
+          </Card>
         ) : (
           <>
             <View style={styles.chipRow}>
               {vehicles.map((vehicle) => (
-                <Pressable
+                <Chip
                   key={vehicle.id}
+                  label={vehicle.name}
+                  icon={VEHICLE_ICONS[vehicle.kind] ?? 'cube'}
+                  tone="olive"
+                  selected={vehicleId === vehicle.id}
                   onPress={() => setVehicleId(vehicle.id)}
-                  style={[styles.vehicleChip, vehicleId === vehicle.id && styles.chipSelected]}>
-                  <Ionicons
-                    name={VEHICLE_ICONS[vehicle.kind] ?? 'cube'}
-                    size={15}
-                    color={vehicleId === vehicle.id ? colors.ink : colors.inkSoft}
-                  />
-                  <Text
-                    style={[
-                      styles.chipText,
-                      vehicleId === vehicle.id && styles.chipTextSelected,
-                    ]}>
-                    {vehicle.name}
-                  </Text>
-                </Pressable>
+                />
               ))}
             </View>
 
-            <View style={styles.checkHeader}>
-              <Text style={styles.sectionTitle}>Today&apos;s check</Text>
-              {isAdmin && (itemsState !== 'ok' || items.length > 0) ? (
-                <Pressable
-                  onPress={() => {
-                    setStatus(null);
-                    setManageMode((prev) => !prev);
-                  }}
-                  hitSlop={6}
-                  style={({ pressed }) => [styles.manageToggle, pressed && styles.pressed]}>
-                  <Ionicons
-                    name={manageMode ? 'checkmark' : 'settings-outline'}
-                    size={14}
-                    color={colors.ocean}
-                  />
-                  <Text style={styles.manageToggleText}>
-                    {manageMode ? 'Done' : 'Manage list'}
-                  </Text>
-                </Pressable>
-              ) : null}
-            </View>
+            <SectionHeader
+              title="Today's check"
+              icon="clipboard-outline"
+              action={
+                isAdmin && (itemsState !== 'ok' || items.length > 0)
+                  ? {
+                      label: manageMode ? 'Done' : 'Manage list',
+                      icon: manageMode ? 'checkmark' : 'settings-outline',
+                      onPress: () => {
+                        setStatus(null);
+                        setManageMode((prev) => !prev);
+                      },
+                    }
+                  : undefined
+              }
+              style={styles.sectionHeader}
+            />
 
             {itemsState === 'loading' ? (
-              <View style={styles.centerCard}>
-                <ActivityIndicator color={colors.ocean} />
-              </View>
+              <SkeletonList count={5} height={54} />
             ) : itemsState === 'unavailable' ? (
-              <View style={styles.centerCard}>
-                <Text style={styles.promptText}>The checklist is unavailable right now.</Text>
-              </View>
+              <Card>
+                <EmptyState
+                  icon="cloud-offline-outline"
+                  title="The checklist is unavailable right now."
+                  body="The tool list could not be loaded. Try again once you are back on a signal."
+                />
+              </Card>
             ) : items.length === 0 && !isAdmin ? (
-              <View style={styles.centerCard}>
-                <Ionicons name="clipboard" size={22} color={colors.inkSoft} />
-                <Text style={styles.promptText}>
-                  No checklist set up for this vehicle yet
-                </Text>
-              </View>
+              <Card>
+                <EmptyState
+                  icon="clipboard"
+                  title="No checklist set up for this vehicle yet"
+                  body="The office builds the tool list. Ask them to add one for this vehicle."
+                />
+              </Card>
             ) : items.length > 0 ? (
-              <View style={styles.listCard}>
+              <Card padded={false}>
                 {items.map((item, index) => {
                   const missing = results[item.id] === false;
                   return (
-                    <Pressable
-                      key={item.id}
-                      onPress={() => (manageMode ? undefined : toggleItem(item.id))}
-                      disabled={manageMode}
-                      style={({ pressed }) => [
-                        styles.itemRow,
-                        index > 0 && styles.rowBorderTop,
-                        missing && styles.itemRowMissing,
-                        pressed && !manageMode && styles.rowPressed,
-                      ]}>
-                      <Ionicons
-                        name={missing ? 'close-circle' : 'checkmark-circle'}
-                        size={22}
-                        color={missing ? colors.danger : colors.ocean}
-                      />
-                      <Text style={[styles.itemName, missing && styles.itemNameMissing]}>
-                        {item.name}
-                      </Text>
-                      {missing ? <Text style={styles.missingLabel}>Missing</Text> : null}
-                      {manageMode ? (
-                        <Pressable
-                          onPress={() => confirmRemoveItem(item)}
-                          hitSlop={8}
-                          style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}>
-                          <Ionicons name="close" size={16} color={colors.danger} />
-                        </Pressable>
-                      ) : null}
-                    </Pressable>
+                    <FadeInUp key={item.id} index={index}>
+                      <AnimatedPressable
+                        onPress={() => (manageMode ? undefined : toggleItem(item.id))}
+                        disabled={manageMode}
+                        haptic={manageMode ? undefined : 'tapLight'}
+                        scaleTo={0.99}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: !missing, disabled: manageMode }}
+                        accessibilityLabel={item.name}
+                        style={({ pressed }) => [
+                          styles.itemRow,
+                          index > 0 && styles.rowBorderTop,
+                          missing && styles.itemRowMissing,
+                          pressed && !manageMode && styles.rowPressed,
+                        ]}>
+                        <Ionicons
+                          name={missing ? 'close-circle' : 'checkmark-circle'}
+                          size={22}
+                          color={missing ? colors.danger : colors.accentPrimary}
+                        />
+                        <AppText
+                          variant="bodyStrong"
+                          color={missing ? colors.danger : colors.textPrimary}
+                          style={styles.itemName}>
+                          {item.name}
+                        </AppText>
+                        {missing ? (
+                          <AppText variant="section" color={colors.danger}>
+                            Missing
+                          </AppText>
+                        ) : null}
+                        {manageMode ? (
+                          <AnimatedPressable
+                            onPress={() => confirmRemoveItem(item)}
+                            haptic="tapMedium"
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove ${item.name}`}
+                            style={styles.removeButton}>
+                            <Ionicons name="close" size={16} color={colors.danger} />
+                          </AnimatedPressable>
+                        ) : null}
+                      </AnimatedPressable>
+                    </FadeInUp>
                   );
                 })}
-              </View>
+              </Card>
             ) : null}
 
             {showManageArea ? (
-              <View style={styles.formCard}>
-                <Text style={styles.formTitle}>
+              <Card style={styles.formCard}>
+                <AppText variant="heading">
                   {items.length === 0 ? 'Set up this checklist' : 'Add item'}
-                </Text>
+                </AppText>
                 <View style={styles.addRow}>
                   <TextInput
                     value={newItemName}
                     onChangeText={setNewItemName}
                     placeholder="e.g. Impact driver"
-                    placeholderTextColor={colors.inkSoft}
+                    placeholderTextColor={colors.textMuted}
                     style={[styles.input, styles.addInput]}
                     onSubmitEditing={submitNewItem}
                   />
-                  <Pressable
-                    onPress={submitNewItem}
-                    disabled={addingItem}
-                    style={({ pressed }) => [
-                      styles.saveButton,
-                      (pressed || addingItem) && styles.pressed,
-                    ]}>
-                    {addingItem ? (
-                      <ActivityIndicator color={colors.ink} size="small" />
-                    ) : (
-                      <Text style={styles.saveButtonText}>Add</Text>
-                    )}
-                  </Pressable>
+                  <Button label="Add" size="sm" loading={addingItem} onPress={submitNewItem} />
                 </View>
-              </View>
+              </Card>
             ) : null}
 
             {itemsState === 'ok' && items.length > 0 && !manageMode ? (
@@ -402,230 +396,122 @@ export default function ChecklistScreen() {
                   value={note}
                   onChangeText={setNote}
                   placeholder="Note (optional)"
-                  placeholderTextColor={colors.inkSoft}
+                  placeholderTextColor={colors.textMuted}
                   style={styles.input}
                 />
-                <Pressable
+                <Button
+                  label={`Submit check${missingCount > 0 ? ` (${missingCount} missing)` : ''}`}
+                  icon="checkmark-done"
+                  size="lg"
+                  fullWidth
+                  loading={submitting}
                   onPress={submitCheck}
-                  disabled={submitting}
-                  style={({ pressed }) => [
-                    styles.submitButton,
-                    (pressed || submitting) && styles.pressed,
-                  ]}>
-                  {submitting ? (
-                    <ActivityIndicator color={colors.ink} size="small" />
-                  ) : (
-                    <>
-                      <Ionicons name="checkmark-done" size={18} color={colors.ink} />
-                      <Text style={styles.submitButtonText}>
-                        Submit check
-                        {missingCount > 0 ? ` (${missingCount} missing)` : ''}
-                      </Text>
-                    </>
-                  )}
-                </Pressable>
+                />
               </>
             ) : null}
 
-            <Text style={styles.sectionTitle}>Recent checks</Text>
+            <SectionHeader
+              title="Recent checks"
+              icon="time-outline"
+              style={styles.sectionHeader}
+            />
             {runs.length === 0 ? (
-              <View style={styles.centerCard}>
-                <Text style={styles.promptText}>No checks recorded for this vehicle yet.</Text>
-              </View>
+              <Card>
+                <EmptyState
+                  icon="time-outline"
+                  title="No checks recorded for this vehicle yet."
+                  body="Submit today's check and it lands here for everyone to see."
+                />
+              </Card>
             ) : (
-              <View style={styles.listCard}>
+              <Card padded={false}>
                 {runs.map((run, index) => (
-                  <View key={run.id} style={[styles.runRow, index > 0 && styles.rowBorderTop]}>
-                    <View style={styles.runBody}>
-                      <Text style={styles.runDate}>{formatShortDate(run.run_date)}</Text>
-                      <Text style={styles.runMeta}>{employeeLabel(run.employee)}</Text>
-                      {run.note ? <Text style={styles.runNote}>{run.note}</Text> : null}
+                  <FadeInUp key={run.id} index={index}>
+                    <View style={[styles.runRow, index > 0 && styles.rowBorderTop]}>
+                      <View style={styles.runBody}>
+                        <AppText variant="bodyStrong">{formatShortDate(run.run_date)}</AppText>
+                        <AppText variant="caption" color={colors.textMuted}>
+                          {employeeLabel(run.employee)}
+                        </AppText>
+                        {run.note ? (
+                          <AppText
+                            variant="caption"
+                            color={colors.textSecondary}
+                            style={styles.runNote}>
+                            {run.note}
+                          </AppText>
+                        ) : null}
+                      </View>
+                      <Pill
+                        label={
+                          run.missing_count > 0 ? `${run.missing_count} missing` : 'All good'
+                        }
+                        bg={run.missing_count > 0 ? colors.coralSoft : colors.mintSoft}
+                        fg={run.missing_count > 0 ? colors.coralDeep : colors.mintDeep}
+                      />
                     </View>
-                    <View
-                      style={[
-                        styles.runPill,
-                        run.missing_count > 0 ? styles.runPillBad : styles.runPillGood,
-                      ]}>
-                      <Text
-                        style={[
-                          styles.runPillText,
-                          { color: run.missing_count > 0 ? colors.danger : colors.ocean },
-                        ]}>
-                        {run.missing_count > 0 ? `${run.missing_count} missing` : 'All good'}
-                      </Text>
-                    </View>
-                  </View>
+                  </FadeInUp>
                 ))}
-              </View>
+              </Card>
             )}
           </>
         )}
 
         {status ? (
-          <Text
-            style={[
-              styles.statusText,
-              status.kind === 'error' ? styles.statusError : styles.statusSuccess,
-            ]}>
+          <AppText
+            variant="caption"
+            align="center"
+            color={status.kind === 'error' ? colors.danger : colors.success}>
             {status.message}
-          </Text>
+          </AppText>
         ) : null}
-      </ScrollView>
+      </Screen>
     </>
   );
 }
 
+/** Danger tint for a "missing" row — the theme's danger at 10 % on white. */
+const DANGER_TINT = `${colors.danger}1A`;
+
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.cream,
-  },
-  container: {
-    padding: spacing.lg,
-    gap: spacing.md,
-    paddingBottom: spacing.xxl,
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
+  sectionHeader: {
     marginTop: spacing.sm,
-  },
-  centerCard: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  badge: {
-    width: 56,
-    height: 56,
-    borderRadius: radii.lg,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  promptTitle: {
-    color: colors.ink,
-    fontSize: 17,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  promptText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
   },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
   },
-  vehicleChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.tan,
-  },
-  chipSelected: {
-    backgroundColor: colors.sun,
-    borderColor: colors.sun,
-  },
-  chipText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  chipTextSelected: {
-    color: colors.ink,
-  },
-  checkHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  manageToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    backgroundColor: colors.skySoft,
-  },
-  manageToggleText: {
-    color: colors.ocean,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  listCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    ...shadows.card,
-  },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
     padding: spacing.md,
+    backgroundColor: colors.surface,
   },
   itemRowMissing: {
     backgroundColor: DANGER_TINT,
   },
   rowPressed: {
-    backgroundColor: colors.skySoft,
-  },
-  pressed: {
-    opacity: 0.7,
+    backgroundColor: colors.oliveTint,
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
   },
   itemName: {
     flex: 1,
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  itemNameMissing: {
-    color: colors.danger,
-  },
-  missingLabel: {
-    color: colors.danger,
-    fontSize: 12,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   removeButton: {
     width: 28,
     height: 28,
     borderRadius: radii.pill,
-    backgroundColor: colors.cream,
+    backgroundColor: colors.dangerSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   formCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.sm,
-    ...shadows.card,
-  },
-  formTitle: {
-    color: colors.ink,
-    fontSize: 16,
-    fontWeight: '800',
   },
   addRow: {
     flexDirection: 'row',
@@ -637,94 +523,26 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.border,
     borderRadius: radii.sm,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.sm + 4,
     paddingVertical: spacing.sm,
-    color: colors.ink,
+    color: colors.textPrimary,
     fontSize: 15,
-    fontWeight: '600',
-    backgroundColor: colors.white,
-  },
-  saveButton: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  submitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 2,
-    paddingHorizontal: spacing.lg,
-    ...shadows.card,
-  },
-  submitButtonText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
+    backgroundColor: colors.surface,
   },
   runRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
     padding: spacing.md,
+    backgroundColor: colors.surface,
   },
   runBody: {
     flex: 1,
     gap: 2,
   },
-  runDate: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  runMeta: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
   runNote: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
     fontStyle: 'italic',
-  },
-  runPill: {
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-  },
-  runPillGood: {
-    backgroundColor: colors.skySoft,
-  },
-  runPillBad: {
-    backgroundColor: DANGER_TINT,
-  },
-  runPillText: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  statusError: {
-    color: colors.danger,
-  },
-  statusSuccess: {
-    color: colors.ocean,
   },
 });

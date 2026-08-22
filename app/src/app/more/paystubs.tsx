@@ -1,22 +1,23 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import * as DocumentPicker from 'expo-document-picker';
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Alert, Platform, StyleSheet, TextInput, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AppText,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  FadeInUp,
+  ListRow,
+  Screen,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
-import { viewDocument } from '@/lib/pdf';
+import { haptics } from '@/lib/haptics';
 import {
   fetchEmployees,
   fetchMyEmployeeId,
@@ -26,6 +27,7 @@ import {
   type EmployeeDocument,
   type EmployeeLite,
 } from '@/lib/paystubs';
+import { viewDocument } from '@/lib/pdf';
 import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
@@ -61,27 +63,15 @@ function PaystubRow({
   onPress: () => void;
 }) {
   return (
-    <Pressable
+    <ListRow
+      icon="cash"
+      title={doc.period_label ?? doc.file_name}
+      subtitle={`${doc.file_name} · ${formatShortDate(doc.created_at?.slice(0, 10) ?? null)}${
+        formatBytes(doc.size_bytes) ? ` · ${formatBytes(doc.size_bytes)}` : ''
+      }`}
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.row,
-        !isFirst && styles.rowBorderTop,
-        pressed && styles.rowPressed,
-      ]}>
-      <View style={styles.iconWrap}>
-        <Ionicons name="cash" size={18} color={colors.ocean} />
-      </View>
-      <View style={styles.rowBody}>
-        <Text style={styles.rowValue} numberOfLines={1}>
-          {doc.period_label ?? doc.file_name}
-        </Text>
-        <Text style={styles.rowMeta} numberOfLines={1}>
-          {doc.file_name} · {formatShortDate(doc.created_at?.slice(0, 10) ?? null)}
-          {formatBytes(doc.size_bytes) ? ` · ${formatBytes(doc.size_bytes)}` : ''}
-        </Text>
-      </View>
-      <Ionicons name="chevron-forward" size={18} color={colors.inkSoft} />
-    </Pressable>
+      style={!isFirst ? styles.rowBorderTop : undefined}
+    />
   );
 }
 
@@ -229,6 +219,7 @@ export default function PaystubsScreen() {
           loadMine();
         }
         setPeriodLabel('');
+        haptics.success();
         notify(setStatus, 'success', 'Uploaded', `Paystub for ${label} was added.`);
       } else {
         notify(setStatus, 'error', 'Upload failed', upload.message);
@@ -243,312 +234,194 @@ export default function PaystubsScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Paystubs' }} />
-      <ScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled">
+      <Screen edges={[]}>
         {signedIn === null ? (
-          <View style={styles.placeholderCard}>
-            <ActivityIndicator color={colors.ocean} />
-          </View>
+          <SkeletonList count={3} height={64} />
         ) : !signedIn ? (
-          <View style={styles.placeholderCard}>
-            <Ionicons name="lock-closed" size={22} color={colors.inkSoft} />
-            <Text style={styles.placeholderText}>Sign in to view your paystubs.</Text>
-          </View>
+          <Card>
+            <EmptyState
+              icon="lock-closed"
+              title="Sign in to view your paystubs."
+              body="Paystubs are tied to your employee record, so the app has to know who you are."
+            />
+          </Card>
         ) : (
           <>
-            <Text style={styles.sectionTitle}>My paystubs</Text>
-            {myState === 'loading' ? (
-              <View style={styles.placeholderCard}>
-                <ActivityIndicator color={colors.ocean} />
-              </View>
-            ) : myState === 'unavailable' ? (
-              <View style={styles.placeholderCard}>
-                <Ionicons name="cloud-offline" size={22} color={colors.inkSoft} />
-                <Text style={styles.placeholderText}>Paystubs not available right now</Text>
-              </View>
-            ) : myPaystubs.length === 0 ? (
-              <View style={styles.placeholderCard}>
-                <Ionicons name="cash" size={22} color={colors.inkSoft} />
-                <Text style={styles.placeholderText}>No paystubs yet</Text>
-              </View>
-            ) : (
-              <View style={styles.card}>
-                {myPaystubs.map((doc, index) => (
-                  <PaystubRow
-                    key={doc.id}
-                    doc={doc}
-                    isFirst={index === 0}
-                    onPress={() => openPaystub(doc)}
+            <View style={styles.section}>
+              <SectionHeader title="My paystubs" icon="cash-outline" />
+              {myState === 'loading' ? (
+                <SkeletonList count={3} height={64} />
+              ) : myState === 'unavailable' ? (
+                <Card>
+                  <EmptyState
+                    icon="cloud-offline"
+                    title="Paystubs not available right now"
+                    body="Your stubs could not be loaded. Try again once you are back on a signal."
                   />
-                ))}
-              </View>
-            )}
+                </Card>
+              ) : myPaystubs.length === 0 ? (
+                <Card>
+                  <EmptyState
+                    icon="cash"
+                    title="No paystubs yet"
+                    body="The office uploads these each pay period. They show up here as soon as they do."
+                  />
+                </Card>
+              ) : (
+                <Card padded={false}>
+                  {myPaystubs.map((doc, index) => (
+                    <FadeInUp key={doc.id} index={index}>
+                      <PaystubRow
+                        doc={doc}
+                        isFirst={index === 0}
+                        onPress={() => openPaystub(doc)}
+                      />
+                    </FadeInUp>
+                  ))}
+                </Card>
+              )}
+            </View>
 
             {role?.isAdmin ? (
               <>
-                <Text style={styles.sectionTitle}>Upload paystub</Text>
-                <View style={styles.formCard}>
-                  <Text style={styles.fieldLabel}>Employee</Text>
-                  <View style={styles.chipRow}>
-                    {employees.length === 0 ? (
-                      <Text style={styles.placeholderText}>No employees found</Text>
-                    ) : (
-                      employees.map((employee) => (
-                        <Pressable
-                          key={employee.id}
-                          onPress={() => setSelectedEmployee(employee.id)}
-                          style={[
-                            styles.chip,
-                            selectedEmployee === employee.id && styles.chipSelected,
-                          ]}>
-                          <Text
-                            style={[
-                              styles.chipText,
-                              selectedEmployee === employee.id && styles.chipTextSelected,
-                            ]}>
-                            {employee.display_name ?? employee.email}
-                          </Text>
-                        </Pressable>
-                      ))
-                    )}
-                  </View>
-                  <Text style={styles.fieldLabel}>Pay period</Text>
-                  <TextInput
-                    value={periodLabel}
-                    onChangeText={setPeriodLabel}
-                    placeholder='e.g. "Jul 1–15, 2026"'
-                    placeholderTextColor={colors.inkSoft}
-                    style={styles.input}
-                  />
-                  <Pressable
-                    onPress={pickAndUpload}
-                    disabled={uploading}
-                    style={({ pressed }) => [
-                      styles.uploadButton,
-                      (pressed || uploading) && styles.pressed,
-                    ]}>
-                    {uploading ? (
-                      <ActivityIndicator color={colors.ink} />
-                    ) : (
-                      <Ionicons name="cloud-upload" size={18} color={colors.ink} />
-                    )}
-                    <Text style={styles.uploadButtonText}>
-                      {uploading ? 'Uploading…' : 'Pick PDF & upload'}
-                    </Text>
-                  </Pressable>
+                <View style={styles.section}>
+                  <SectionHeader title="Upload paystub" icon="cloud-upload-outline" />
+                  <Card style={styles.formCard}>
+                    <AppText variant="section" color={colors.textMuted}>
+                      Employee
+                    </AppText>
+                    <View style={styles.chipRow}>
+                      {employees.length === 0 ? (
+                        <AppText variant="caption" color={colors.textMuted}>
+                          No employees found
+                        </AppText>
+                      ) : (
+                        employees.map((employee) => (
+                          <Chip
+                            key={employee.id}
+                            label={employee.display_name ?? employee.email}
+                            tone="sun"
+                            selected={selectedEmployee === employee.id}
+                            onPress={() => setSelectedEmployee(employee.id)}
+                          />
+                        ))
+                      )}
+                    </View>
+                    <AppText variant="section" color={colors.textMuted}>
+                      Pay period
+                    </AppText>
+                    <TextInput
+                      value={periodLabel}
+                      onChangeText={setPeriodLabel}
+                      placeholder='e.g. "Jul 1–15, 2026"'
+                      placeholderTextColor={colors.textMuted}
+                      style={styles.input}
+                    />
+                    <Button
+                      label={uploading ? 'Uploading…' : 'Pick PDF & upload'}
+                      icon="cloud-upload"
+                      size="lg"
+                      fullWidth
+                      loading={uploading}
+                      onPress={pickAndUpload}
+                      style={styles.uploadButton}
+                    />
+                  </Card>
                 </View>
 
-                <Text style={styles.sectionTitle}>All paystubs</Text>
-                {allState === 'loading' ? (
-                  <View style={styles.placeholderCard}>
-                    <ActivityIndicator color={colors.ocean} />
-                  </View>
-                ) : allState === 'unavailable' ? (
-                  <View style={styles.placeholderCard}>
-                    <Ionicons name="cloud-offline" size={22} color={colors.inkSoft} />
-                    <Text style={styles.placeholderText}>Paystubs not available right now</Text>
-                  </View>
-                ) : grouped.length === 0 ? (
-                  <View style={styles.placeholderCard}>
-                    <Ionicons name="cash" size={22} color={colors.inkSoft} />
-                    <Text style={styles.placeholderText}>No paystubs uploaded yet</Text>
-                  </View>
-                ) : (
-                  grouped.map((group) => (
-                    <View key={group.employeeId} style={styles.groupBlock}>
-                      <Text style={styles.groupTitle}>{employeeLabel(group.employeeId)}</Text>
-                      <View style={styles.card}>
-                        {group.docs.map((doc, index) => (
-                          <PaystubRow
-                            key={doc.id}
-                            doc={doc}
-                            isFirst={index === 0}
-                            onPress={() => openPaystub(doc)}
-                          />
-                        ))}
-                      </View>
+                <View style={styles.section}>
+                  <SectionHeader title="All paystubs" icon="folder-open-outline" />
+                  {allState === 'loading' ? (
+                    <SkeletonList count={3} height={64} />
+                  ) : allState === 'unavailable' ? (
+                    <Card>
+                      <EmptyState
+                        icon="cloud-offline"
+                        title="Paystubs not available right now"
+                        body="The list could not be loaded. Try again once you are back on a signal."
+                      />
+                    </Card>
+                  ) : grouped.length === 0 ? (
+                    <Card>
+                      <EmptyState
+                        icon="cash"
+                        title="No paystubs uploaded yet"
+                        body="Upload the first PDF above and it appears here, grouped by employee."
+                      />
+                    </Card>
+                  ) : (
+                    <View style={styles.groups}>
+                      {grouped.map((group, groupIndex) => (
+                        <FadeInUp key={group.employeeId} index={groupIndex}>
+                          <View style={styles.groupBlock}>
+                            <SectionHeader title={employeeLabel(group.employeeId)} />
+                            <Card padded={false}>
+                              {group.docs.map((doc, index) => (
+                                <PaystubRow
+                                  key={doc.id}
+                                  doc={doc}
+                                  isFirst={index === 0}
+                                  onPress={() => openPaystub(doc)}
+                                />
+                              ))}
+                            </Card>
+                          </View>
+                        </FadeInUp>
+                      ))}
                     </View>
-                  ))
-                )}
+                  )}
+                </View>
               </>
             ) : null}
           </>
         )}
 
         {status ? (
-          <Text
-            style={[
-              styles.statusText,
-              status.kind === 'error' ? styles.statusError : styles.statusSuccess,
-            ]}>
+          <AppText
+            variant="caption"
+            align="center"
+            color={status.kind === 'error' ? colors.danger : colors.success}>
             {status.message}
-          </Text>
+          </AppText>
         ) : null}
-      </ScrollView>
+      </Screen>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.cream,
-  },
-  content: {
-    padding: spacing.md,
-    paddingBottom: spacing.xxl,
-    gap: spacing.md,
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
+  section: {
     marginTop: spacing.sm,
-  },
-  placeholderCard: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  placeholderText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    ...shadows.card,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.md,
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
-  },
-  rowPressed: {
-    backgroundColor: colors.skySoft,
-  },
-  iconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowBody: {
-    flex: 1,
-    gap: 2,
-  },
-  rowValue: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  rowMeta: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
+    borderTopColor: colors.border,
   },
   formCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.sm,
-    ...shadows.card,
-  },
-  fieldLabel: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
   },
-  chip: {
-    backgroundColor: colors.white,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.tan,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-  },
-  chipSelected: {
-    backgroundColor: colors.sunLight,
-    borderColor: colors.sun,
-  },
-  chipText: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  chipTextSelected: {
-    color: colors.ink,
-  },
   input: {
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.border,
     borderRadius: radii.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs + 2,
-    color: colors.ink,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.xs + 4,
+    color: colors.textPrimary,
     fontSize: 14,
-    fontWeight: '600',
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceSunk,
   },
   uploadButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 2,
-    paddingHorizontal: spacing.lg,
     marginTop: spacing.xs,
   },
-  uploadButtonText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  pressed: {
-    opacity: 0.7,
+  groups: {
+    gap: spacing.md,
   },
   groupBlock: {
-    gap: spacing.sm,
-  },
-  groupTitle: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  statusError: {
-    color: colors.danger,
-  },
-  statusSuccess: {
-    color: colors.ocean,
+    gap: spacing.xs,
   },
 });

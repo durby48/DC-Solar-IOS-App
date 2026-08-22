@@ -7,17 +7,28 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
-  Pressable,
-  ScrollView,
   StyleSheet,
   Switch,
-  Text,
   TextInput,
   View,
 } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  FadeInUp,
+  Pill,
+  Screen,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
+import { haptics } from '@/lib/haptics';
 import {
   approveReceipt,
   fetchActiveJobs,
@@ -36,10 +47,17 @@ import {
 import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
-const STATUS_PILLS: Record<ReceiptStatus, { bg: string; text: string; label: string }> = {
-  pending: { bg: colors.sunLight, text: colors.ink, label: 'Pending' },
-  approved: { bg: colors.skySoft, text: colors.ocean, label: 'Approved' },
-  rejected: { bg: colors.cream, text: colors.danger, label: 'Rejected' },
+/**
+ * Receipt status colors. The map still lives here — it is this screen's
+ * vocabulary — but it now feeds `<Pill>` from the UI kit instead of a local
+ * `styles.pill`, and it speaks the accent ramp: amber for waiting, mint for
+ * accepted, coral for refused. That is the same three-way reading the crew
+ * already had (sun / sky / danger), tuned to the 2026-08 palette.
+ */
+const STATUS_PILLS: Record<ReceiptStatus, { bg: string; fg: string; label: string }> = {
+  pending: { bg: colors.amberSoft, fg: colors.amberDeep, label: 'Pending' },
+  approved: { bg: colors.mintSoft, fg: colors.mintDeep, label: 'Approved' },
+  rejected: { bg: colors.coralSoft, fg: colors.coralDeep, label: 'Rejected' },
 };
 
 function formatMoney(amount: number): string {
@@ -257,6 +275,7 @@ export default function ReceiptsScreen() {
       setMine((prev) => [result.receipt, ...prev]);
       setMineState('ok');
       resetForm();
+      haptics.success();
       notify(setStatus, 'success', 'Receipt submitted', 'It is now waiting for review.');
     } else {
       notify(setStatus, 'error', 'Could not submit', result.message);
@@ -278,6 +297,7 @@ export default function ReceiptsScreen() {
     setReviewBusy((prev) => ({ ...prev, [receipt.id]: false }));
     if (result.ok) {
       finishReview(result.receipt);
+      haptics.success();
       notify(setStatus, 'success', 'Approved', 'Expense recorded in the finance log.');
     } else {
       notify(setStatus, 'error', 'Approval problem', result.message);
@@ -292,6 +312,8 @@ export default function ReceiptsScreen() {
     setReviewBusy((prev) => ({ ...prev, [receipt.id]: false }));
     if (result.ok) {
       finishReview(result.receipt);
+      // Rejecting worked, but it is not good news — `warn` is the honest tick.
+      haptics.warn();
       notify(setStatus, 'success', 'Rejected', 'The receipt was rejected.');
     } else {
       notify(setStatus, 'error', 'Could not reject', result.message);
@@ -312,378 +334,352 @@ export default function ReceiptsScreen() {
 
   const renderStatusPill = (s: ReceiptStatus) => {
     const pill = STATUS_PILLS[s];
-    return (
-      <View style={[styles.pill, { backgroundColor: pill.bg }]}>
-        <Text style={[styles.pillText, { color: pill.text }]}>{pill.label}</Text>
-      </View>
-    );
+    return <Pill label={pill.label} bg={pill.bg} fg={pill.fg} />;
   };
 
   return (
     <>
       <Stack.Screen options={{ title: 'Receipts' }} />
-      <ScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled">
+      <Screen edges={[]}>
         {auth.state === 'loading' ? (
-          <View style={styles.centerCard}>
-            <ActivityIndicator color={colors.ocean} />
-          </View>
+          <SkeletonList count={3} height={96} />
         ) : auth.state === 'out' ? (
-          <View style={styles.centerCard}>
-            <View style={styles.badge}>
-              <Ionicons name="receipt" size={26} color={colors.ocean} />
-            </View>
-            <Text style={styles.promptTitle}>Sign in to submit receipts</Text>
-            <Text style={styles.promptText}>
-              Receipts are tied to your account so the office can review and reimburse them.
-            </Text>
-          </View>
+          <Card>
+            <EmptyState
+              icon="receipt"
+              title="Sign in to submit receipts"
+              body="Receipts are tied to your account so the office can review and reimburse them."
+            />
+          </Card>
         ) : (
           <>
             {isAdmin ? (
-              <>
-                <Text style={styles.sectionTitle}>Pending review</Text>
+              <View style={styles.section}>
+                <SectionHeader title="Pending review" icon="hourglass-outline" />
                 {pendingState === 'loading' ? (
-                  <View style={styles.centerCard}>
-                    <ActivityIndicator color={colors.ocean} />
-                  </View>
+                  <SkeletonList count={2} height={120} />
                 ) : pendingState === 'unavailable' ? (
-                  <View style={styles.centerCard}>
-                    <Text style={styles.promptText}>Pending receipts are unavailable right now.</Text>
-                  </View>
+                  <Card>
+                    <EmptyState
+                      icon="cloud-offline-outline"
+                      title="Pending receipts are unavailable right now."
+                      body="The office list could not be loaded. Try again once you are back on a signal."
+                    />
+                  </Card>
                 ) : pending.length === 0 ? (
-                  <View style={styles.centerCard}>
-                    <Ionicons name="checkmark-circle" size={22} color={colors.ocean} />
-                    <Text style={styles.promptText}>No receipts waiting for review.</Text>
-                  </View>
+                  <Card>
+                    <EmptyState
+                      icon="checkmark-circle"
+                      title="No receipts waiting for review."
+                      body="Anything the crew submits lands here."
+                    />
+                  </Card>
                 ) : (
-                  pending.map((receipt) => (
-                    <View key={receipt.id} style={styles.card}>
-                      <View style={styles.reviewTop}>
-                        {receipt.storage_path ? (
-                          thumbs[receipt.id] ? (
-                            <Image
-                              source={{ uri: thumbs[receipt.id] }}
-                              style={styles.reviewThumb}
-                              contentFit="cover"
-                              transition={150}
+                  <View style={styles.stack}>
+                    {pending.map((receipt, index) => (
+                      <FadeInUp key={receipt.id} index={index}>
+                        <Card style={styles.reviewCard}>
+                          <View style={styles.reviewTop}>
+                            {receipt.storage_path ? (
+                              thumbs[receipt.id] ? (
+                                <Image
+                                  source={{ uri: thumbs[receipt.id] }}
+                                  style={styles.reviewThumb}
+                                  contentFit="cover"
+                                  transition={150}
+                                />
+                              ) : (
+                                <View style={[styles.reviewThumb, styles.reviewThumbEmpty]}>
+                                  <ActivityIndicator
+                                    color={colors.accentPrimary}
+                                    size="small"
+                                  />
+                                </View>
+                              )
+                            ) : (
+                              <View style={[styles.reviewThumb, styles.reviewThumbEmpty]}>
+                                <Ionicons name="receipt" size={20} color={colors.oliveMid} />
+                              </View>
+                            )}
+                            <View style={styles.reviewBody}>
+                              <AppText variant="numeric" style={styles.reviewAmount}>
+                                {formatMoney(receipt.amount)}
+                              </AppText>
+                              <AppText variant="bodyStrong">
+                                {receipt.description ?? 'No description'}
+                              </AppText>
+                              <AppText variant="caption" color={colors.textMuted}>
+                                {receipt.employee} ·{' '}
+                                {formatShortDate(receipt.created_at.slice(0, 10))}
+                              </AppText>
+                              <View style={styles.pillRow}>
+                                <Pill
+                                  label={categoryLabel(receipt.category)}
+                                  bg={colors.skySoft}
+                                  fg={colors.ocean}
+                                />
+                                {jobLabel(receipt.job_id) ? (
+                                  <Pill
+                                    label={jobLabel(receipt.job_id) as string}
+                                    bg={colors.oliveSoft}
+                                    fg={colors.oliveDeep}
+                                  />
+                                ) : null}
+                                {receipt.needs_reimbursed ? (
+                                  <Pill
+                                    label="Reimburse"
+                                    bg={colors.amberSoft}
+                                    fg={colors.amberDeep}
+                                  />
+                                ) : null}
+                              </View>
+                            </View>
+                          </View>
+                          <View style={styles.reviewButtons}>
+                            <Button
+                              label="Reject"
+                              variant="danger"
+                              size="sm"
+                              disabled={reviewBusy[receipt.id]}
+                              onPress={() => reject(receipt)}
                             />
-                          ) : (
-                            <View style={[styles.reviewThumb, styles.reviewThumbEmpty]}>
-                              <ActivityIndicator color={colors.ocean} size="small" />
-                            </View>
-                          )
-                        ) : (
-                          <View style={[styles.reviewThumb, styles.reviewThumbEmpty]}>
-                            <Ionicons name="receipt" size={20} color={colors.inkSoft} />
+                            <Button
+                              label="Approve"
+                              size="sm"
+                              loading={reviewBusy[receipt.id]}
+                              onPress={() => approve(receipt)}
+                            />
                           </View>
-                        )}
-                        <View style={styles.reviewBody}>
-                          <Text style={styles.reviewAmount}>{formatMoney(receipt.amount)}</Text>
-                          <Text style={styles.reviewDescription}>
-                            {receipt.description ?? 'No description'}
-                          </Text>
-                          <Text style={styles.reviewMeta}>
-                            {receipt.employee} · {formatShortDate(receipt.created_at.slice(0, 10))}
-                          </Text>
-                          <View style={styles.pillRow}>
-                            <View style={[styles.pill, { backgroundColor: colors.skySoft }]}>
-                              <Text style={[styles.pillText, { color: colors.ocean }]}>
-                                {categoryLabel(receipt.category)}
-                              </Text>
-                            </View>
-                            {jobLabel(receipt.job_id) ? (
-                              <View style={[styles.pill, { backgroundColor: colors.tan }]}>
-                                <Text style={[styles.pillText, { color: colors.inkSoft }]}>
-                                  {jobLabel(receipt.job_id)}
-                                </Text>
-                              </View>
-                            ) : null}
-                            {receipt.needs_reimbursed ? (
-                              <View style={[styles.pill, { backgroundColor: colors.sunLight }]}>
-                                <Text style={[styles.pillText, { color: colors.ink }]}>
-                                  Reimburse
-                                </Text>
-                              </View>
-                            ) : null}
-                          </View>
-                        </View>
-                      </View>
-                      <View style={styles.reviewButtons}>
-                        <Pressable
-                          onPress={() => reject(receipt)}
-                          disabled={reviewBusy[receipt.id]}
-                          style={({ pressed }) => [
-                            styles.rejectButton,
-                            (pressed || reviewBusy[receipt.id]) && styles.pressed,
-                          ]}>
-                          <Text style={styles.rejectButtonText}>Reject</Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => approve(receipt)}
-                          disabled={reviewBusy[receipt.id]}
-                          style={({ pressed }) => [
-                            styles.approveButton,
-                            (pressed || reviewBusy[receipt.id]) && styles.pressed,
-                          ]}>
-                          {reviewBusy[receipt.id] ? (
-                            <ActivityIndicator color={colors.ink} size="small" />
-                          ) : (
-                            <Text style={styles.approveButtonText}>Approve</Text>
-                          )}
-                        </Pressable>
-                      </View>
-                    </View>
-                  ))
-                )}
-              </>
-            ) : null}
-
-            <Text style={styles.sectionTitle}>Submit receipt</Text>
-            <View style={styles.card}>
-              {photo ? (
-                <View style={styles.photoRow}>
-                  <Image source={{ uri: photo.uri }} style={styles.photoPreview} contentFit="cover" />
-                  <Pressable onPress={() => setPhoto(null)} hitSlop={8} style={styles.photoRemove}>
-                    <Ionicons name="close" size={16} color={colors.danger} />
-                  </Pressable>
-                </View>
-              ) : Platform.OS === 'web' ? (
-                <View style={styles.photoButtonRow}>
-                  <Pressable
-                    onPress={takePhoto}
-                    style={({ pressed }) => [styles.photoButton, pressed && styles.pressed]}>
-                    <Ionicons name="camera" size={16} color={colors.ink} />
-                    <Text style={styles.photoButtonText}>Camera</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={pickFromLibrary}
-                    style={({ pressed }) => [styles.photoButton, pressed && styles.pressed]}>
-                    <Ionicons name="images" size={16} color={colors.ink} />
-                    <Text style={styles.photoButtonText}>Library</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <Pressable
-                  onPress={choosePhotoSource}
-                  style={({ pressed }) => [styles.photoButton, pressed && styles.pressed]}>
-                  <Ionicons name="camera" size={16} color={colors.ink} />
-                  <Text style={styles.photoButtonText}>Add receipt photo</Text>
-                </Pressable>
-              )}
-
-              <Text style={styles.fieldLabel}>Amount</Text>
-              <TextInput
-                value={amountText}
-                onChangeText={setAmountText}
-                placeholder="0.00"
-                placeholderTextColor={colors.inkSoft}
-                keyboardType="decimal-pad"
-                style={styles.input}
-              />
-
-              <Text style={styles.fieldLabel}>Description</Text>
-              <TextInput
-                value={description}
-                onChangeText={setDescription}
-                placeholder="What was purchased?"
-                placeholderTextColor={colors.inkSoft}
-                style={styles.input}
-              />
-
-              <Text style={styles.fieldLabel}>Category</Text>
-              <View style={styles.chipRow}>
-                {RECEIPT_CATEGORIES.map((c) => (
-                  <Pressable
-                    key={c.value}
-                    onPress={() => setCategory(c.value)}
-                    style={[styles.chip, category === c.value && styles.chipSelected]}>
-                    <Text
-                      style={[styles.chipText, category === c.value && styles.chipTextSelected]}>
-                      {c.label}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <Text style={styles.fieldLabel}>Payment method</Text>
-              <TextInput
-                value={method}
-                onChangeText={setMethod}
-                placeholder="e.g. debit card"
-                placeholderTextColor={colors.inkSoft}
-                style={styles.input}
-              />
-
-              {jobs.length > 0 ? (
-                <>
-                  <Text style={styles.fieldLabel}>Job (optional)</Text>
-                  <View style={styles.chipRow}>
-                    <Pressable
-                      onPress={() => setJobId(null)}
-                      style={[styles.chip, jobId === null && styles.chipSelected]}>
-                      <Text style={[styles.chipText, jobId === null && styles.chipTextSelected]}>
-                        None
-                      </Text>
-                    </Pressable>
-                    {jobs.map((job) => (
-                      <Pressable
-                        key={job.id}
-                        onPress={() => setJobId(job.id)}
-                        style={[styles.chip, jobId === job.id && styles.chipSelected]}>
-                        <Text
-                          style={[styles.chipText, jobId === job.id && styles.chipTextSelected]}>
-                          {job.job_number ? `Job ${job.job_number}` : job.name}
-                        </Text>
-                      </Pressable>
+                        </Card>
+                      </FadeInUp>
                     ))}
                   </View>
-                </>
-              ) : null}
-
-              <View style={styles.switchRow}>
-                <Text style={styles.switchLabel}>I paid out of pocket — needs reimbursement</Text>
-                <Switch
-                  value={needsReimbursed}
-                  onValueChange={setNeedsReimbursed}
-                  trackColor={{ false: colors.tan, true: colors.sun }}
-                  thumbColor={colors.white}
-                />
-              </View>
-
-              <Pressable
-                onPress={submit}
-                disabled={submitting}
-                style={({ pressed }) => [
-                  styles.submitButton,
-                  (pressed || submitting) && styles.pressed,
-                ]}>
-                {submitting ? (
-                  <ActivityIndicator color={colors.ink} size="small" />
-                ) : (
-                  <>
-                    <Ionicons name="paper-plane" size={16} color={colors.ink} />
-                    <Text style={styles.submitButtonText}>Submit receipt</Text>
-                  </>
                 )}
-              </Pressable>
+              </View>
+            ) : null}
+
+            <View style={styles.section}>
+              <SectionHeader title="Submit receipt" icon="camera-outline" />
+              <Card style={styles.formCard}>
+                {photo ? (
+                  <View style={styles.photoRow}>
+                    <Image
+                      source={{ uri: photo.uri }}
+                      style={styles.photoPreview}
+                      contentFit="cover"
+                    />
+                    <AnimatedPressable
+                      onPress={() => setPhoto(null)}
+                      haptic="tapLight"
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Remove photo"
+                      style={styles.photoRemove}>
+                      <Ionicons name="close" size={16} color={colors.danger} />
+                    </AnimatedPressable>
+                  </View>
+                ) : Platform.OS === 'web' ? (
+                  <View style={styles.photoButtonRow}>
+                    <Button
+                      label="Camera"
+                      icon="camera"
+                      variant="secondary"
+                      size="sm"
+                      onPress={takePhoto}
+                    />
+                    <Button
+                      label="Library"
+                      icon="images"
+                      variant="secondary"
+                      size="sm"
+                      onPress={pickFromLibrary}
+                    />
+                  </View>
+                ) : (
+                  <Button
+                    label="Add receipt photo"
+                    icon="camera"
+                    variant="secondary"
+                    size="sm"
+                    onPress={choosePhotoSource}
+                  />
+                )}
+
+                <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
+                  Amount
+                </AppText>
+                <TextInput
+                  value={amountText}
+                  onChangeText={setAmountText}
+                  placeholder="0.00"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="decimal-pad"
+                  style={styles.input}
+                />
+
+                <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
+                  Description
+                </AppText>
+                <TextInput
+                  value={description}
+                  onChangeText={setDescription}
+                  placeholder="What was purchased?"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.input}
+                />
+
+                <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
+                  Category
+                </AppText>
+                <View style={styles.chipRow}>
+                  {RECEIPT_CATEGORIES.map((c) => (
+                    <Chip
+                      key={c.value}
+                      label={c.label}
+                      tone="sun"
+                      selected={category === c.value}
+                      onPress={() => setCategory(c.value)}
+                    />
+                  ))}
+                </View>
+
+                <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
+                  Payment method
+                </AppText>
+                <TextInput
+                  value={method}
+                  onChangeText={setMethod}
+                  placeholder="e.g. debit card"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.input}
+                />
+
+                {jobs.length > 0 ? (
+                  <>
+                    <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
+                      Job (optional)
+                    </AppText>
+                    <View style={styles.chipRow}>
+                      <Chip
+                        label="None"
+                        tone="sun"
+                        selected={jobId === null}
+                        onPress={() => setJobId(null)}
+                      />
+                      {jobs.map((job) => (
+                        <Chip
+                          key={job.id}
+                          label={job.job_number ? `Job ${job.job_number}` : job.name}
+                          tone="sun"
+                          selected={jobId === job.id}
+                          onPress={() => setJobId(job.id)}
+                        />
+                      ))}
+                    </View>
+                  </>
+                ) : null}
+
+                <View style={styles.switchRow}>
+                  <AppText variant="body" style={styles.switchLabel}>
+                    I paid out of pocket — needs reimbursement
+                  </AppText>
+                  <Switch
+                    value={needsReimbursed}
+                    onValueChange={setNeedsReimbursed}
+                    trackColor={{ false: colors.border, true: colors.accentAction }}
+                    thumbColor={colors.white}
+                  />
+                </View>
+
+                <Button
+                  label="Submit receipt"
+                  icon="paper-plane"
+                  loading={submitting}
+                  fullWidth
+                  onPress={submit}
+                  style={styles.submit}
+                />
+              </Card>
             </View>
 
-            <Text style={styles.sectionTitle}>My receipts</Text>
-            {mineState === 'loading' ? (
-              <View style={styles.centerCard}>
-                <ActivityIndicator color={colors.ocean} />
-              </View>
-            ) : mineState === 'unavailable' ? (
-              <View style={styles.centerCard}>
-                <Text style={styles.promptText}>Receipts are unavailable right now.</Text>
-              </View>
-            ) : mine.length === 0 ? (
-              <View style={styles.centerCard}>
-                <Ionicons name="receipt" size={22} color={colors.inkSoft} />
-                <Text style={styles.promptText}>No receipts yet.</Text>
-              </View>
-            ) : (
-              <View style={styles.card}>
-                {mine.map((receipt, index) => (
-                  <View
-                    key={receipt.id}
-                    style={[styles.mineRow, index > 0 && styles.rowBorderTop]}>
-                    <View style={styles.mineBody}>
-                      <Text style={styles.mineAmount}>{formatMoney(receipt.amount)}</Text>
-                      <Text style={styles.mineDescription} numberOfLines={2}>
-                        {receipt.description ?? 'No description'}
-                      </Text>
-                      <Text style={styles.mineMeta}>
-                        {formatShortDate(receipt.created_at.slice(0, 10))} ·{' '}
-                        {categoryLabel(receipt.category)}
-                      </Text>
-                    </View>
-                    <View style={styles.minePills}>
-                      {renderStatusPill(receipt.status)}
-                      {receipt.needs_reimbursed ? (
-                        <View style={[styles.pill, { backgroundColor: colors.sunLight }]}>
-                          <Text style={[styles.pillText, { color: colors.ink }]}>Reimburse</Text>
+            <View style={styles.section}>
+              <SectionHeader title="My receipts" icon="receipt-outline" />
+              {mineState === 'loading' ? (
+                <SkeletonList count={3} height={64} />
+              ) : mineState === 'unavailable' ? (
+                <Card>
+                  <EmptyState
+                    icon="cloud-offline-outline"
+                    title="Receipts are unavailable right now."
+                    body="Your list could not be loaded. Try again once you are back on a signal."
+                  />
+                </Card>
+              ) : mine.length === 0 ? (
+                <Card>
+                  <EmptyState
+                    icon="receipt"
+                    title="No receipts yet."
+                    body="Anything you submit above shows up here with its review status."
+                  />
+                </Card>
+              ) : (
+                <Card padded={false}>
+                  {mine.map((receipt, index) => (
+                    <FadeInUp key={receipt.id} index={index}>
+                      <View style={[styles.mineRow, index > 0 && styles.rowBorderTop]}>
+                        <View style={styles.mineBody}>
+                          <AppText variant="bodyStrong">{formatMoney(receipt.amount)}</AppText>
+                          <AppText variant="body" numberOfLines={2}>
+                            {receipt.description ?? 'No description'}
+                          </AppText>
+                          <AppText variant="caption" color={colors.textMuted}>
+                            {formatShortDate(receipt.created_at.slice(0, 10))} ·{' '}
+                            {categoryLabel(receipt.category)}
+                          </AppText>
                         </View>
-                      ) : null}
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
+                        <View style={styles.minePills}>
+                          {renderStatusPill(receipt.status)}
+                          {receipt.needs_reimbursed ? (
+                            <Pill
+                              label="Reimburse"
+                              bg={colors.amberSoft}
+                              fg={colors.amberDeep}
+                            />
+                          ) : null}
+                        </View>
+                      </View>
+                    </FadeInUp>
+                  ))}
+                </Card>
+              )}
+            </View>
           </>
         )}
 
         {status ? (
-          <Text
-            style={[
-              styles.statusText,
-              status.kind === 'error' ? styles.statusError : styles.statusSuccess,
-            ]}>
+          <AppText
+            variant="caption"
+            align="center"
+            color={status.kind === 'error' ? colors.danger : colors.success}>
             {status.message}
-          </Text>
+          </AppText>
         ) : null}
-      </ScrollView>
+      </Screen>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.cream,
-  },
-  container: {
-    padding: spacing.lg,
-    gap: spacing.md,
-    paddingBottom: spacing.xxl,
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
+  section: {
     marginTop: spacing.sm,
   },
-  centerCard: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  badge: {
-    width: 56,
-    height: 56,
-    borderRadius: radii.lg,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  promptTitle: {
-    color: colors.ink,
-    fontSize: 17,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  promptText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    gap: spacing.sm,
-    ...shadows.card,
-  },
-  pressed: {
-    opacity: 0.7,
+  stack: {
+    gap: spacing.md,
   },
   // Admin review
+  reviewCard: {
+    gap: spacing.sm,
+  },
   reviewTop: {
     flexDirection: 'row',
     gap: spacing.md,
@@ -692,7 +688,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
+    backgroundColor: colors.surfaceSunk,
   },
   reviewThumbEmpty: {
     alignItems: 'center',
@@ -703,19 +699,8 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   reviewAmount: {
-    color: colors.ink,
     fontSize: 18,
-    fontWeight: '800',
-  },
-  reviewDescription: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  reviewMeta: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
+    lineHeight: 24,
   },
   pillRow: {
     flexDirection: 'row',
@@ -723,47 +708,17 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     marginTop: spacing.xs,
   },
-  pill: {
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-  },
-  pillText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
   reviewButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
+    alignItems: 'center',
     gap: spacing.sm,
     marginTop: spacing.xs,
   },
-  rejectButton: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.danger,
-  },
-  rejectButtonText: {
-    color: colors.danger,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  approveButton: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  approveButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
   // Form
+  formCard: {
+    gap: spacing.sm,
+  },
   photoRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -773,13 +728,13 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
+    backgroundColor: colors.surfaceSunk,
   },
   photoRemove: {
     width: 28,
     height: 28,
     borderRadius: radii.pill,
-    backgroundColor: colors.cream,
+    backgroundColor: colors.dangerSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -787,65 +742,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
   },
-  photoButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.sunLight,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    alignSelf: 'flex-start',
-  },
-  photoButtonText: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '800',
-  },
   fieldLabel: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginTop: spacing.xs,
   },
   input: {
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.border,
     borderRadius: radii.sm,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.sm + 4,
     paddingVertical: spacing.sm,
-    color: colors.ink,
+    color: colors.textPrimary,
     fontSize: 15,
-    fontWeight: '600',
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceSunk,
   },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.xs,
-  },
-  chip: {
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    backgroundColor: colors.cream,
-    borderWidth: 1,
-    borderColor: colors.tan,
-  },
-  chipSelected: {
-    backgroundColor: colors.sun,
-    borderColor: colors.sun,
-  },
-  chipText: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  chipTextSelected: {
-    color: colors.ink,
   },
   switchRow: {
     flexDirection: 'row',
@@ -856,70 +769,28 @@ const styles = StyleSheet.create({
   },
   switchLabel: {
     flex: 1,
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
   },
-  submitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 2,
-    paddingHorizontal: spacing.lg,
+  submit: {
     marginTop: spacing.sm,
-    ...shadows.card,
-  },
-  submitButtonText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
   },
   // My receipts
   mineRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
   },
   mineBody: {
     flex: 1,
     gap: 2,
   },
-  mineAmount: {
-    color: colors.ink,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  mineDescription: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  mineMeta: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
   minePills: {
     alignItems: 'flex-end',
     gap: spacing.xs,
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  statusError: {
-    color: colors.danger,
-  },
-  statusSuccess: {
-    color: colors.ocean,
   },
 });

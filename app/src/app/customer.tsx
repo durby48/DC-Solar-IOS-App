@@ -1,10 +1,22 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  EmptyState,
+  FadeInUp,
+  ListRow,
+  Screen,
+  SectionHeader,
+  SkeletonList,
+  StatTile,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import {
   deleteOwnAccount,
   fetchCustomerPortal,
@@ -18,9 +30,8 @@ import { clearRoleCache } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
 /**
- * Where a CUSTOMER account lands. Customers deliberately have access to
- * nothing yet — their portal is a later project — so this is a holding screen
- * that confirms the account exists, plus sign-out and account deletion.
+ * Where a CUSTOMER account lands: their projects, their paperwork, what they
+ * owe, and the two account controls the App Store requires.
  *
  * The real barrier is RLS: a customer has no `employees` row, so every
  * company policy evaluates false for them. This screen is routing, not
@@ -119,290 +130,261 @@ export default function CustomerScreen() {
     }
   };
 
+  const empty = projects.length === 0 && documents.length === 0;
+
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container}>
+    <Screen contentContainerStyle={styles.container}>
+      <View style={styles.hero}>
         <View style={styles.badge}>
-          <Ionicons name="sunny" size={30} color={colors.sun} />
+          <Ionicons name="sunny" size={30} color={colors.accentAction} />
         </View>
-        <Text style={styles.title}>Welcome{name ? `, ${name}` : ''}</Text>
+        <AppText variant="title" align="center">
+          Welcome{name ? `, ${name}` : ''}
+        </AppText>
+      </View>
 
-        {!loaded ? (
-          <ActivityIndicator color={colors.ocean} />
-        ) : projects.length === 0 && documents.length === 0 ? (
-          <Text style={styles.body}>
-            Your DC Solar account is active. Once we start work on your project, your estimates,
-            invoices and payments will appear here.
-          </Text>
-        ) : (
-          <>
-            {balance ? (
+      {!loaded ? (
+        <SkeletonList count={3} height={72} />
+      ) : empty ? (
+        <Card>
+          <EmptyState
+            icon="sunny-outline"
+            title="Your DC Solar account is active"
+            body="Once we start work on your project, your estimates, invoices and payments will appear here."
+          />
+        </Card>
+      ) : (
+        <>
+          {balance ? (
+            <FadeInUp index={0}>
               <View style={styles.balanceRow}>
-                {([
-                  ['Invoiced', balance.invoiced],
-                  ['Paid', balance.paid],
-                  ['Balance', balance.balance],
-                ] as [string, number][]).map(([label, value], i) => (
-                  <View key={label} style={styles.balanceTile}>
-                    <Text style={styles.cardLabel}>{label}</Text>
-                    <Text style={[styles.balanceValue, i === 2 && value > 0 && styles.owing]}>
-                      {`$${Math.round(value).toLocaleString('en-US')}`}
-                    </Text>
-                  </View>
-                ))}
+                <StatTile
+                  label="Invoiced"
+                  value={Math.round(balance.invoiced)}
+                  prefix="$"
+                  tone={0}
+                  compact
+                  style={styles.balanceTile}
+                />
+                <StatTile
+                  label="Paid"
+                  value={Math.round(balance.paid)}
+                  prefix="$"
+                  tone={6}
+                  compact
+                  style={styles.balanceTile}
+                />
+                <StatTile
+                  label="Balance"
+                  value={Math.round(balance.balance)}
+                  prefix="$"
+                  tone={balance.balance > 0 ? 4 : 'olive'}
+                  compact
+                  style={styles.balanceTile}
+                />
               </View>
-            ) : null}
+            </FadeInUp>
+          ) : null}
 
-            {projects.length > 0 ? (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Your projects</Text>
-                {projects.map((p) => (
-                  <View key={p.job_id} style={styles.listRow}>
-                    <View style={styles.listBody}>
-                      <Text style={styles.listTitle} numberOfLines={2}>
-                        {p.name ?? p.job_number ?? 'Project'}
-                      </Text>
-                      {p.address ? (
-                        <Text style={styles.listMeta} numberOfLines={1}>
-                          {p.address}
-                        </Text>
-                      ) : null}
-                    </View>
-                    <Text style={styles.listStage}>{p.stage ?? ''}</Text>
-                  </View>
+          {projects.length > 0 ? (
+            <View style={styles.section}>
+              <SectionHeader title="Your projects" icon="home-outline" />
+              <Card padded={false}>
+                {projects.map((p, index) => (
+                  <FadeInUp key={p.job_id} index={index}>
+                    <ListRow
+                      icon="home"
+                      title={p.name ?? p.job_number ?? 'Project'}
+                      subtitle={p.address ?? undefined}
+                      divider={index < projects.length - 1}
+                      chevron={false}
+                      right={
+                        p.stage ? (
+                          <AppText variant="caption" color={colors.accentPrimary}>
+                            {p.stage}
+                          </AppText>
+                        ) : null
+                      }
+                    />
+                  </FadeInUp>
                 ))}
-              </View>
-            ) : null}
+              </Card>
+            </View>
+          ) : null}
 
-            {documents.length > 0 ? (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Estimates, invoices &amp; payments</Text>
-                {documents.map((d) => {
+          {documents.length > 0 ? (
+            <View style={styles.section}>
+              <SectionHeader title="Estimates, invoices & payments" icon="document-text-outline" />
+              <Card padded={false}>
+                {documents.map((d, index) => {
                   const stale = d.pdf_state === 'stale';
                   const revision = d.revision ?? 1;
                   const hasPdf = Boolean(d.document_path);
+                  const opening = openingDoc === d.entry_id;
+                  const subtitle = [
+                    d.job_number,
+                    d.occurred_on,
+                    // Shown, not hidden: the numbers below are current even
+                    // when the stored PDF hasn't caught up.
+                    stale && hasPdf ? '(PDF being updated)' : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ');
                   return (
-                    <Pressable
-                      key={d.entry_id}
-                      onPress={() => (hasPdf ? void openDocument(d) : undefined)}
-                      disabled={!hasPdf || openingDoc !== null}
-                      style={({ pressed }) => [
-                        styles.listRow,
-                        pressed && hasPdf && styles.rowPressed,
-                      ]}>
-                      <View style={styles.listBody}>
-                        <Text style={styles.listTitle}>
-                          {d.document_number ??
-                            d.type.charAt(0).toUpperCase() + d.type.slice(1)}
-                          {revision > 1 ? ` · rev ${revision}` : ''}
-                        </Text>
-                        <Text style={styles.listMeta}>
-                          {[
-                            d.job_number,
-                            d.occurred_on,
-                            // Shown, not hidden: the numbers below are current
-                            // even when the stored PDF hasn't caught up.
-                            stale && hasPdf ? '(PDF being updated)' : null,
-                          ]
-                            .filter(Boolean)
-                            .join(' · ')}
-                        </Text>
-                      </View>
-                      <Text style={[styles.listAmount, d.type === 'payment' && styles.paidAmount]}>
-                        {`$${Math.round(d.amount).toLocaleString('en-US')}`}
-                      </Text>
-                      {hasPdf ? (
-                        openingDoc === d.entry_id ? (
-                          <ActivityIndicator size="small" color={colors.ocean} />
-                        ) : (
-                          <Ionicons name="chevron-forward" size={18} color={colors.ocean} />
-                        )
-                      ) : null}
-                    </Pressable>
+                    <FadeInUp key={d.entry_id} index={index}>
+                      <ListRow
+                        icon={d.type === 'payment' ? 'cash' : 'document-text'}
+                        title={`${
+                          d.document_number ??
+                          d.type.charAt(0).toUpperCase() + d.type.slice(1)
+                        }${revision > 1 ? ` · rev ${revision}` : ''}`}
+                        subtitle={subtitle || undefined}
+                        divider={index < documents.length - 1}
+                        disabled={!hasPdf || openingDoc !== null}
+                        onPress={hasPdf ? () => void openDocument(d) : undefined}
+                        chevron={hasPdf && !opening}
+                        right={
+                          <View style={styles.docRight}>
+                            <AppText
+                              variant="bodyStrong"
+                              color={d.type === 'payment' ? colors.mintDeep : colors.textPrimary}
+                              style={styles.amount}>
+                              {`$${Math.round(d.amount).toLocaleString('en-US')}`}
+                            </AppText>
+                            {opening ? (
+                              <ActivityIndicator size="small" color={colors.accentPrimary} />
+                            ) : null}
+                          </View>
+                        }
+                      />
+                    </FadeInUp>
                   );
                 })}
-                {docError ? <Text style={styles.error}>{docError}</Text> : null}
-              </View>
-            ) : null}
-          </>
-        )}
-
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>Signed in as</Text>
-          <Text style={styles.cardValue}>{email ?? '—'}</Text>
-        </View>
-
-        <Pressable
-          onPress={signOut}
-          style={({ pressed }) => [styles.primary, pressed && styles.pressed]}>
-          <Text style={styles.primaryText}>Sign out</Text>
-        </Pressable>
-
-        {confirming ? (
-          <View style={styles.dangerCard}>
-            <Text style={styles.dangerTitle}>Delete this account?</Text>
-            <Text style={styles.dangerBody}>
-              This permanently removes your login and cannot be undone. You can sign up again at
-              any time.
-            </Text>
-            <View style={styles.dangerRow}>
-              <Pressable onPress={() => setConfirming(false)} disabled={busy} hitSlop={8}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={remove}
-                disabled={busy}
-                style={({ pressed }) => [styles.deleteButton, pressed && styles.pressed]}>
-                {busy ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.deleteText}>Delete permanently</Text>
-                )}
-              </Pressable>
+              </Card>
+              {docError ? (
+                <AppText variant="caption" color={colors.danger} align="center">
+                  {docError}
+                </AppText>
+              ) : null}
             </View>
-          </View>
-        ) : (
-          <Pressable onPress={() => setConfirming(true)} hitSlop={8} style={styles.deleteLinkWrap}>
-            <Text style={styles.deleteLink}>Delete my account</Text>
-          </Pressable>
-        )}
+          ) : null}
+        </>
+      )}
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-      </ScrollView>
-    </SafeAreaView>
+      <Card>
+        <AppText variant="section" color={colors.textMuted}>
+          Signed in as
+        </AppText>
+        <AppText variant="bodyStrong">{email ?? '—'}</AppText>
+      </Card>
+
+      <Button label="Sign out" size="lg" fullWidth onPress={signOut} />
+
+      {/* Required by App Store guideline 5.1.1(v) for any app with accounts. */}
+      {confirming ? (
+        <Card tone="danger" style={styles.dangerCard}>
+          <AppText variant="heading" color={colors.danger}>
+            Delete this account?
+          </AppText>
+          <AppText variant="body" color={colors.textSecondary}>
+            This permanently removes your login and cannot be undone. You can sign up again at any
+            time.
+          </AppText>
+          <View style={styles.dangerRow}>
+            <Button
+              label="Cancel"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onPress={() => setConfirming(false)}
+            />
+            <Button
+              label="Delete permanently"
+              variant="danger"
+              size="sm"
+              loading={busy}
+              onPress={remove}
+            />
+          </View>
+        </Card>
+      ) : (
+        <AnimatedPressable
+          onPress={() => setConfirming(true)}
+          haptic="tapLight"
+          hitSlop={8}
+          accessibilityRole="button"
+          style={styles.deleteLinkWrap}>
+          <AppText variant="caption" color={colors.danger}>
+            Delete my account
+          </AppText>
+        </AnimatedPressable>
+      )}
+
+      {error ? (
+        <AppText variant="caption" color={colors.danger} align="center">
+          {error}
+        </AppText>
+      ) : null}
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.cream },
   container: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-    gap: spacing.md,
-    maxWidth: 520,
+    maxWidth: 560,
+    width: '100%',
     alignSelf: 'center',
+  },
+  hero: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingBottom: spacing.xs,
   },
   badge: {
     width: 64,
     height: 64,
-    borderRadius: 32,
+    borderRadius: radii.pill,
     backgroundColor: colors.sunLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  title: { color: colors.ink, fontSize: 24, fontWeight: '800', textAlign: 'center' },
-  body: {
-    color: colors.inkSoft,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: 'center',
+  balanceRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
-  card: {
-    alignSelf: 'stretch',
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    gap: 2,
-    ...shadows.card,
-  },
-  cardLabel: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  cardValue: { color: colors.ink, fontSize: 15, fontWeight: '700' },
-  balanceRow: { flexDirection: 'row', alignSelf: 'stretch', gap: spacing.sm },
+  /**
+   * `StatTile`'s own `minWidth: 120` would total 376pt across three tiles and
+   * overflow a 375pt phone. The row decides the width here — same trick Home
+   * uses on its tile grid.
+   */
   balanceTile: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    gap: 2,
-    ...shadows.card,
+    minWidth: 0,
   },
-  balanceValue: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  owing: { color: colors.coralDeep },
   section: {
-    alignSelf: 'stretch',
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    ...shadows.card,
+    marginTop: spacing.sm,
+    gap: spacing.xs,
   },
-  sectionTitle: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    paddingVertical: spacing.sm,
-  },
-  listRow: {
+  docRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
+    gap: spacing.xs,
   },
-  rowPressed: { opacity: 0.6 },
-  listBody: { flex: 1, gap: 2 },
-  listTitle: { color: colors.ink, fontSize: 14, fontWeight: '700' },
-  listMeta: { color: colors.inkSoft, fontSize: 12, fontWeight: '600' },
-  listStage: { color: colors.ocean, fontSize: 12, fontWeight: '800' },
-  listAmount: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
+  amount: {
     fontVariant: ['tabular-nums'],
   },
-  paidAmount: { color: colors.mintDeep },
-  primary: {
-    alignSelf: 'stretch',
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    ...shadows.card,
-  },
-  primaryText: { color: colors.ink, fontSize: 16, fontWeight: '800' },
-  pressed: { opacity: 0.8 },
-  deleteLinkWrap: { paddingVertical: spacing.sm },
-  deleteLink: { color: colors.danger, fontSize: 14, fontWeight: '700' },
   dangerCard: {
-    alignSelf: 'stretch',
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
+    gap: spacing.sm,
     borderWidth: 1,
     borderColor: colors.danger,
-    padding: spacing.md,
-    gap: spacing.sm,
   },
-  dangerTitle: { color: colors.danger, fontSize: 15, fontWeight: '800' },
-  dangerBody: { color: colors.inkSoft, fontSize: 13, lineHeight: 19 },
   dangerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: spacing.md,
   },
-  cancelText: { color: colors.inkSoft, fontSize: 14, fontWeight: '700' },
-  deleteButton: {
-    backgroundColor: colors.danger,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm + 2,
+  deleteLinkWrap: {
+    alignSelf: 'center',
+    paddingVertical: spacing.sm,
   },
-  deleteText: { color: colors.white, fontSize: 14, fontWeight: '800' },
-  error: { color: colors.danger, fontSize: 13, fontWeight: '600', textAlign: 'center' },
 });

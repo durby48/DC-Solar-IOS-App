@@ -1,19 +1,19 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Clipboard from 'expo-clipboard';
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Image, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  Screen,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 import {
   confirmEnrollment,
   listFactors,
@@ -71,6 +71,7 @@ export default function SecurityScreen() {
     if (result.ok) {
       setSetup(null);
       setCode('');
+      haptics.success();
       setStatus({ kind: 'success', message: 'Two-factor authentication is on.' });
       await load();
     } else {
@@ -84,6 +85,7 @@ export default function SecurityScreen() {
     const result = await removeFactor(factorId);
     setBusy(false);
     if (result.ok) {
+      haptics.warn();
       setStatus({ kind: 'success', message: 'Two-factor authentication is off.' });
       await load();
     } else {
@@ -92,180 +94,205 @@ export default function SecurityScreen() {
   };
 
   /**
-   * Web copies to the clipboard; on the phone the key is `selectable` so a
-   * long-press copies it. `expo-clipboard` is NOT installed and adding it
-   * would force a full App Store build for one convenience button.
+   * Copy the setup key. `expo-clipboard` ships in build 29, so this now works
+   * on the phone as well as the browser — which matters, because the phone is
+   * where most people enrol (the authenticator is on the same device, so
+   * there is no QR to scan). The key stays `selectable` regardless: if the
+   * clipboard is blocked (an insecure browser context, a locked-down device)
+   * a long-press still gets it, so this button can only ever add.
    */
   const copyKey = async () => {
     if (!setup) return;
-    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
-      try {
-        await navigator.clipboard.writeText(setup.secret);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } catch {
-        // Clipboard blocked (insecure context): the key is selectable anyway.
-      }
+    try {
+      await Clipboard.setStringAsync(setup.secret);
+      haptics.success();
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable: the key is selectable anyway.
     }
   };
 
   return (
     <>
       <Stack.Screen options={{ title: 'Security' }} />
-      <ScrollView style={styles.safe} contentContainerStyle={styles.container}>
-        <Text style={styles.heading}>Two-factor authentication</Text>
-        <Text style={styles.body}>
+      <Screen edges={[]} contentContainerStyle={styles.container}>
+        <AppText variant="title">Two-factor authentication</AppText>
+        <AppText variant="body" color={colors.textSecondary}>
           Adds a 6-digit code from an authenticator app on top of your password. You&apos;ll
           enter it once per device — after that the device stays trusted until you sign out.
-        </Text>
+        </AppText>
 
         {loading ? (
-          <ActivityIndicator color={colors.ocean} />
+          <SkeletonList count={1} height={96} />
         ) : active ? (
-          <View style={styles.card}>
+          <Card style={styles.card}>
             <View style={styles.onRow}>
               <Ionicons name="shield-checkmark" size={22} color={colors.success} />
               <View style={styles.onText}>
-                <Text style={styles.onTitle}>Two-factor is ON</Text>
-                <Text style={styles.onBody}>{active.friendlyName ?? 'Authenticator app'}</Text>
+                <AppText variant="bodyStrong">Two-factor is ON</AppText>
+                <AppText variant="caption" color={colors.textMuted}>
+                  {active.friendlyName ?? 'Authenticator app'}
+                </AppText>
               </View>
             </View>
-            <Pressable
+            <Button
+              label="Turn off"
+              variant="danger"
+              fullWidth
+              loading={busy}
+              haptic="warn"
               onPress={() => void turnOff(active.id)}
-              disabled={busy}
-              style={({ pressed }) => [styles.outlineDanger, pressed && styles.pressed]}>
-              {busy ? (
-                <ActivityIndicator color={colors.danger} />
-              ) : (
-                <Text style={styles.outlineDangerText}>Turn off</Text>
-              )}
-            </Pressable>
-          </View>
+            />
+          </Card>
         ) : setup ? (
-          <View style={styles.card}>
-            <Text style={styles.step}>1. Add this to your authenticator app</Text>
+          <Card style={styles.card}>
+            <AppText variant="section" color={colors.accentPrimary} style={styles.step}>
+              1. Add this to your authenticator app
+            </AppText>
             {Platform.OS === 'web' && setup.qrCode ? (
               <Image source={{ uri: setup.qrCode }} style={styles.qr} resizeMode="contain" />
             ) : null}
-            <Text style={styles.step}>
+            <AppText variant="section" color={colors.accentPrimary} style={styles.step}>
               {Platform.OS === 'web' ? 'Or enter this key by hand:' : 'Enter this setup key:'}
-            </Text>
-            <Pressable onPress={copyKey} style={({ pressed }) => [styles.keyBox, pressed && styles.pressed]}>
+            </AppText>
+            <AnimatedPressable
+              onPress={copyKey}
+              haptic="tapLight"
+              scaleTo={0.99}
+              accessibilityRole="button"
+              accessibilityLabel="Copy the setup key"
+              style={styles.keyBox}>
+              {/* Stays a bare Text: `selectable` is the fallback when the
+                  clipboard is unavailable, and AppText has no such prop. */}
               <Text style={styles.keyText} selectable>
                 {setup.secret}
               </Text>
-              <Text style={styles.keyHint}>
-                {copied
-                  ? 'Copied'
-                  : Platform.OS === 'web'
-                    ? 'Tap to copy'
-                    : 'Press and hold to copy'}
-              </Text>
-            </Pressable>
+              <View style={styles.keyHintRow}>
+                <Ionicons
+                  name={copied ? 'checkmark-circle' : 'copy-outline'}
+                  size={13}
+                  color={copied ? colors.success : colors.textMuted}
+                />
+                <AppText
+                  variant="caption"
+                  color={copied ? colors.success : colors.textMuted}>
+                  {copied ? 'Copied' : 'Tap to copy — or press and hold the key'}
+                </AppText>
+              </View>
+            </AnimatedPressable>
 
-            <Text style={styles.step}>2. Enter the 6-digit code it shows</Text>
+            <AppText variant="section" color={colors.accentPrimary} style={styles.step}>
+              2. Enter the 6-digit code it shows
+            </AppText>
             <TextInput
               style={styles.codeInput}
               value={code}
               onChangeText={setCode}
               placeholder="000000"
-              placeholderTextColor={colors.inkSoft}
+              placeholderTextColor={colors.textMuted}
               keyboardType="number-pad"
               maxLength={6}
               autoFocus
             />
             <View style={styles.buttonRow}>
-              <Pressable onPress={() => setSetup(null)} disabled={busy} hitSlop={8}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
+              <Button
+                label="Cancel"
+                variant="ghost"
+                disabled={busy}
+                onPress={() => setSetup(null)}
+              />
+              <Button
+                label="Turn on"
+                disabled={code.length < 6}
+                loading={busy}
                 onPress={confirm}
-                disabled={busy || code.length < 6}
-                style={({ pressed }) => [
-                  styles.primary,
-                  (busy || code.length < 6) && styles.disabled,
-                  pressed && styles.pressed,
-                ]}>
-                {busy ? (
-                  <ActivityIndicator color={colors.ink} />
-                ) : (
-                  <Text style={styles.primaryText}>Turn on</Text>
-                )}
-              </Pressable>
+              />
             </View>
-          </View>
+          </Card>
         ) : (
-          <Pressable
+          <Button
+            label="Set up two-factor"
+            icon="shield-checkmark"
+            size="lg"
+            loading={busy}
             onPress={begin}
-            disabled={busy}
-            style={({ pressed }) => [styles.primary, pressed && styles.pressed]}>
-            {busy ? (
-              <ActivityIndicator color={colors.ink} />
-            ) : (
-              <Text style={styles.primaryText}>Set up two-factor</Text>
-            )}
-          </Pressable>
+          />
         )}
 
         {status ? (
-          <Text style={status.kind === 'error' ? styles.error : styles.success}>
+          <AppText
+            variant="caption"
+            color={status.kind === 'error' ? colors.danger : colors.success}>
             {status.message}
-          </Text>
+          </AppText>
         ) : null}
 
-        <Text style={styles.footnote}>
+        <AppText variant="caption" color={colors.textMuted} style={styles.footnote}>
           Lost your authenticator? Devon can clear it from the office — you&apos;ll sign in with
           just your password and can set it up again.
-        </Text>
-      </ScrollView>
+        </AppText>
+      </Screen>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.cream },
-  container: { padding: spacing.lg, gap: spacing.md, maxWidth: 520, width: '100%', alignSelf: 'center' },
-  heading: { color: colors.ink, fontSize: 20, fontWeight: '800' },
-  body: { color: colors.inkSoft, fontSize: 14, lineHeight: 21 },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    gap: spacing.sm,
-    ...shadows.card,
+  container: {
+    maxWidth: 520,
+    width: '100%',
+    alignSelf: 'center',
   },
-  onRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  onText: { flex: 1 },
-  onTitle: { color: colors.ink, fontSize: 15, fontWeight: '800' },
-  onBody: { color: colors.inkSoft, fontSize: 12, fontWeight: '600' },
-  step: { color: colors.ink, fontSize: 13, fontWeight: '800', marginTop: spacing.xs },
-  qr: { width: 200, height: 200, alignSelf: 'center', backgroundColor: colors.white },
+  card: {
+    gap: spacing.sm,
+  },
+  onRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  onText: {
+    flex: 1,
+    gap: 1,
+  },
+  step: {
+    marginTop: spacing.xs,
+  },
+  qr: {
+    width: 200,
+    height: 200,
+    alignSelf: 'center',
+    backgroundColor: colors.white,
+  },
   keyBox: {
-    backgroundColor: colors.canvas,
+    backgroundColor: colors.surfaceSunk,
     borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.border,
     padding: spacing.sm + 2,
-    gap: 2,
+    gap: spacing.xs,
   },
   keyText: {
-    color: colors.ink,
+    color: colors.textPrimary,
     fontSize: 15,
-    fontWeight: '800',
+    lineHeight: 21,
     letterSpacing: 1.5,
     ...Platform.select({ ios: { fontFamily: 'Menlo' }, default: { fontFamily: 'monospace' } }),
   },
-  keyHint: { color: colors.inkSoft, fontSize: 11, fontWeight: '700' },
+  keyHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
   codeInput: {
-    backgroundColor: colors.canvas,
+    backgroundColor: colors.surfaceSunk,
     borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.border,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
-    color: colors.ink,
+    color: colors.textPrimary,
     fontSize: 24,
-    fontWeight: '800',
     letterSpacing: 8,
     textAlign: 'center',
   },
@@ -275,27 +302,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: spacing.md,
   },
-  primary: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 2,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    ...shadows.card,
+  footnote: {
+    lineHeight: 18,
   },
-  primaryText: { color: colors.ink, fontSize: 15, fontWeight: '800' },
-  disabled: { opacity: 0.5 },
-  outlineDanger: {
-    borderWidth: 1,
-    borderColor: colors.danger,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm + 2,
-    alignItems: 'center',
-  },
-  outlineDangerText: { color: colors.danger, fontSize: 14, fontWeight: '800' },
-  cancelText: { color: colors.inkSoft, fontSize: 14, fontWeight: '700' },
-  pressed: { opacity: 0.8 },
-  error: { color: colors.danger, fontSize: 13, fontWeight: '600' },
-  success: { color: colors.success, fontSize: 13, fontWeight: '700' },
-  footnote: { color: colors.inkSoft, fontSize: 12, lineHeight: 18 },
 });

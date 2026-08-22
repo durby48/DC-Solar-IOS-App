@@ -1,16 +1,21 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import {
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Card,
+  Chip,
+  EmptyState,
+  FadeInUp,
+  Pill,
+  Screen,
+  SkeletonList,
+  StatTile,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import {
   fetchHoursData,
   formatPayrollDate,
@@ -46,6 +51,10 @@ function stateLabel(state: PayrollState, pre: boolean): string {
   }
 }
 
+/**
+ * Where the period sits in the cycle, in color. Unchanged meanings — this
+ * map now feeds `<Pill>` instead of a local `styles.stateChip`.
+ */
 function stateChipStyle(state: PayrollState) {
   switch (state) {
     case 'current':
@@ -108,11 +117,12 @@ export default function HoursScreen() {
   };
 
   const placeholder = (message: string) => (
-    <View style={styles.placeholderCard}>
-      <Ionicons name="time" size={22} color={colors.inkSoft} />
-      <Text style={styles.placeholderText}>{message}</Text>
-    </View>
+    <Card>
+      <EmptyState icon="time" title={message} />
+    </Card>
   );
+
+  const chipStyle = stateChipStyle(state);
 
   return (
     <>
@@ -120,17 +130,10 @@ export default function HoursScreen() {
           title is declared in the body, the back arrow comes from
           app/_layout.tsx. */}
       <Stack.Screen options={{ title: 'Hours' }} />
-      <ScrollView
-        style={styles.safe}
-        contentContainerStyle={styles.container}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors.ocean}
-          />
-        }>
-        {!loaded ? null : !role ? (
+      <Screen edges={[]} refreshing={refreshing} onRefresh={onRefresh}>
+        {!loaded ? (
+          <SkeletonList count={4} height={110} />
+        ) : !role ? (
           placeholder('Sign in to see crew hours.')
         ) : !role.isAdmin ? (
           placeholder('Hours are available to owners and operators.')
@@ -138,190 +141,222 @@ export default function HoursScreen() {
           placeholder('Hours are not available right now.')
         ) : (
           <>
-            <View style={styles.periodCard}>
+            <Card tone="sunk" style={styles.periodCard}>
               <View style={styles.periodPagerRow}>
-                <Pressable
-                  onPress={() => setPeriodIndex((i) => Math.max(0, i - 1))}
+                <Chip
+                  label="Prev"
+                  icon="chevron-back"
+                  tone="olive"
                   disabled={periodIndex === 0}
-                  hitSlop={8}
-                  style={({ pressed }) => [
-                    styles.pagerButton,
-                    periodIndex === 0 && styles.pagerButtonDisabled,
-                    pressed && styles.buttonPressed,
-                  ]}>
-                  <Ionicons name="chevron-back" size={18} color={colors.ink} />
-                </Pressable>
+                  onPress={() => setPeriodIndex((i) => Math.max(0, i - 1))}
+                />
                 <View style={styles.periodLabelWrap}>
-                  <Text style={styles.periodDates}>{period.label}</Text>
-                  <View
-                    style={[
-                      styles.stateChip,
-                      { backgroundColor: stateChipStyle(state).bg },
-                    ]}>
-                    <Text style={[styles.stateChipText, { color: stateChipStyle(state).fg }]}>
-                      {stateLabel(state, period.pre)}
-                    </Text>
-                  </View>
+                  <AppText variant="heading" align="center">
+                    {period.label}
+                  </AppText>
+                  <Pill
+                    label={stateLabel(state, period.pre)}
+                    bg={chipStyle.bg}
+                    fg={chipStyle.fg}
+                    style={styles.stateChip}
+                  />
                 </View>
-                <Pressable
-                  onPress={() => setPeriodIndex((i) => Math.min(periods.length - 1, i + 1))}
+                <Chip
+                  label="Next"
+                  icon="chevron-forward"
+                  tone="olive"
                   disabled={periodIndex === periods.length - 1}
-                  hitSlop={8}
-                  style={({ pressed }) => [
-                    styles.pagerButton,
-                    periodIndex === periods.length - 1 && styles.pagerButtonDisabled,
-                    pressed && styles.buttonPressed,
-                  ]}>
-                  <Ionicons name="chevron-forward" size={18} color={colors.ink} />
-                </Pressable>
+                  onPress={() => setPeriodIndex((i) => Math.min(periods.length - 1, i + 1))}
+                />
               </View>
-              <View style={styles.overviewGrid}>
-                <View style={styles.overviewTile}>
-                  <Text style={styles.tileLabel}>Crew hours</Text>
-                  <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-                    {formatHours(overview.totalPeriodHours)}
-                  </Text>
-                </View>
-                <View style={styles.overviewTile}>
-                  <Text style={styles.tileLabel}>{isPaid ? 'Payroll paid' : 'Payroll due'}</Text>
-                  <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-                    {formatMoney(overview.totalPeriodPay)}
-                  </Text>
-                </View>
+
+              <View style={styles.tileRow}>
+                <StatTile
+                  label="Crew hours"
+                  value={overview.totalPeriodHours}
+                  suffix=" h"
+                  decimals={1}
+                  tone="olive"
+                  countUp
+                />
+                <StatTile
+                  label={isPaid ? 'Payroll paid' : 'Payroll due'}
+                  value={overview.totalPeriodPay}
+                  prefix="$"
+                  decimals={2}
+                  tone={5}
+                  countUp
+                />
               </View>
+
               {period.pre ? (
-                <Text style={styles.periodHint}>
+                <AppText variant="caption" color={colors.textMuted}>
                   Paid through the old spreadsheet, before the app tracked hours.
-                </Text>
+                </AppText>
               ) : (
                 <View style={styles.cycleRow}>
                   <View style={styles.cycleItem}>
-                    <Text style={styles.cycleLabel}>Submit</Text>
-                    <Text style={styles.cycleValue}>{formatPayrollDate(period.submitOn)}</Text>
+                    <AppText variant="section" color={colors.textMuted}>
+                      Submit
+                    </AppText>
+                    <AppText variant="bodyStrong">{formatPayrollDate(period.submitOn)}</AppText>
                   </View>
                   <View style={styles.cycleDivider} />
                   <View style={styles.cycleItem}>
-                    <Text style={styles.cycleLabel}>Payday</Text>
-                    <Text style={[styles.cycleValue, styles.cyclePayday]}>
+                    <AppText variant="section" color={colors.textMuted}>
+                      Payday
+                    </AppText>
+                    <AppText variant="bodyStrong" color={colors.mintDeep}>
                       {formatPayrollDate(period.payOn)}
-                    </Text>
+                    </AppText>
                   </View>
                 </View>
               )}
-              <Text style={styles.periodHint}>
+
+              <AppText variant="caption" color={colors.textMuted}>
                 Two-week periods. Payroll is submitted the Wednesday after a period closes and
                 paid the Friday after. Use the arrows to review past payrolls.
-              </Text>
-            </View>
+              </AppText>
+            </Card>
 
             {overview.employees.length === 0
               ? placeholder('No hours in this period.')
-              : overview.employees.map((emp) => {
+              : overview.employees.map((emp, index) => {
                   const open = openNames.has(emp.name);
                   return (
-                    <View key={emp.name} style={styles.employeeCard}>
-                      <Pressable
-                        onPress={() => toggle(emp.name)}
-                        style={({ pressed }) => [pressed && styles.buttonPressed]}>
-                        <View style={styles.employeeHeaderRow}>
-                          <Text style={styles.employeeName}>{emp.name}</Text>
-                          <Ionicons
-                            name={open ? 'chevron-down' : 'chevron-forward'}
-                            size={16}
-                            color={colors.inkSoft}
-                          />
-                        </View>
-                        <View style={styles.overviewGrid}>
-                          <View style={styles.employeeTile}>
-                            <Text style={styles.tileLabel}>
-                              {period.current ? 'This payroll' : 'Period'}
-                            </Text>
-                            <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-                              {formatHours(emp.periodHours)}
-                            </Text>
+                    <FadeInUp key={emp.name} index={index}>
+                      <Card style={styles.employeeCard}>
+                        <AnimatedPressable
+                          onPress={() => toggle(emp.name)}
+                          haptic="tapLight"
+                          scaleTo={0.995}
+                          accessibilityRole="button"
+                          accessibilityState={{ expanded: open }}
+                          accessibilityLabel={emp.name}>
+                          <View style={styles.employeeHeaderRow}>
+                            <AppText variant="heading">{emp.name}</AppText>
+                            <Ionicons
+                              name={open ? 'chevron-down' : 'chevron-forward'}
+                              size={16}
+                              color={colors.textMuted}
+                            />
                           </View>
-                          <View style={styles.employeeTile}>
-                            <Text style={styles.tileLabel}>
-                              {isPaid ? 'Paid' : 'Pay due'}
-                            </Text>
-                            <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-                              {formatMoney(emp.periodPay)}
-                              {emp.periodPayIncomplete ? '*' : ''}
-                            </Text>
-                          </View>
-                          <View style={styles.employeeTile}>
-                            <Text style={styles.tileLabel}>YTD</Text>
-                            <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-                              {formatHours(emp.ytdHours)}
-                            </Text>
-                          </View>
-                        </View>
-                        {emp.periodPayIncomplete ? (
-                          <Text style={styles.rateWarning}>
-                            * some hours have no pay rate — actual pay is higher.
-                          </Text>
-                        ) : null}
-                      </Pressable>
-                      {open ? (
-                        <View style={styles.jobList}>
-                          <View style={styles.jobHeaderRow}>
-                            <Text style={styles.jobColLabel}>Job</Text>
-                            <View style={styles.jobNumbers}>
-                              <Text style={[styles.jobColLabel, styles.jobColPaid]}>
-                                Paid before
-                              </Text>
-                              <Text style={[styles.jobColLabel, styles.jobColPeriod]}>
-                                {period.current ? 'This payroll' : 'This period'}
-                              </Text>
+                          <View style={styles.overviewGrid}>
+                            <View style={styles.employeeTile}>
+                              <AppText variant="section" color={colors.textMuted}>
+                                {period.current ? 'This payroll' : 'Period'}
+                              </AppText>
+                              <AppText
+                                variant="numeric"
+                                style={styles.tileValue}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit>
+                                {formatHours(emp.periodHours)}
+                              </AppText>
+                            </View>
+                            <View style={styles.employeeTile}>
+                              <AppText variant="section" color={colors.textMuted}>
+                                {isPaid ? 'Paid' : 'Pay due'}
+                              </AppText>
+                              <AppText
+                                variant="numeric"
+                                style={styles.tileValue}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit>
+                                {formatMoney(emp.periodPay)}
+                                {emp.periodPayIncomplete ? '*' : ''}
+                              </AppText>
+                            </View>
+                            <View style={styles.employeeTile}>
+                              <AppText variant="section" color={colors.textMuted}>
+                                YTD
+                              </AppText>
+                              <AppText
+                                variant="numeric"
+                                style={styles.tileValue}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit>
+                                {formatHours(emp.ytdHours)}
+                              </AppText>
                             </View>
                           </View>
-                          {emp.jobs.map((job) => (
-                            <View key={job.jobId ?? 'none'} style={styles.jobRow}>
-                              <View style={styles.jobChip}>
-                                <Text style={styles.jobChipText}>{job.label}</Text>
-                              </View>
+                          {emp.periodPayIncomplete ? (
+                            <AppText
+                              variant="caption"
+                              color={colors.textMuted}
+                              style={styles.rateWarning}>
+                              * some hours have no pay rate — actual pay is higher.
+                            </AppText>
+                          ) : null}
+                        </AnimatedPressable>
+
+                        {open ? (
+                          <View style={styles.jobList}>
+                            <View style={styles.jobHeaderRow}>
+                              <AppText variant="section" color={colors.textMuted}>
+                                Job
+                              </AppText>
                               <View style={styles.jobNumbers}>
-                                <Text style={[styles.jobPaidHours, styles.jobColPaid]}>
-                                  {job.paidHours > 0 ? formatHours(job.paidHours) : '—'}
-                                </Text>
-                                <Text style={[styles.jobHours, styles.jobColPeriod]}>
-                                  {job.periodHours > 0 ? formatHours(job.periodHours) : '—'}
-                                </Text>
+                                <AppText
+                                  variant="section"
+                                  color={colors.textMuted}
+                                  style={styles.jobColPaid}>
+                                  Paid before
+                                </AppText>
+                                <AppText
+                                  variant="section"
+                                  color={colors.textMuted}
+                                  style={styles.jobColPeriod}>
+                                  {period.current ? 'This payroll' : 'This period'}
+                                </AppText>
                               </View>
                             </View>
-                          ))}
-                          <Text style={styles.jobListHint}>
-                            "Paid before" = hours on the job from earlier, already-paid periods —
-                            carry-over jobs show both sides.
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
+                            {emp.jobs.map((job) => (
+                              <View key={job.jobId ?? 'none'} style={styles.jobRow}>
+                                <Pill
+                                  label={job.label}
+                                  bg={colors.oliveSoft}
+                                  fg={colors.oliveDeep}
+                                  style={styles.jobChip}
+                                />
+                                <View style={styles.jobNumbers}>
+                                  <AppText
+                                    variant="caption"
+                                    color={colors.textMuted}
+                                    style={[styles.jobNumber, styles.jobColPaid]}>
+                                    {job.paidHours > 0 ? formatHours(job.paidHours) : '—'}
+                                  </AppText>
+                                  <AppText
+                                    variant="bodyStrong"
+                                    style={[styles.jobNumber, styles.jobColPeriod]}>
+                                    {job.periodHours > 0 ? formatHours(job.periodHours) : '—'}
+                                  </AppText>
+                                </View>
+                              </View>
+                            ))}
+                            <AppText
+                              variant="caption"
+                              color={colors.textMuted}
+                              style={styles.jobListHint}>
+                              &quot;Paid before&quot; = hours on the job from earlier,
+                              already-paid periods — carry-over jobs show both sides.
+                            </AppText>
+                          </View>
+                        ) : null}
+                      </Card>
+                    </FadeInUp>
                   );
                 })}
           </>
         )}
-      </ScrollView>
+      </Screen>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.cream,
-  },
-  container: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xl,
-  },
   periodCard: {
-    backgroundColor: colors.sunLight,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
     gap: spacing.sm,
-    ...shadows.card,
   },
   periodPagerRow: {
     flexDirection: 'row',
@@ -329,58 +364,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.sm,
   },
-  pagerButton: {
-    width: 32,
-    height: 32,
-    borderRadius: radii.sm,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.card,
-  },
-  pagerButtonDisabled: {
-    opacity: 0.35,
-  },
   periodLabelWrap: {
     flex: 1,
     alignItems: 'center',
-    gap: 1,
-  },
-  periodDates: {
-    color: colors.ink,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  periodSub: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  periodHint: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
+    gap: 2,
   },
   stateChip: {
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 3,
     marginTop: 2,
   },
-  stateChipText: {
-    fontSize: 11,
-    fontWeight: '800',
+  tileRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
   cycleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.canvas,
+    backgroundColor: colors.surface,
     borderRadius: radii.sm,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
   },
   cycleItem: {
     flex: 1,
@@ -389,59 +392,25 @@ const styles = StyleSheet.create({
   cycleDivider: {
     width: StyleSheet.hairlineWidth,
     alignSelf: 'stretch',
-    backgroundColor: colors.line,
+    backgroundColor: colors.border,
     marginHorizontal: spacing.sm,
-  },
-  cycleLabel: {
-    color: colors.inkSoft,
-    fontSize: 10,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  cycleValue: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  cyclePayday: {
-    color: colors.mintDeep,
   },
   overviewGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     rowGap: spacing.md,
   },
-  overviewTile: {
-    width: '50%',
-    gap: 2,
-    paddingRight: spacing.sm,
-  },
   employeeTile: {
     width: '33.33%',
     gap: 2,
     paddingRight: spacing.sm,
   },
-  tileLabel: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
   tileValue: {
-    color: colors.ink,
     fontSize: 20,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
+    lineHeight: 25,
   },
   employeeCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
     gap: spacing.sm,
-    ...shadows.card,
   },
   employeeHeaderRow: {
     flexDirection: 'row',
@@ -449,20 +418,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.sm,
   },
-  employeeName: {
-    color: colors.ink,
-    fontSize: 17,
-    fontWeight: '800',
-  },
   rateWarning: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '600',
     marginTop: spacing.xs,
   },
   jobList: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
     paddingTop: spacing.sm,
     gap: spacing.xs,
   },
@@ -470,13 +431,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  jobColLabel: {
-    color: colors.inkSoft,
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   jobNumbers: {
     flexDirection: 'row',
@@ -496,49 +450,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   jobChip: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
     flexShrink: 1,
   },
-  jobChipText: {
-    color: colors.ocean,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  jobPaidHours: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  jobHours: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
+  jobNumber: {
     fontVariant: ['tabular-nums'],
   },
   jobListHint: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '600',
     marginTop: spacing.xs,
-  },
-  buttonPressed: {
-    opacity: 0.7,
-  },
-  placeholderCard: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  placeholderText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
   },
 });

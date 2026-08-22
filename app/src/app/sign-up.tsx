@@ -1,21 +1,20 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import AuthProviderButtons from '@/components/AuthProviderButtons';
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { AnimatedPressable, AppText, Button } from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import { landingRoute, signUpCustomer } from '@/lib/account';
+import { haptics } from '@/lib/haptics';
 import type { OAuthResult } from '@/lib/oauth';
 
 /**
@@ -37,6 +36,11 @@ import type { OAuthResult } from '@/lib/oauth';
  *
  * The password rules shown are the ones Supabase actually enforces; the server
  * is the authority, this text is just so people aren't guessing.
+ *
+ * WHY THIS SCREEN KEEPS ITS OWN SHELL rather than using the `Screen`
+ * primitive: the form has to sit inside a `KeyboardAvoidingView`, which has
+ * to sit between the safe area and the scroll view. `Screen` owns both of
+ * those, so there is nowhere to put it. Everything inside is primitives.
  */
 export default function SignUpScreen() {
   const router = useRouter();
@@ -56,6 +60,7 @@ export default function SignUpScreen() {
     if (result.ok === 'cancelled') return;
     if (result.ok) {
       setError(null);
+      haptics.success();
       router.replace(await landingRoute());
       return;
     }
@@ -75,6 +80,7 @@ export default function SignUpScreen() {
       setError(result.message);
       return;
     }
+    haptics.success();
     if (result.needsConfirmation) setSent(true);
     else router.replace('/customer');
   };
@@ -83,16 +89,14 @@ export default function SignUpScreen() {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.centered}>
-          <Text style={styles.title}>Check your email</Text>
-          <Text style={styles.body}>
+          <AppText variant="display" align="center">
+            Check your email
+          </AppText>
+          <AppText variant="body" color={colors.textSecondary} align="center">
             We sent a confirmation link to {email.trim()}. Open it to finish creating your
             account, then come back and sign in.
-          </Text>
-          <Pressable
-            onPress={() => router.replace('/')}
-            style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
-            <Text style={styles.buttonText}>Back to sign in</Text>
-          </Pressable>
+          </AppText>
+          <Button label="Back to sign in" fullWidth onPress={() => router.replace('/')} />
         </View>
       </SafeAreaView>
     );
@@ -104,11 +108,11 @@ export default function SignUpScreen() {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-          <Text style={styles.title}>Create your account</Text>
-          <Text style={styles.body}>
+          <AppText variant="display">Create your account</AppText>
+          <AppText variant="body" color={colors.textSecondary} style={styles.body}>
             For DC Solar customers. Crew accounts are set up by the office — if you work here,
             ask Devon or Isaiah instead of signing up.
-          </Text>
+          </AppText>
 
           {/* Renders nothing until the Google client ids are configured. */}
           <AuthProviderButtons
@@ -122,7 +126,7 @@ export default function SignUpScreen() {
             <TextInput
               style={styles.input}
               placeholder="Full name"
-              placeholderTextColor={colors.inkSoft}
+              placeholderTextColor={colors.textMuted}
               autoCapitalize="words"
               value={fullName}
               onChangeText={setFullName}
@@ -130,7 +134,7 @@ export default function SignUpScreen() {
             <TextInput
               style={styles.input}
               placeholder="Email"
-              placeholderTextColor={colors.inkSoft}
+              placeholderTextColor={colors.textMuted}
               autoCapitalize="none"
               autoComplete="email"
               keyboardType="email-address"
@@ -140,33 +144,34 @@ export default function SignUpScreen() {
             <TextInput
               style={styles.input}
               placeholder="Password"
-              placeholderTextColor={colors.inkSoft}
+              placeholderTextColor={colors.textMuted}
               secureTextEntry
               value={password}
               onChangeText={setPassword}
               onSubmitEditing={submit}
             />
-            <Text style={styles.rules}>
+            <AppText variant="caption" color={colors.textMuted} style={styles.rules}>
               At least 10 characters, with an uppercase letter, a lowercase letter and a number.
               Passwords found in known data breaches are rejected.
-            </Text>
+            </AppText>
 
-            {error ? <Text style={styles.error}>{error}</Text> : null}
+            {error ? (
+              <AppText variant="caption" color={colors.danger} align="center">
+                {error}
+              </AppText>
+            ) : null}
 
-            <Pressable
-              onPress={submit}
-              disabled={loading}
-              style={({ pressed }) => [styles.button, pressed && styles.pressed]}>
-              {loading ? (
-                <ActivityIndicator color={colors.ink} />
-              ) : (
-                <Text style={styles.buttonText}>Create account</Text>
-              )}
-            </Pressable>
+            <Button label="Create account" size="lg" fullWidth loading={loading} onPress={submit} />
 
-            <Pressable onPress={() => router.replace('/')} hitSlop={8}>
-              <Text style={styles.link}>Already have an account? Sign in</Text>
-            </Pressable>
+            <AnimatedPressable
+              onPress={() => router.replace('/')}
+              haptic="tapLight"
+              hitSlop={8}
+              accessibilityRole="button">
+              <AppText variant="caption" color={colors.accentLink} align="center">
+                Already have an account? Sign in
+              </AppText>
+            </AnimatedPressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -175,8 +180,13 @@ export default function SignUpScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.cream },
-  flex: { flex: 1 },
+  safe: {
+    flex: 1,
+    backgroundColor: colors.surfaceAlt,
+  },
+  flex: {
+    flex: 1,
+  },
   centered: {
     flex: 1,
     justifyContent: 'center',
@@ -184,6 +194,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.md,
     maxWidth: 460,
+    width: '100%',
     alignSelf: 'center',
   },
   container: {
@@ -195,29 +206,23 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
   },
-  title: { color: colors.ink, fontSize: 26, fontWeight: '800' },
-  body: { color: colors.inkSoft, fontSize: 14, lineHeight: 21, marginBottom: spacing.sm },
-  form: { gap: spacing.md },
+  body: {
+    marginBottom: spacing.sm,
+  },
+  form: {
+    gap: spacing.md,
+  },
   input: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.pill,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.border,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md - 2,
     fontSize: 16,
-    color: colors.ink,
+    color: colors.textPrimary,
   },
-  rules: { color: colors.inkSoft, fontSize: 12, lineHeight: 18 },
-  button: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    ...shadows.card,
+  rules: {
+    lineHeight: 18,
   },
-  buttonText: { color: colors.ink, fontSize: 16, fontWeight: '800' },
-  pressed: { opacity: 0.8 },
-  link: { color: colors.ocean, fontSize: 14, fontWeight: '700', textAlign: 'center' },
-  error: { color: colors.danger, fontSize: 13, fontWeight: '600', textAlign: 'center' },
 });

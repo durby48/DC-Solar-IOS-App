@@ -1,22 +1,29 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { AppText, Button, Card, EmptyState, Skeleton } from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import { landingRoute } from '@/lib/account';
+import { haptics } from '@/lib/haptics';
 import { supabase } from '@/lib/supabase';
 
+/**
+ * Set a permanent password after a temporary-password or invite sign-in.
+ *
+ * WHY THIS SCREEN KEEPS ITS OWN SHELL rather than using the `Screen`
+ * primitive: the form sits inside a `KeyboardAvoidingView`, which has to sit
+ * between the safe area and the scroll view — and `Screen` owns both of
+ * those. Everything inside is primitives.
+ */
 export default function SetPasswordScreen() {
   const router = useRouter();
   const [password, setPassword] = useState('');
@@ -72,6 +79,7 @@ export default function SetPasswordScreen() {
         setError(updateError.message);
         return;
       }
+      haptics.success();
       // Staff land in the crew tabs, invited customers in the portal.
       router.replace(await landingRoute());
     } catch {
@@ -85,7 +93,7 @@ export default function SetPasswordScreen() {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.centre}>
-          <ActivityIndicator color={colors.ink} />
+          <Skeleton width={280} height={120} />
         </View>
       </SafeAreaView>
     );
@@ -97,22 +105,14 @@ export default function SetPasswordScreen() {
     return (
       <SafeAreaView style={styles.safe}>
         <ScrollView contentContainerStyle={styles.container}>
-          <View style={styles.card}>
-            <Text style={styles.title}>Link expired</Text>
-            <Text style={styles.subtitle}>
-              This link has expired or was already used — ask the office to
-              resend your invitation.
-            </Text>
-            <Pressable
-              style={({ pressed }) => [
-                styles.button,
-                styles.cardButton,
-                pressed && styles.pressed,
-              ]}
-              onPress={() => router.replace('/')}>
-              <Text style={styles.buttonText}>Back to sign in</Text>
-            </Pressable>
-          </View>
+          <Card style={styles.card}>
+            <EmptyState
+              icon="link-outline"
+              title="Link expired"
+              body="This link has expired or was already used — ask the office to resend your invitation."
+            />
+            <Button label="Back to sign in" fullWidth onPress={() => router.replace('/')} />
+          </Card>
         </ScrollView>
       </SafeAreaView>
     );
@@ -126,17 +126,23 @@ export default function SetPasswordScreen() {
         <ScrollView
           contentContainerStyle={styles.container}
           keyboardShouldPersistTaps="handled">
-          <Text style={styles.title}>Create your password</Text>
-          <Text style={styles.subtitle}>
-            You signed in with the shared temporary password. Set a permanent
-            password only you know — you&apos;ll use it from now on.
-          </Text>
+          <AppText variant="title" align="center">
+            Create your password
+          </AppText>
+          <AppText
+            variant="body"
+            color={colors.textSecondary}
+            align="center"
+            style={styles.subtitle}>
+            You signed in with the shared temporary password. Set a permanent password only you
+            know — you&apos;ll use it from now on.
+          </AppText>
 
           <View style={styles.form}>
             <TextInput
               style={styles.input}
               placeholder="New password (8+ characters)"
-              placeholderTextColor={colors.inkSoft}
+              placeholderTextColor={colors.textMuted}
               secureTextEntry
               autoCapitalize="none"
               value={password}
@@ -145,7 +151,7 @@ export default function SetPasswordScreen() {
             <TextInput
               style={styles.input}
               placeholder="Confirm new password"
-              placeholderTextColor={colors.inkSoft}
+              placeholderTextColor={colors.textMuted}
               secureTextEntry
               autoCapitalize="none"
               value={confirm}
@@ -153,18 +159,13 @@ export default function SetPasswordScreen() {
               onSubmitEditing={save}
             />
 
-            {error ? <Text style={styles.error}>{error}</Text> : null}
+            {error ? (
+              <AppText variant="caption" color={colors.danger} align="center">
+                {error}
+              </AppText>
+            ) : null}
 
-            <Pressable
-              style={({ pressed }) => [styles.button, pressed && styles.pressed]}
-              onPress={save}
-              disabled={loading}>
-              {loading ? (
-                <ActivityIndicator color={colors.ink} />
-              ) : (
-                <Text style={styles.buttonText}>Save password</Text>
-              )}
-            </Pressable>
+            <Button label="Save password" size="lg" fullWidth loading={loading} onPress={save} />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -175,7 +176,7 @@ export default function SetPasswordScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceAlt,
   },
   flex: {
     flex: 1,
@@ -184,18 +185,12 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    padding: spacing.lg,
   },
   card: {
     width: '100%',
     maxWidth: 400,
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.tan,
-    padding: spacing.lg,
-    gap: spacing.md,
-    alignItems: 'center',
-    ...shadows.card,
+    gap: spacing.sm,
   },
   container: {
     flexGrow: 1,
@@ -204,15 +199,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.md,
   },
-  title: {
-    color: colors.ink,
-    fontSize: 24,
-    fontWeight: '800',
-  },
   subtitle: {
-    color: colors.inkSoft,
-    fontSize: 15,
-    textAlign: 'center',
     maxWidth: 400,
     marginBottom: spacing.md,
   },
@@ -222,37 +209,13 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   input: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.border,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md - 2,
     fontSize: 16,
-    color: colors.ink,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  button: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    ...shadows.card,
-  },
-  cardButton: {
-    alignSelf: 'stretch',
-    paddingHorizontal: spacing.lg,
-  },
-  pressed: {
-    opacity: 0.8,
-  },
-  buttonText: {
-    color: colors.ink,
-    fontSize: 17,
-    fontWeight: '800',
+    color: colors.textPrimary,
   },
 });

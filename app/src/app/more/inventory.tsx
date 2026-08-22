@@ -1,19 +1,23 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Alert, Platform, StyleSheet, TextInput, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  FadeInUp,
+  Pill,
+  Screen,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 import {
   addInventoryItem,
   addInventoryTransaction,
@@ -169,6 +173,7 @@ export default function InventoryScreen() {
       await loadItems(); // DB trigger applied the delta — refetch for the source of truth.
       resetAction();
       setExpandedId(null);
+      haptics.success();
       notify(setStatus, 'success', 'Saved', `${item.name} updated.`);
     } else {
       setSaving(false);
@@ -216,8 +221,10 @@ export default function InventoryScreen() {
       await loadItems();
       resetAddForm();
       if (result.stockingError) {
+        haptics.warn();
         notify(setStatus, 'error', 'Partly saved', result.stockingError);
       } else {
+        haptics.success();
         notify(setStatus, 'success', 'Item added', `${result.item.name} is now tracked.`);
       }
     } else {
@@ -233,59 +240,55 @@ export default function InventoryScreen() {
     const meta = ACTION_META[action];
     return (
       <View style={styles.actionForm}>
-        <Text style={styles.fieldLabel}>
+        <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
           {meta.signed ? 'Change (+/-)' : `Quantity (${item.unit})`}
-        </Text>
+        </AppText>
         <TextInput
           value={qtyText}
           onChangeText={setQtyText}
           placeholder={meta.signed ? 'e.g. -2 or 5' : 'e.g. 3'}
-          placeholderTextColor={colors.inkSoft}
+          placeholderTextColor={colors.textMuted}
           keyboardType={meta.signed ? 'numbers-and-punctuation' : 'decimal-pad'}
           style={styles.input}
         />
         {action === 'use' && jobs.length > 0 ? (
           <>
-            <Text style={styles.fieldLabel}>Job (optional)</Text>
+            <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
+              Job (optional)
+            </AppText>
             <View style={styles.chipRow}>
-              <Pressable
+              <Chip
+                label="None"
+                tone="sun"
+                selected={actionJobId === null}
                 onPress={() => setActionJobId(null)}
-                style={[styles.chip, actionJobId === null && styles.chipSelected]}>
-                <Text style={[styles.chipText, actionJobId === null && styles.chipTextSelected]}>
-                  None
-                </Text>
-              </Pressable>
+              />
               {jobs.map((job) => (
-                <Pressable
+                <Chip
                   key={job.id}
+                  label={job.job_number ? `Job ${job.job_number}` : job.name}
+                  tone="sun"
+                  selected={actionJobId === job.id}
                   onPress={() => setActionJobId(job.id)}
-                  style={[styles.chip, actionJobId === job.id && styles.chipSelected]}>
-                  <Text
-                    style={[styles.chipText, actionJobId === job.id && styles.chipTextSelected]}>
-                    {job.job_number ? `Job ${job.job_number}` : job.name}
-                  </Text>
-                </Pressable>
+                />
               ))}
             </View>
           </>
         ) : null}
         <View style={styles.formButtons}>
-          <Pressable
+          <Button
+            label="Cancel"
+            variant="ghost"
+            size="sm"
+            disabled={saving}
             onPress={resetAction}
-            disabled={saving}
-            style={({ pressed }) => [styles.cancelButton, pressed && styles.pressed]}>
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </Pressable>
-          <Pressable
+          />
+          <Button
+            label={meta.label}
+            size="sm"
+            loading={saving}
             onPress={() => saveAction(item)}
-            disabled={saving}
-            style={({ pressed }) => [styles.saveButton, (pressed || saving) && styles.pressed]}>
-            {saving ? (
-              <ActivityIndicator color={colors.ink} size="small" />
-            ) : (
-              <Text style={styles.saveButtonText}>{meta.label}</Text>
-            )}
-          </Pressable>
+          />
         </View>
       </View>
     );
@@ -294,303 +297,236 @@ export default function InventoryScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Inventory' }} />
-      <ScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled">
+      <Screen edges={[]}>
         {auth.state === 'loading' ? (
-          <View style={styles.centerCard}>
-            <ActivityIndicator color={colors.ocean} />
-          </View>
+          <SkeletonList count={4} height={60} />
         ) : auth.state === 'out' ? (
-          <View style={styles.centerCard}>
-            <View style={styles.badge}>
-              <Ionicons name="cube" size={26} color={colors.ocean} />
-            </View>
-            <Text style={styles.promptTitle}>Sign in to view inventory</Text>
-            <Text style={styles.promptText}>
-              Materials and stock levels are only visible to signed-in crew members.
-            </Text>
-          </View>
+          <Card>
+            <EmptyState
+              icon="cube"
+              title="Sign in to view inventory"
+              body="Materials and stock levels are only visible to signed-in crew members."
+            />
+          </Card>
         ) : (
           <>
-            <Text style={styles.sectionTitle}>Materials</Text>
+            <SectionHeader title="Materials" icon="cube-outline" style={styles.sectionHeader} />
             {itemsState === 'loading' ? (
-              <View style={styles.centerCard}>
-                <ActivityIndicator color={colors.ocean} />
-              </View>
+              <SkeletonList count={5} height={60} />
             ) : itemsState === 'unavailable' ? (
-              <View style={styles.centerCard}>
-                <Text style={styles.promptText}>Inventory is unavailable right now.</Text>
-              </View>
+              <Card>
+                <EmptyState
+                  icon="cloud-offline-outline"
+                  title="Inventory is unavailable right now."
+                  body="Stock levels could not be loaded. Try again once you are back on a signal."
+                />
+              </Card>
             ) : items.length === 0 ? (
-              <View style={styles.centerCard}>
-                <Ionicons name="cube" size={22} color={colors.inkSoft} />
-                <Text style={styles.promptText}>
-                  {isAdmin ? 'No materials yet — add your first item' : 'No materials yet'}
-                </Text>
-              </View>
+              <Card>
+                <EmptyState
+                  icon="cube"
+                  title={isAdmin ? 'No materials yet — add your first item' : 'No materials yet'}
+                  body="Anything the office tracks — connectors, rail, breakers — shows up here with what's on hand."
+                />
+              </Card>
             ) : (
-              <View style={styles.listCard}>
+              <Card padded={false}>
                 {items.map((item, index) => {
                   const expanded = expandedId === item.id;
                   return (
-                    <View key={item.id} style={index > 0 ? styles.rowBorderTop : null}>
-                      <Pressable
-                        onPress={() => toggleExpand(item.id)}
-                        style={({ pressed }) => [styles.itemRow, pressed && styles.rowPressed]}>
-                        <View style={styles.itemBody}>
-                          <Text style={styles.itemName}>{item.name}</Text>
-                          {item.sku ? <Text style={styles.itemSku}>SKU {item.sku}</Text> : null}
-                        </View>
-                        {isLow(item) ? (
-                          <View style={styles.lowPill}>
-                            <Ionicons name="warning" size={11} color={colors.danger} />
-                            <Text style={styles.lowPillText}>Low</Text>
+                    <FadeInUp key={item.id} index={index}>
+                      <View style={index > 0 ? styles.rowBorderTop : null}>
+                        <AnimatedPressable
+                          onPress={() => toggleExpand(item.id)}
+                          haptic="tapLight"
+                          scaleTo={0.99}
+                          accessibilityRole="button"
+                          accessibilityState={{ expanded }}
+                          accessibilityLabel={item.name}
+                          style={({ pressed }) => [
+                            styles.itemRow,
+                            pressed && styles.rowPressed,
+                          ]}>
+                          <View style={styles.itemBody}>
+                            <AppText variant="bodyStrong">{item.name}</AppText>
+                            {item.sku ? (
+                              <AppText variant="caption" color={colors.textMuted}>
+                                SKU {item.sku}
+                              </AppText>
+                            ) : null}
+                          </View>
+                          {isLow(item) ? (
+                            <Pill label="Low" bg={colors.coralSoft} fg={colors.coralDeep} />
+                          ) : null}
+                          <AppText variant="bodyStrong" color={colors.accentPrimary}>
+                            {formatQty(item.qty_on_hand)} {item.unit}
+                          </AppText>
+                          <Ionicons
+                            name={expanded ? 'chevron-up' : 'chevron-down'}
+                            size={16}
+                            color={colors.textMuted}
+                          />
+                        </AnimatedPressable>
+                        {expanded ? (
+                          <View style={styles.expandArea}>
+                            <View style={styles.chipRow}>
+                              {(Object.keys(ACTION_META) as ActionKind[])
+                                .filter((kind) => isAdmin || !ACTION_META[kind].adminOnly)
+                                .map((kind) => (
+                                  <Chip
+                                    key={kind}
+                                    label={ACTION_META[kind].label}
+                                    tone="olive"
+                                    selected={action === kind}
+                                    onPress={() => {
+                                      setStatus(null);
+                                      setQtyText('');
+                                      setActionJobId(null);
+                                      setAction((prev) => (prev === kind ? null : kind));
+                                    }}
+                                  />
+                                ))}
+                            </View>
+                            {renderActionForm(item)}
                           </View>
                         ) : null}
-                        <Text style={styles.itemQty}>
-                          {formatQty(item.qty_on_hand)} {item.unit}
-                        </Text>
-                        <Ionicons
-                          name={expanded ? 'chevron-up' : 'chevron-down'}
-                          size={16}
-                          color={colors.inkSoft}
-                        />
-                      </Pressable>
-                      {expanded ? (
-                        <View style={styles.expandArea}>
-                          <View style={styles.chipRow}>
-                            {(Object.keys(ACTION_META) as ActionKind[])
-                              .filter((kind) => isAdmin || !ACTION_META[kind].adminOnly)
-                              .map((kind) => (
-                                <Pressable
-                                  key={kind}
-                                  onPress={() => {
-                                    setStatus(null);
-                                    setQtyText('');
-                                    setActionJobId(null);
-                                    setAction((prev) => (prev === kind ? null : kind));
-                                  }}
-                                  style={[styles.chip, action === kind && styles.chipSelected]}>
-                                  <Text
-                                    style={[
-                                      styles.chipText,
-                                      action === kind && styles.chipTextSelected,
-                                    ]}>
-                                    {ACTION_META[kind].label}
-                                  </Text>
-                                </Pressable>
-                              ))}
-                          </View>
-                          {renderActionForm(item)}
-                        </View>
-                      ) : null}
-                    </View>
+                      </View>
+                    </FadeInUp>
                   );
                 })}
-              </View>
+              </Card>
             )}
 
             {isAdmin && itemsState !== 'loading' ? (
               !showAddForm ? (
-                <Pressable
+                <Button
+                  label="Add item"
+                  icon="add"
+                  variant="secondary"
                   onPress={() => {
                     setStatus(null);
                     setShowAddForm(true);
                   }}
-                  style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}>
-                  <Ionicons name="add" size={18} color={colors.ink} />
-                  <Text style={styles.addButtonText}>Add item</Text>
-                </Pressable>
+                  style={styles.addButton}
+                />
               ) : (
-                <View style={styles.formCard}>
-                  <Text style={styles.formTitle}>New item</Text>
-                  <Text style={styles.fieldLabel}>Name</Text>
+                <Card style={styles.formCard}>
+                  <AppText variant="heading">New item</AppText>
+                  <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
+                    Name
+                  </AppText>
                   <TextInput
                     value={newName}
                     onChangeText={setNewName}
                     placeholder="e.g. MC4 connectors"
-                    placeholderTextColor={colors.inkSoft}
+                    placeholderTextColor={colors.textMuted}
                     style={styles.input}
                   />
-                  <Text style={styles.fieldLabel}>SKU (optional)</Text>
+                  <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
+                    SKU (optional)
+                  </AppText>
                   <TextInput
                     value={newSku}
                     onChangeText={setNewSku}
                     placeholder="e.g. MC4-100"
-                    placeholderTextColor={colors.inkSoft}
+                    placeholderTextColor={colors.textMuted}
                     autoCapitalize="characters"
                     style={styles.input}
                   />
-                  <Text style={styles.fieldLabel}>Unit</Text>
+                  <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
+                    Unit
+                  </AppText>
                   <TextInput
                     value={newUnit}
                     onChangeText={setNewUnit}
                     placeholder="each"
-                    placeholderTextColor={colors.inkSoft}
+                    placeholderTextColor={colors.textMuted}
                     autoCapitalize="none"
                     style={styles.input}
                   />
-                  <Text style={styles.fieldLabel}>Starting qty</Text>
+                  <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
+                    Starting qty
+                  </AppText>
                   <TextInput
                     value={newQty}
                     onChangeText={setNewQty}
                     placeholder="0"
-                    placeholderTextColor={colors.inkSoft}
+                    placeholderTextColor={colors.textMuted}
                     keyboardType="decimal-pad"
                     style={styles.input}
                   />
-                  <Text style={styles.fieldLabel}>Low-stock alert below (optional)</Text>
+                  <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
+                    Low-stock alert below (optional)
+                  </AppText>
                   <TextInput
                     value={newMinQty}
                     onChangeText={setNewMinQty}
                     placeholder="e.g. 10"
-                    placeholderTextColor={colors.inkSoft}
+                    placeholderTextColor={colors.textMuted}
                     keyboardType="decimal-pad"
                     style={styles.input}
                   />
                   <View style={styles.formButtons}>
-                    <Pressable
+                    <Button
+                      label="Cancel"
+                      variant="ghost"
+                      size="sm"
+                      disabled={adding}
                       onPress={resetAddForm}
-                      disabled={adding}
-                      style={({ pressed }) => [styles.cancelButton, pressed && styles.pressed]}>
-                      <Text style={styles.cancelButtonText}>Cancel</Text>
-                    </Pressable>
-                    <Pressable
+                    />
+                    <Button
+                      label="Add item"
+                      size="sm"
+                      loading={adding}
                       onPress={submitAddItem}
-                      disabled={adding}
-                      style={({ pressed }) => [
-                        styles.saveButton,
-                        (pressed || adding) && styles.pressed,
-                      ]}>
-                      {adding ? (
-                        <ActivityIndicator color={colors.ink} size="small" />
-                      ) : (
-                        <Text style={styles.saveButtonText}>Add item</Text>
-                      )}
-                    </Pressable>
+                    />
                   </View>
-                </View>
+                </Card>
               )
             ) : null}
           </>
         )}
 
         {status ? (
-          <Text
-            style={[
-              styles.statusText,
-              status.kind === 'error' ? styles.statusError : styles.statusSuccess,
-            ]}>
+          <AppText
+            variant="caption"
+            align="center"
+            color={status.kind === 'error' ? colors.danger : colors.success}>
             {status.message}
-          </Text>
+          </AppText>
         ) : null}
-      </ScrollView>
+      </Screen>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.cream,
-  },
-  container: {
-    padding: spacing.lg,
-    gap: spacing.md,
-    paddingBottom: spacing.xxl,
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
+  sectionHeader: {
     marginTop: spacing.sm,
-  },
-  centerCard: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  badge: {
-    width: 56,
-    height: 56,
-    borderRadius: radii.lg,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  promptTitle: {
-    color: colors.ink,
-    fontSize: 17,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  promptText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  listCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    ...shadows.card,
   },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     padding: spacing.md,
+    backgroundColor: colors.surface,
   },
   rowPressed: {
-    backgroundColor: colors.skySoft,
+    backgroundColor: colors.oliveTint,
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
   },
   itemBody: {
     flex: 1,
     gap: 2,
   },
-  itemName: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  itemSku: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  itemQty: {
-    color: colors.ocean,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  lowPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 3,
-    borderWidth: 1,
-    borderColor: colors.danger,
-  },
-  lowPillText: {
-    color: colors.danger,
-    fontSize: 11,
-    fontWeight: '800',
-  },
   expandArea: {
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.md,
     gap: spacing.sm,
+    backgroundColor: colors.surface,
   },
   actionForm: {
     gap: spacing.xs,
@@ -600,114 +536,30 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.xs,
   },
-  chip: {
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs + 2,
-    backgroundColor: colors.cream,
-    borderWidth: 1,
-    borderColor: colors.tan,
-  },
-  chipSelected: {
-    backgroundColor: colors.sun,
-    borderColor: colors.sun,
-  },
-  chipText: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  chipTextSelected: {
-    color: colors.ink,
-  },
   fieldLabel: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginTop: spacing.xs,
   },
   input: {
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.border,
     borderRadius: radii.sm,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.sm + 4,
     paddingVertical: spacing.sm,
-    color: colors.ink,
+    color: colors.textPrimary,
     fontSize: 15,
-    fontWeight: '600',
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceSunk,
   },
   formButtons: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'flex-end',
     gap: spacing.sm,
     marginTop: spacing.xs,
   },
-  cancelButton: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-  },
-  cancelButtonText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  saveButton: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
   addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.sunLight,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.lg,
     alignSelf: 'flex-start',
   },
-  addButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
   formCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.xs,
-    ...shadows.card,
-  },
-  formTitle: {
-    color: colors.ink,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  statusError: {
-    color: colors.danger,
-  },
-  statusSuccess: {
-    color: colors.ocean,
   },
 });

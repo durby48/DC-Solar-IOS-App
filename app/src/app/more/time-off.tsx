@@ -1,20 +1,25 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Platform, StyleSheet, TextInput, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  FadeInUp,
+  Pill,
+  Screen,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import { formatShortDate, parseISODate, todayISO } from '@/lib/dates';
+import { haptics } from '@/lib/haptics';
 import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 import { isValidISODate, toISODate } from '@/lib/time';
@@ -32,10 +37,15 @@ import {
 
 const KINDS = Object.keys(TIME_OFF_KIND_LABELS) as TimeOffKind[];
 
-const STATUS_STYLES: Record<TimeOffStatus, { bg: string; text: string; label: string }> = {
-  pending: { bg: colors.tan, text: colors.inkSoft, label: 'Pending' },
-  approved: { bg: colors.skySoft, text: colors.ocean, label: 'Approved' },
-  denied: { bg: colors.cream, text: colors.danger, label: 'Denied' },
+/**
+ * Request status colors — this screen's own vocabulary, now drawn by `<Pill>`
+ * rather than a local `styles.pill`. Waiting is amber, approved is mint,
+ * denied is coral: the same three-way reading as before on the 2026-08 ramp.
+ */
+const STATUS_STYLES: Record<TimeOffStatus, { bg: string; fg: string; label: string }> = {
+  pending: { bg: colors.amberSoft, fg: colors.amberDeep, label: 'Pending' },
+  approved: { bg: colors.mintSoft, fg: colors.mintDeep, label: 'Approved' },
+  denied: { bg: colors.coralSoft, fg: colors.coralDeep, label: 'Denied' },
 };
 
 function formatRange(start: string, end: string): string {
@@ -45,11 +55,7 @@ function formatRange(start: string, end: string): string {
 
 function StatusPill({ status }: { status: TimeOffStatus }) {
   const style = STATUS_STYLES[status];
-  return (
-    <View style={[styles.pill, { backgroundColor: style.bg }]}>
-      <Text style={[styles.pillText, { color: style.text }]}>{style.label}</Text>
-    </View>
-  );
+  return <Pill label={style.label} bg={style.bg} fg={style.fg} />;
 }
 
 export default function TimeOffScreen() {
@@ -169,6 +175,7 @@ export default function TimeOffScreen() {
     if (result.ok) {
       setMyRequests((prev) => [result.request, ...prev]);
       setMyState('ok');
+      haptics.success();
       resetForm();
     } else {
       setSaving(false);
@@ -206,6 +213,8 @@ export default function TimeOffScreen() {
     const result = await reviewTimeOff({ id: request.id, status, reviewerEmail: role.email });
     setReviewingId(null);
     if (result.ok) {
+      if (status === 'approved') haptics.success();
+      else haptics.warn();
       setPending((prev) => prev.filter((r) => r.id !== request.id));
       if (result.request.employee === email) {
         setMyRequests((prev) =>
@@ -220,299 +229,298 @@ export default function TimeOffScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Time off' }} />
-      <ScrollView
-        style={styles.screen}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled">
+      <Screen edges={[]}>
         {signedIn === null ? (
-          <View style={styles.placeholderCard}>
-            <ActivityIndicator color={colors.ocean} />
-          </View>
+          <SkeletonList count={3} height={72} />
         ) : !signedIn ? (
-          <View style={styles.placeholderCard}>
-            <Ionicons name="lock-closed" size={22} color={colors.inkSoft} />
-            <Text style={styles.placeholderText}>Sign in to request time off.</Text>
-          </View>
+          <Card>
+            <EmptyState
+              icon="lock-closed"
+              title="Sign in to request time off."
+              body="Requests are recorded against your account so the office knows who is out."
+            />
+          </Card>
         ) : (
           <>
             {role?.isAdmin ? (
-              <>
-                <Text style={styles.sectionTitle}>Pending requests</Text>
+              <View style={styles.section}>
+                <SectionHeader title="Pending requests" icon="hourglass-outline" />
                 {pendingState === 'loading' ? (
-                  <View style={styles.placeholderCard}>
-                    <ActivityIndicator color={colors.ocean} />
-                  </View>
+                  <SkeletonList count={2} height={84} />
                 ) : pendingState === 'unavailable' ? (
-                  <View style={styles.placeholderCard}>
-                    <Ionicons name="cloud-offline" size={22} color={colors.inkSoft} />
-                    <Text style={styles.placeholderText}>Requests not available right now</Text>
-                  </View>
+                  <Card>
+                    <EmptyState
+                      icon="cloud-offline"
+                      title="Requests not available right now"
+                      body="The queue could not be loaded. Try again once you are back on a signal."
+                    />
+                  </Card>
                 ) : pending.length === 0 ? (
-                  <View style={styles.placeholderCard}>
-                    <Ionicons name="checkmark-done" size={22} color={colors.inkSoft} />
-                    <Text style={styles.placeholderText}>No pending requests</Text>
-                  </View>
+                  <Card>
+                    <EmptyState
+                      icon="checkmark-done"
+                      title="No pending requests"
+                      body="Anything the crew asks for lands here for approval."
+                    />
+                  </Card>
                 ) : (
-                  <View style={styles.card}>
+                  <Card padded={false}>
                     {pending.map((request, index) => (
-                      <View
-                        key={request.id}
-                        style={[styles.row, index > 0 && styles.rowBorderTop]}>
-                        <View style={styles.rowBody}>
-                          <Text style={styles.rowValue}>{requesterLabel(request)}</Text>
-                          <Text style={styles.rowMeta}>
-                            {formatRange(request.start_date, request.end_date)} ·{' '}
-                            {TIME_OFF_KIND_LABELS[request.kind] ?? request.kind}
-                          </Text>
-                          {request.reason ? (
-                            <Text style={styles.rowNote}>{request.reason}</Text>
-                          ) : null}
+                      <FadeInUp key={request.id} index={index}>
+                        <View style={[styles.row, index > 0 && styles.rowBorderTop]}>
+                          <View style={styles.rowBody}>
+                            <AppText variant="bodyStrong">{requesterLabel(request)}</AppText>
+                            <AppText variant="caption" color={colors.textMuted}>
+                              {formatRange(request.start_date, request.end_date)} ·{' '}
+                              {TIME_OFF_KIND_LABELS[request.kind] ?? request.kind}
+                            </AppText>
+                            {request.reason ? (
+                              <AppText
+                                variant="caption"
+                                color={colors.textSecondary}
+                                style={styles.rowNote}>
+                                {request.reason}
+                              </AppText>
+                            ) : null}
+                          </View>
+                          <View style={styles.reviewButtons}>
+                            <Button
+                              label="Approve"
+                              size="sm"
+                              disabled={reviewingId != null && reviewingId !== request.id}
+                              loading={reviewingId === request.id}
+                              onPress={() => review(request, 'approved')}
+                            />
+                            <Button
+                              label="Deny"
+                              variant="danger"
+                              size="sm"
+                              disabled={reviewingId != null}
+                              onPress={() => review(request, 'denied')}
+                            />
+                          </View>
                         </View>
-                        <View style={styles.reviewButtons}>
-                          <Pressable
-                            onPress={() => review(request, 'approved')}
-                            disabled={reviewingId != null}
-                            style={({ pressed }) => [
-                              styles.approveButton,
-                              (pressed || reviewingId === request.id) && styles.pressed,
-                            ]}>
-                            <Text style={styles.approveButtonText}>Approve</Text>
-                          </Pressable>
-                          <Pressable
-                            onPress={() => review(request, 'denied')}
-                            disabled={reviewingId != null}
-                            style={({ pressed }) => [
-                              styles.denyButton,
-                              (pressed || reviewingId === request.id) && styles.pressed,
-                            ]}>
-                            <Text style={styles.denyButtonText}>Deny</Text>
-                          </Pressable>
-                        </View>
-                      </View>
+                      </FadeInUp>
                     ))}
-                  </View>
+                  </Card>
                 )}
-              </>
+              </View>
             ) : null}
 
-            <Text style={styles.sectionTitle}>Request time off</Text>
-            {!showForm ? (
-              <Pressable
-                onPress={() => setShowForm(true)}
-                style={({ pressed }) => [styles.requestButton, pressed && styles.pressed]}>
-                <Ionicons name="sunny" size={18} color={colors.ink} />
-                <Text style={styles.requestButtonText}>Request time off</Text>
-              </Pressable>
-            ) : (
-              <View style={styles.formCard}>
-                <View style={styles.kindSelector}>
-                  {KINDS.map((k) => (
-                    <Pressable
-                      key={k}
-                      onPress={() => setKind(k)}
-                      style={[styles.kindChip, kind === k && styles.kindChipSelected]}>
-                      <Text
-                        style={[styles.kindChipText, kind === k && styles.kindChipTextSelected]}>
-                        {TIME_OFF_KIND_LABELS[k]}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-
-                {Platform.OS === 'web' ? (
-                  <>
-                    <View style={styles.fieldRow}>
-                      <Text style={styles.fieldLabel}>Start date</Text>
-                      <TextInput
-                        value={startText}
-                        onChangeText={setStartText}
-                        placeholder="YYYY-MM-DD"
-                        placeholderTextColor={colors.inkSoft}
-                        style={styles.input}
-                        autoCapitalize="none"
+            <View style={styles.section}>
+              <SectionHeader title="Request time off" icon="sunny-outline" />
+              {!showForm ? (
+                <Button
+                  label="Request time off"
+                  icon="sunny"
+                  size="lg"
+                  fullWidth
+                  onPress={() => setShowForm(true)}
+                />
+              ) : (
+                <Card style={styles.formCard}>
+                  <View style={styles.kindSelector}>
+                    {KINDS.map((k) => (
+                      <Chip
+                        key={k}
+                        label={TIME_OFF_KIND_LABELS[k]}
+                        tone="sun"
+                        selected={kind === k}
+                        onPress={() => setKind(k)}
                       />
-                    </View>
-                    <View style={styles.fieldRow}>
-                      <Text style={styles.fieldLabel}>End date</Text>
-                      <TextInput
-                        value={endText}
-                        onChangeText={setEndText}
-                        placeholder="YYYY-MM-DD (blank = 1 day)"
-                        placeholderTextColor={colors.inkSoft}
-                        style={styles.input}
-                        autoCapitalize="none"
-                      />
-                    </View>
-                  </>
-                ) : (
-                  <>
-                    <Pressable
-                      onPress={() => setPickerMode(pickerMode === 'start' ? null : 'start')}
-                      style={({ pressed }) => [styles.fieldRow, pressed && styles.pressed]}>
-                      <Text style={styles.fieldLabel}>Start date</Text>
-                      <Text style={styles.fieldValue}>
-                        {draftStart ? formatShortDate(toISODate(draftStart)) : 'Pick a date'}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => setPickerMode(pickerMode === 'end' ? null : 'end')}
-                      style={({ pressed }) => [styles.fieldRow, pressed && styles.pressed]}>
-                      <Text style={styles.fieldLabel}>End date</Text>
-                      <Text style={styles.fieldValue}>
-                        {draftEnd ? formatShortDate(toISODate(draftEnd)) : 'Same as start'}
-                      </Text>
-                    </Pressable>
-                    {pickerMode ? (
-                      <DateTimePicker
-                        value={
-                          pickerMode === 'start'
-                            ? (draftStart ?? parseISODate(todayISO()))
-                            : (draftEnd ?? draftStart ?? parseISODate(todayISO()))
-                        }
-                        mode="date"
-                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                        themeVariant="light"
-                        onChange={(event, selected) => {
-                          if (Platform.OS !== 'ios') setPickerMode(null);
-                          if (event.type === 'set' && selected) {
-                            if (pickerMode === 'start') setDraftStart(selected);
-                            else setDraftEnd(selected);
-                          }
-                        }}
-                      />
-                    ) : null}
-                  </>
-                )}
-
-                <View style={styles.fieldRow}>
-                  <Text style={styles.fieldLabel}>Reason</Text>
-                  <TextInput
-                    value={reason}
-                    onChangeText={setReason}
-                    placeholder="Optional"
-                    placeholderTextColor={colors.inkSoft}
-                    style={styles.input}
-                  />
-                </View>
-
-                <View style={styles.formButtons}>
-                  <Pressable
-                    onPress={resetForm}
-                    disabled={saving}
-                    style={({ pressed }) => [styles.cancelButton, pressed && styles.pressed]}>
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={Platform.OS === 'web' ? submitWeb : submitNative}
-                    disabled={saving}
-                    style={({ pressed }) => [
-                      styles.saveButton,
-                      (pressed || saving) && styles.pressed,
-                    ]}>
-                    {saving ? (
-                      <ActivityIndicator color={colors.ink} size="small" />
-                    ) : (
-                      <Text style={styles.saveButtonText}>Submit request</Text>
-                    )}
-                  </Pressable>
-                </View>
-              </View>
-            )}
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-            <Text style={styles.sectionTitle}>My requests</Text>
-            {myState === 'loading' ? (
-              <View style={styles.placeholderCard}>
-                <ActivityIndicator color={colors.ocean} />
-              </View>
-            ) : myState === 'unavailable' ? (
-              <View style={styles.placeholderCard}>
-                <Ionicons name="cloud-offline" size={22} color={colors.inkSoft} />
-                <Text style={styles.placeholderText}>Requests not available right now</Text>
-              </View>
-            ) : myRequests.length === 0 ? (
-              <View style={styles.placeholderCard}>
-                <Ionicons name="cafe" size={22} color={colors.inkSoft} />
-                <Text style={styles.placeholderText}>No requests yet</Text>
-              </View>
-            ) : (
-              <View style={styles.card}>
-                {myRequests.map((request, index) => (
-                  <View key={request.id} style={[styles.row, index > 0 && styles.rowBorderTop]}>
-                    <View style={styles.iconWrap}>
-                      <Ionicons name="sunny" size={18} color={colors.ocean} />
-                    </View>
-                    <View style={styles.rowBody}>
-                      <Text style={styles.rowValue}>
-                        {formatRange(request.start_date, request.end_date)}
-                      </Text>
-                      <Text style={styles.rowMeta}>
-                        {TIME_OFF_KIND_LABELS[request.kind] ?? request.kind}
-                        {request.reason ? ` · ${request.reason}` : ''}
-                      </Text>
-                    </View>
-                    <StatusPill status={request.status} />
+                    ))}
                   </View>
-                ))}
-              </View>
-            )}
+
+                  {Platform.OS === 'web' ? (
+                    <>
+                      <View style={styles.fieldRow}>
+                        <AppText variant="section" color={colors.textMuted}>
+                          Start date
+                        </AppText>
+                        <TextInput
+                          value={startText}
+                          onChangeText={setStartText}
+                          placeholder="YYYY-MM-DD"
+                          placeholderTextColor={colors.textMuted}
+                          style={styles.input}
+                          autoCapitalize="none"
+                        />
+                      </View>
+                      <View style={styles.fieldRow}>
+                        <AppText variant="section" color={colors.textMuted}>
+                          End date
+                        </AppText>
+                        <TextInput
+                          value={endText}
+                          onChangeText={setEndText}
+                          placeholder="YYYY-MM-DD (blank = 1 day)"
+                          placeholderTextColor={colors.textMuted}
+                          style={styles.input}
+                          autoCapitalize="none"
+                        />
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <AnimatedPressable
+                        onPress={() => setPickerMode(pickerMode === 'start' ? null : 'start')}
+                        haptic="tapLight"
+                        scaleTo={0.99}
+                        accessibilityRole="button"
+                        accessibilityLabel="Pick the start date"
+                        style={styles.fieldRow}>
+                        <AppText variant="section" color={colors.textMuted}>
+                          Start date
+                        </AppText>
+                        <AppText variant="bodyStrong" color={colors.accentPrimary}>
+                          {draftStart ? formatShortDate(toISODate(draftStart)) : 'Pick a date'}
+                        </AppText>
+                      </AnimatedPressable>
+                      <AnimatedPressable
+                        onPress={() => setPickerMode(pickerMode === 'end' ? null : 'end')}
+                        haptic="tapLight"
+                        scaleTo={0.99}
+                        accessibilityRole="button"
+                        accessibilityLabel="Pick the end date"
+                        style={styles.fieldRow}>
+                        <AppText variant="section" color={colors.textMuted}>
+                          End date
+                        </AppText>
+                        <AppText variant="bodyStrong" color={colors.accentPrimary}>
+                          {draftEnd ? formatShortDate(toISODate(draftEnd)) : 'Same as start'}
+                        </AppText>
+                      </AnimatedPressable>
+                      {pickerMode ? (
+                        <DateTimePicker
+                          value={
+                            pickerMode === 'start'
+                              ? (draftStart ?? parseISODate(todayISO()))
+                              : (draftEnd ?? draftStart ?? parseISODate(todayISO()))
+                          }
+                          mode="date"
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          themeVariant="light"
+                          onChange={(event, selected) => {
+                            if (Platform.OS !== 'ios') setPickerMode(null);
+                            if (event.type === 'set' && selected) {
+                              if (pickerMode === 'start') setDraftStart(selected);
+                              else setDraftEnd(selected);
+                            }
+                          }}
+                        />
+                      ) : null}
+                    </>
+                  )}
+
+                  <View style={styles.fieldRow}>
+                    <AppText variant="section" color={colors.textMuted}>
+                      Reason
+                    </AppText>
+                    <TextInput
+                      value={reason}
+                      onChangeText={setReason}
+                      placeholder="Optional"
+                      placeholderTextColor={colors.textMuted}
+                      style={styles.input}
+                    />
+                  </View>
+
+                  <View style={styles.formButtons}>
+                    <Button
+                      label="Cancel"
+                      variant="ghost"
+                      size="sm"
+                      disabled={saving}
+                      onPress={resetForm}
+                    />
+                    <Button
+                      label="Submit request"
+                      size="sm"
+                      loading={saving}
+                      onPress={Platform.OS === 'web' ? submitWeb : submitNative}
+                    />
+                  </View>
+                </Card>
+              )}
+              {error ? (
+                <AppText variant="caption" color={colors.danger} align="center">
+                  {error}
+                </AppText>
+              ) : null}
+            </View>
+
+            <View style={styles.section}>
+              <SectionHeader title="My requests" icon="calendar-outline" />
+              {myState === 'loading' ? (
+                <SkeletonList count={3} height={64} />
+              ) : myState === 'unavailable' ? (
+                <Card>
+                  <EmptyState
+                    icon="cloud-offline"
+                    title="Requests not available right now"
+                    body="Your list could not be loaded. Try again once you are back on a signal."
+                  />
+                </Card>
+              ) : myRequests.length === 0 ? (
+                <Card>
+                  <EmptyState
+                    icon="cafe"
+                    title="No requests yet"
+                    body="Ask for a day off above and it shows up here with its status."
+                  />
+                </Card>
+              ) : (
+                <Card padded={false}>
+                  {myRequests.map((request, index) => (
+                    <FadeInUp key={request.id} index={index}>
+                      <View style={[styles.row, index > 0 && styles.rowBorderTop]}>
+                        <View style={styles.iconWrap}>
+                          <Ionicons name="sunny" size={18} color={colors.accentPrimary} />
+                        </View>
+                        <View style={styles.rowBody}>
+                          <AppText variant="bodyStrong">
+                            {formatRange(request.start_date, request.end_date)}
+                          </AppText>
+                          <AppText variant="caption" color={colors.textMuted}>
+                            {TIME_OFF_KIND_LABELS[request.kind] ?? request.kind}
+                            {request.reason ? ` · ${request.reason}` : ''}
+                          </AppText>
+                        </View>
+                        <StatusPill status={request.status} />
+                      </View>
+                    </FadeInUp>
+                  ))}
+                </Card>
+              )}
+            </View>
           </>
         )}
-      </ScrollView>
+      </Screen>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.cream,
-  },
-  content: {
-    padding: spacing.md,
-    paddingBottom: spacing.xxl,
-    gap: spacing.md,
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
+  section: {
     marginTop: spacing.sm,
-  },
-  placeholderCard: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  placeholderText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    ...shadows.card,
+    gap: spacing.sm,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
     padding: spacing.md,
+    backgroundColor: colors.surface,
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
   },
   iconWrap: {
     width: 32,
     height: 32,
     borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
+    backgroundColor: colors.oliveSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -520,109 +528,20 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
-  rowValue: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  rowMeta: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
   rowNote: {
-    color: colors.inkSoft,
-    fontSize: 12,
     fontStyle: 'italic',
-  },
-  pill: {
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-  },
-  pillText: {
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   reviewButtons: {
     gap: spacing.xs,
     alignItems: 'stretch',
   },
-  approveButton: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.xs + 2,
-    paddingHorizontal: spacing.md,
-    alignItems: 'center',
-  },
-  approveButtonText: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  denyButton: {
-    backgroundColor: colors.cream,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.danger,
-    paddingVertical: spacing.xs + 1,
-    paddingHorizontal: spacing.md,
-    alignItems: 'center',
-  },
-  denyButtonText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  requestButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 2,
-    paddingHorizontal: spacing.lg,
-    ...shadows.card,
-  },
-  requestButtonText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-  },
   formCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.sm,
-    ...shadows.card,
   },
   kindSelector: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
-  },
-  kindChip: {
-    backgroundColor: colors.white,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.tan,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-  },
-  kindChipSelected: {
-    backgroundColor: colors.sunLight,
-    borderColor: colors.sun,
-  },
-  kindChipText: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  kindChipTextSelected: {
-    color: colors.ink,
   },
   fieldRow: {
     flexDirection: 'row',
@@ -631,67 +550,23 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingVertical: spacing.xs,
   },
-  fieldLabel: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  fieldValue: {
-    color: colors.ocean,
-    fontSize: 15,
-    fontWeight: '700',
-  },
   input: {
     flex: 1,
     maxWidth: 220,
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.border,
     borderRadius: radii.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs + 2,
-    color: colors.ink,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.xs + 4,
+    color: colors.textPrimary,
     fontSize: 14,
-    fontWeight: '600',
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceSunk,
   },
   formButtons: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'flex-end',
     gap: spacing.sm,
     marginTop: spacing.xs,
-  },
-  cancelButton: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-  },
-  cancelButtonText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  saveButton: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-  errorText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
   },
 });
