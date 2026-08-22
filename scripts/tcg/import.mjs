@@ -75,6 +75,7 @@ const LIKENESS_EMAILS = {
   'crew-isaiah': 'inettleton18@gmail.com',
   'crew-foreman': 'bnettleton403@gmail.com', // Ben Nettleton
   'crew-simon': 'snettleton2005@gmail.com',
+  'crew-sandals': 'gnimsgern.2022@gmail.com', // Garrett Nimsgern (confirmed by Devon 2026-08-22)
 };
 
 /** Fields in cards.json that this importer deliberately does not store. */
