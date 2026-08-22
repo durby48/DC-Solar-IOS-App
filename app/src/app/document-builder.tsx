@@ -2,18 +2,21 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Print from 'expo-print';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Platform, StyleSheet, TextInput, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { Field } from '@/components/forms/Field';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  Screen,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import { fetchJob, getDocumentUrl } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
 import {
@@ -37,6 +40,7 @@ import {
   type FinanceEntry,
   type LineItem,
 } from '@/lib/documents';
+import * as haptics from '@/lib/haptics';
 import { type Job } from '@/lib/types';
 import { shareLocalPdf, viewDocument } from '@/lib/pdf';
 import { getRole, type RoleInfo } from '@/lib/role';
@@ -494,6 +498,7 @@ export default function DocumentBuilderScreen() {
           setPhase('editing');
           return;
         }
+        haptics.success();
         setPhase('done');
         return;
       }
@@ -534,6 +539,7 @@ export default function DocumentBuilderScreen() {
           `The ${type} entry could not be recorded (${insert.message}). The PDF is still available to share below.`,
         ]);
       }
+      haptics.success();
       setPhase('done');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not create the PDF. Please try again.');
@@ -575,6 +581,7 @@ export default function DocumentBuilderScreen() {
     setSavedRevision(result.revision);
     setSavedArchivePath(args.archivePath);
     setSavedStale(args.pdfState === 'stale');
+    haptics.success();
     setPhase('done');
   };
 
@@ -670,6 +677,7 @@ export default function DocumentBuilderScreen() {
         setError(attached.message);
         return;
       }
+      haptics.success();
       setSavedStale(false);
       setWarnings([]);
     } finally {
@@ -704,9 +712,9 @@ export default function DocumentBuilderScreen() {
     return (
       <>
         <Stack.Screen options={{ title: screenTitle }} />
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.ocean} />
-        </View>
+        <Screen edges={[]}>
+          <SkeletonList count={4} height={120} />
+        </Screen>
       </>
     );
   }
@@ -715,13 +723,15 @@ export default function DocumentBuilderScreen() {
     return (
       <>
         <Stack.Screen options={{ title: screenTitle }} />
-        <View style={styles.center}>
-          <Ionicons name="lock-closed" size={28} color={colors.inkSoft} />
-          <Text style={styles.blockText}>
-            Estimates and invoices are only available to admins. Please sign in with an admin
-            account.
-          </Text>
-        </View>
+        <Screen edges={[]}>
+          <Card>
+            <EmptyState
+              icon="lock-closed"
+              title="Admins only"
+              body="Estimates and invoices are only available to admins. Please sign in with an admin account."
+            />
+          </Card>
+        </Screen>
       </>
     );
   }
@@ -730,9 +740,11 @@ export default function DocumentBuilderScreen() {
     return (
       <>
         <Stack.Screen options={{ title: screenTitle }} />
-        <View style={styles.center}>
-          <Text style={styles.blockText}>{loadError}</Text>
-        </View>
+        <Screen edges={[]}>
+          <Card>
+            <EmptyState icon="alert-circle" title={loadError} />
+          </Card>
+        </Screen>
       </>
     );
   }
@@ -741,9 +753,15 @@ export default function DocumentBuilderScreen() {
     return (
       <>
         <Stack.Screen options={{ title: screenTitle }} />
-        <View style={styles.center}>
-          <Text style={styles.blockText}>Job not found.</Text>
-        </View>
+        <Screen edges={[]}>
+          <Card>
+            <EmptyState
+              icon="help-circle"
+              title="Job not found."
+              body="It may have been deleted, or the link is out of date."
+            />
+          </Card>
+        </Screen>
       </>
     );
   }
@@ -753,108 +771,121 @@ export default function DocumentBuilderScreen() {
   return (
     <>
       <Stack.Screen options={{ title: screenTitle }} />
-      <ScrollView
-        style={styles.safe}
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled">
-        <View style={styles.headerCard}>
-          <Text style={styles.headerType}>
+      <Screen edges={[]}>
+        <Card style={styles.headerCard}>
+          <AppText variant="section" color={colors.textMuted}>
             {mode === 'revise' ? `Revise ${typeLabel.toLowerCase()}` : typeLabel}
-          </Text>
-          <Text style={styles.headerJob}>
+          </AppText>
+          <AppText variant="heading">
             {job.job_number ? `${job.job_number} · ` : ''}
             {job.name}
-          </Text>
-          {snapshot?.name ? <Text style={styles.headerCustomer}>{snapshot.name}</Text> : null}
+          </AppText>
+          {snapshot?.name ? (
+            <AppText variant="body" color={colors.textMuted}>
+              {snapshot.name}
+            </AppText>
+          ) : null}
           <View style={styles.headerNumberRow}>
-            <Text style={styles.headerNumber}>{docNumber ?? '…'}</Text>
+            <AppText variant="bodyStrong" color={colors.accentPrimary}>
+              {docNumber ?? '…'}
+            </AppText>
             {mode === 'revise' && currentRevision > 1 ? (
-              <View style={styles.revChip}>
-                <Text style={styles.revChipText}>rev {currentRevision}</Text>
-              </View>
+              <Chip label={`rev ${currentRevision}`} tone="olive" />
             ) : null}
             {pdfStale && phase !== 'done' ? (
-              <View style={styles.staleChip}>
-                <Ionicons name="warning" size={12} color={colors.ink} />
-                <Text style={styles.staleChipText}>
-                  {entry?.document_path ? 'PDF out of date' : 'No PDF stored yet'}
-                </Text>
-              </View>
+              <Chip
+                label={entry?.document_path ? 'PDF out of date' : 'No PDF stored yet'}
+                icon="warning"
+                tone="sun"
+              />
             ) : null}
           </View>
-        </View>
+        </Card>
 
         {phase === 'done' ? (
-          <View style={styles.doneCard}>
+          <Card style={styles.doneCard}>
             <Ionicons
               name={savedStale ? 'warning' : 'checkmark-circle'}
               size={30}
-              color={savedStale ? colors.danger : colors.ocean}
+              color={savedStale ? colors.danger : colors.accentPrimary}
             />
-            <Text style={styles.doneTitle}>
+            <AppText variant="heading" align="center">
               {mode === 'revise' && savedRevision != null
                 ? `${typeLabel} ${docNumber} saved as revision ${savedRevision}`
                 : `${typeLabel} ${docNumber} created`}
-            </Text>
-            <Text style={styles.doneTotal}>{formatMoney(totals.total)}</Text>
+            </AppText>
+            <AppText variant="numeric" color={colors.accentPrimary}>
+              {formatMoney(totals.total)}
+            </AppText>
             {savedStale ? (
-              <Text style={styles.warningText}>
+              <AppText variant="caption" color={colors.danger} align="center">
                 The numbers are saved, but the stored PDF still shows the previous revision.
-              </Text>
+              </AppText>
             ) : null}
             {warnings.map((warning) => (
-              <Text key={warning} style={styles.warningText}>
+              <AppText key={warning} variant="caption" color={colors.danger} align="center">
                 {warning}
-              </Text>
+              </AppText>
             ))}
             {savedStale ? (
-              <Pressable
+              <Button
+                label="Retry PDF"
+                icon="refresh"
                 onPress={() => void retryPdf()}
+                loading={busyLabel !== null}
                 disabled={busyLabel !== null}
-                style={({ pressed }) => [
-                  styles.primaryButton,
-                  (pressed || busyLabel !== null) && styles.buttonPressed,
-                ]}>
-                {busyLabel ? (
-                  <ActivityIndicator color={colors.ink} />
-                ) : (
-                  <Ionicons name="refresh" size={18} color={colors.ink} />
-                )}
-                <Text style={styles.primaryButtonText}>Retry PDF</Text>
-              </Pressable>
+                fullWidth
+                style={styles.stackedButton}
+              />
             ) : null}
             {mode === 'revise' && savedRevision != null && !savedStale ? (
-              <Pressable
+              <Button
+                label={`View rev ${savedRevision}`}
+                variant="secondary"
                 onPress={() => void viewSavedRevision()}
-                style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}>
-                <Text style={styles.secondaryButtonText}>View rev {savedRevision}</Text>
-              </Pressable>
+                fullWidth
+                style={styles.stackedButton}
+              />
             ) : null}
             {Platform.OS !== 'web' && localPdfUri ? (
-              <Pressable
+              <Button
+                label="Share PDF"
+                icon="share-outline"
                 onPress={sharePdf}
-                style={({ pressed }) => [styles.primaryButton, pressed && styles.buttonPressed]}>
-                <Ionicons name="share-outline" size={18} color={colors.ink} />
-                <Text style={styles.primaryButtonText}>Share PDF</Text>
-              </Pressable>
+                fullWidth
+                style={styles.stackedButton}
+              />
             ) : null}
-            <Pressable
+            <Button
+              label="Done"
+              variant="secondary"
               onPress={() => router.back()}
-              style={({ pressed }) => [styles.secondaryButton, pressed && styles.buttonPressed]}>
-              <Text style={styles.secondaryButtonText}>Done</Text>
-            </Pressable>
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
-          </View>
+              fullWidth
+              style={styles.stackedButton}
+            />
+            {error ? (
+              <AppText variant="caption" color={colors.danger} align="center">
+                {error}
+              </AppText>
+            ) : null}
+          </Card>
         ) : (
           <>
-            <Text style={styles.sectionTitle}>Line items</Text>
-            <View style={styles.card}>
+            <SectionHeader title="Line items" icon="list" />
+            <Card>
               <View style={styles.itemHeaderRow}>
-                <Text style={[styles.itemHeaderText, styles.nameCol]}>Item</Text>
-                <Text style={[styles.itemHeaderText, styles.qtyCol]}>Qty</Text>
-                <Text style={[styles.itemHeaderText, styles.rateCol]}>Rate</Text>
+                <AppText variant="section" color={colors.textMuted} style={styles.nameCol}>
+                  Item
+                </AppText>
+                <AppText variant="section" color={colors.textMuted} style={styles.qtyCol}>
+                  Qty
+                </AppText>
+                <AppText variant="section" color={colors.textMuted} style={styles.rateCol}>
+                  Rate
+                </AppText>
                 <View style={styles.removeCol} />
               </View>
+
               {items.map((row, index) => (
                 <View key={row.key} style={index > 0 ? styles.rowBorderTop : undefined}>
                   <View style={styles.itemRow}>
@@ -863,14 +894,14 @@ export default function DocumentBuilderScreen() {
                       value={row.name}
                       onChangeText={(text) => updateItem(row.key, { name: text })}
                       placeholder="Description of work"
-                      placeholderTextColor={colors.inkSoft}
+                      placeholderTextColor={colors.textMuted}
                     />
                     <TextInput
                       style={[styles.input, styles.qtyCol]}
                       value={row.qty}
                       onChangeText={(text) => updateItem(row.key, { qty: text })}
                       placeholder="1"
-                      placeholderTextColor={colors.inkSoft}
+                      placeholderTextColor={colors.textMuted}
                       keyboardType="decimal-pad"
                     />
                     <TextInput
@@ -878,92 +909,124 @@ export default function DocumentBuilderScreen() {
                       value={row.rate}
                       onChangeText={(text) => updateItem(row.key, { rate: text })}
                       placeholder="0.00"
-                      placeholderTextColor={colors.inkSoft}
+                      placeholderTextColor={colors.textMuted}
                       keyboardType="decimal-pad"
                     />
-                    <Pressable
+                    <AnimatedPressable
                       onPress={() => removeItem(row.key)}
                       disabled={items.length === 1}
+                      haptic="tapLight"
+                      accessibilityRole="button"
+                      accessibilityLabel="Remove line item"
                       style={styles.removeCol}
                       hitSlop={8}>
                       <Ionicons
                         name="close-circle"
                         size={20}
-                        color={items.length === 1 ? colors.tan : colors.danger}
+                        color={items.length === 1 ? colors.border : colors.danger}
                       />
-                    </Pressable>
+                    </AnimatedPressable>
                   </View>
-                  <Pressable
+
+                  <AnimatedPressable
                     onPress={() => updateItem(row.key, { noteOpen: !row.noteOpen })}
+                    haptic="tapLight"
                     hitSlop={6}
-                    style={({ pressed }) => [styles.noteToggle, pressed && styles.rowPressed]}>
-                    <Text style={styles.noteToggleText}>
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: row.noteOpen }}
+                    accessibilityLabel="Line item note"
+                    style={styles.noteToggle}>
+                    <AppText variant="caption" color={colors.accentLink}>
                       {row.noteOpen ? '− note' : row.description ? '＋ note (1)' : '＋ note'}
-                    </Text>
-                  </Pressable>
+                    </AppText>
+                  </AnimatedPressable>
+
                   {row.noteOpen ? (
                     <TextInput
                       style={[styles.input, styles.noteInput]}
                       value={row.description}
                       onChangeText={(text) => updateItem(row.key, { description: text })}
                       placeholder="Prints in small type under the item on the PDF"
-                      placeholderTextColor={colors.inkSoft}
+                      placeholderTextColor={colors.textMuted}
                       multiline
                     />
                   ) : null}
                 </View>
               ))}
-              <Pressable
+
+              <AnimatedPressable
                 onPress={addItem}
-                style={({ pressed }) => [styles.addRow, pressed && styles.rowPressed]}>
-                <Ionicons name="add-circle" size={18} color={colors.ocean} />
-                <Text style={styles.addRowText}>Add line item</Text>
-              </Pressable>
+                haptic="tapLight"
+                accessibilityRole="button"
+                accessibilityLabel="Add line item"
+                style={styles.addRow}>
+                <Ionicons name="add-circle" size={18} color={colors.accentPrimary} />
+                <AppText variant="bodyStrong" color={colors.accentPrimary}>
+                  Add line item
+                </AppText>
+              </AnimatedPressable>
+
               {type === 'estimate' ? (
                 <>
-                  <Pressable
+                  <AnimatedPressable
                     onPress={toggleSupplement}
-                    style={({ pressed }) => [styles.addRow, pressed && styles.rowPressed]}>
+                    haptic="tapLight"
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: supplementOn }}
+                    accessibilityLabel="Supplement — racking and railing"
+                    style={styles.addRow}>
                     <Ionicons
                       name={supplementOn ? 'checkbox' : 'square-outline'}
                       size={18}
-                      color={colors.ocean}
+                      color={colors.accentPrimary}
                     />
-                    <Text style={styles.addRowText}>
+                    <AppText variant="bodyStrong" color={colors.accentPrimary}>
                       Supplement — racking &amp; railing ($136 / panel)
-                    </Text>
-                  </Pressable>
+                    </AppText>
+                  </AnimatedPressable>
                   {supplementOn ? (
-                    <Text style={styles.supplementHint}>
+                    <AppText variant="caption" color={colors.textMuted}>
                       Adds the prefilled racking &amp; railing warranty item — set the quantity to
                       the panel count. Its wording lives in the row&apos;s own note and can be
                       edited.
-                    </Text>
+                    </AppText>
                   ) : null}
                 </>
               ) : null}
+
               <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Total</Text>
-                <Text style={styles.totalValue}>{formatMoney(totals.total)}</Text>
+                <AppText variant="section" color={colors.ink}>
+                  Total
+                </AppText>
+                <AppText variant="bodyStrong" color={colors.ink} style={styles.totalValue}>
+                  {formatMoney(totals.total)}
+                </AppText>
               </View>
               {totals.tax > 0 ? (
-                <Text style={styles.taxNote}>
+                <AppText variant="caption" color={colors.textMuted} align="right">
                   Includes {formatMoney(totals.tax)} sales tax
-                </Text>
+                </AppText>
               ) : (
-                <Text style={styles.taxNote}>No tax applied</Text>
+                <AppText variant="caption" color={colors.textMuted} align="right">
+                  No tax applied
+                </AppText>
               )}
-            </View>
+            </Card>
 
-            <Pressable
+            <AnimatedPressable
               onPress={() => setAdjustmentsOpen((open) => !open)}
-              style={({ pressed }) => [styles.collapseToggle, pressed && styles.rowPressed]}>
+              haptic="tapLight"
+              scaleTo={0.995}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: adjustmentsOpen }}
+              accessibilityLabel="Adjustments"
+              style={styles.collapseToggle}>
               <Ionicons
                 name={adjustmentsOpen ? 'chevron-down' : 'chevron-forward'}
                 size={16}
-                color={colors.inkSoft}
+                color={colors.accentPrimary}
               />
-              <Text style={styles.collapseToggleText}>
+              <AppText variant="section" color={colors.accentPrimary}>
                 Adjustments
                 {totals.discount > 0 || totals.tax > 0
                   ? ` · ${[
@@ -973,41 +1036,34 @@ export default function DocumentBuilderScreen() {
                       .filter(Boolean)
                       .join(' · ')}`
                   : ''}
-              </Text>
-            </Pressable>
+              </AppText>
+            </AnimatedPressable>
+
             {adjustmentsOpen ? (
-              <View style={styles.card}>
-                <Text style={styles.editLabel}>Discount ($ off the subtotal)</Text>
-                <TextInput
-                  style={styles.input}
+              <Card>
+                <Field
+                  label="Discount ($ off the subtotal)"
                   value={discount}
                   onChangeText={setDiscount}
                   placeholder="0.00"
-                  placeholderTextColor={colors.inkSoft}
                   keyboardType="decimal-pad"
                 />
-                <Text style={styles.editLabel}>Sales tax rate (%)</Text>
-                <TextInput
-                  style={styles.input}
+                <Field
+                  label="Sales tax rate (%)"
                   value={taxRate}
                   onChangeText={setTaxRate}
                   placeholder="0"
-                  placeholderTextColor={colors.inkSoft}
                   keyboardType="decimal-pad"
                 />
                 {type === 'estimate' ? (
-                  <>
-                    <Text style={styles.editLabel}>Valid until (YYYY-MM-DD)</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={validUntil}
-                      onChangeText={setValidUntil}
-                      placeholder="Optional"
-                      placeholderTextColor={colors.inkSoft}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                    />
-                  </>
+                  <Field
+                    label="Valid until (YYYY-MM-DD)"
+                    value={validUntil}
+                    onChangeText={setValidUntil}
+                    placeholder="Optional"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
                 ) : null}
                 <View style={styles.totalsBreakdown}>
                   {(
@@ -1019,33 +1075,44 @@ export default function DocumentBuilderScreen() {
                     ] as [string, number][]
                   ).map(([label, value], i) => (
                     <View key={label} style={styles.breakdownRow}>
-                      <Text style={[styles.breakdownLabel, i === 3 && styles.breakdownStrong]}>
+                      <AppText
+                        variant={i === 3 ? 'bodyStrong' : 'caption'}
+                        color={i === 3 ? colors.textPrimary : colors.textMuted}>
                         {label}
-                      </Text>
-                      <Text style={[styles.breakdownValue, i === 3 && styles.breakdownStrong]}>
+                      </AppText>
+                      <AppText
+                        variant={i === 3 ? 'bodyStrong' : 'caption'}
+                        numberOfLines={1}
+                        style={styles.breakdownValue}>
                         {value < 0 ? `−${formatMoney(Math.abs(value))}` : formatMoney(value)}
-                      </Text>
+                      </AppText>
                     </View>
                   ))}
                 </View>
-              </View>
+              </Card>
             ) : null}
 
-            <Pressable
+            <AnimatedPressable
               onPress={() => setBillToOpen((open) => !open)}
-              style={({ pressed }) => [styles.collapseToggle, pressed && styles.rowPressed]}>
+              haptic="tapLight"
+              scaleTo={0.995}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: billToOpen }}
+              accessibilityLabel="Bill to"
+              style={styles.collapseToggle}>
               <Ionicons
                 name={billToOpen ? 'chevron-down' : 'chevron-forward'}
                 size={16}
-                color={colors.inkSoft}
+                color={colors.accentPrimary}
               />
-              <Text style={styles.collapseToggleText}>
+              <AppText variant="section" color={colors.accentPrimary}>
                 Bill to{snapshot?.name ? ` · ${snapshot.name}` : ''}
-              </Text>
+              </AppText>
               {snapshotChanged ? <View style={styles.changedDot} /> : null}
-            </Pressable>
+            </AnimatedPressable>
+
             {billToOpen ? (
-              <View style={styles.card}>
+              <Card>
                 {(
                   [
                     ['Name', snapshot?.name ?? '—'],
@@ -1055,169 +1122,118 @@ export default function DocumentBuilderScreen() {
                   ] as [string, string][]
                 ).map(([label, value]) => (
                   <View key={label} style={styles.breakdownRow}>
-                    <Text style={styles.breakdownLabel}>{label}</Text>
-                    <Text style={styles.breakdownValue} numberOfLines={2}>
+                    <AppText variant="caption" color={colors.textMuted}>
+                      {label}
+                    </AppText>
+                    <AppText variant="caption" numberOfLines={2} style={styles.breakdownValue}>
                       {value}
-                    </Text>
+                    </AppText>
                   </View>
                 ))}
                 {snapshotChanged ? (
                   <>
-                    <Text style={styles.supplementHint}>
+                    <AppText variant="caption" color={colors.textMuted} style={styles.hint}>
                       Customer record has changed — use current details?
-                    </Text>
-                    <Pressable
+                    </AppText>
+                    <Button
+                      label="Use current details"
+                      variant="secondary"
+                      size="sm"
                       onPress={() => setSnapshot(liveSnapshot)}
-                      style={({ pressed }) => [
-                        styles.secondaryButton,
-                        pressed && styles.buttonPressed,
-                      ]}>
-                      <Text style={styles.secondaryButtonText}>Use current details</Text>
-                    </Pressable>
+                    />
                   </>
                 ) : null}
-              </View>
+              </Card>
             ) : null}
 
-            <Text style={styles.sectionTitle}>Date</Text>
-            <View style={styles.card}>
+            <SectionHeader title="Date" icon="calendar" />
+            <Card style={styles.stackCard}>
+              {/* No field label: the section header above already says Date. */}
               <TextInput
                 style={styles.input}
                 value={occurredOn}
                 onChangeText={setOccurredOn}
                 placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.inkSoft}
+                placeholderTextColor={colors.textMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
               />
               {type === 'estimate' && estimateCount > 1 ? (
-                <Text style={styles.supplementHint}>
-                  This job has {estimateCount} estimates. Only the newest one by date counts
-                  toward the Estimates total — changing this date can change which one that is.
-                </Text>
+                <AppText variant="caption" color={colors.textMuted}>
+                  This job has {estimateCount} estimates. Only the newest one by date counts toward
+                  the Estimates total — changing this date can change which one that is.
+                </AppText>
               ) : null}
-            </View>
+            </Card>
 
-            <Text style={styles.sectionTitle}>Notes / terms</Text>
-            <View style={styles.card}>
+            <SectionHeader title="Notes / terms" icon="document-text" />
+            <Card>
               <TextInput
                 style={[styles.input, styles.notesInput]}
                 value={notes}
                 onChangeText={setNotes}
                 placeholder="Optional notes or terms"
-                placeholderTextColor={colors.inkSoft}
+                placeholderTextColor={colors.textMuted}
                 multiline
               />
-            </View>
+            </Card>
 
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            {error ? (
+              <AppText variant="caption" color={colors.danger} align="center">
+                {error}
+              </AppText>
+            ) : null}
             {warnings.map((warning) => (
-              <Text key={warning} style={styles.warningText}>
+              <AppText key={warning} variant="caption" color={colors.danger} align="center">
                 {warning}
-              </Text>
+              </AppText>
             ))}
 
             {pendingRevise ? (
-              <Pressable
+              <Button
+                label="Retry save"
+                icon="refresh"
                 onPress={() => void retrySave()}
                 disabled={saving}
-                style={({ pressed }) => [
-                  styles.primaryButton,
-                  (pressed || saving) && styles.buttonPressed,
-                ]}>
-                <Ionicons name="refresh" size={18} color={colors.ink} />
-                <Text style={styles.primaryButtonText}>Retry save</Text>
-              </Pressable>
+                fullWidth
+              />
             ) : null}
 
-            <Pressable
+            <Button
+              label={busyLabel ?? (Platform.OS === 'web' ? 'Preview & print' : 'Preview PDF')}
+              variant="secondary"
               onPress={() => void preview()}
               disabled={saving || busyLabel !== null || !docNumber}
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                (pressed || busyLabel !== null) && styles.buttonPressed,
-              ]}>
-              <Text style={styles.secondaryButtonText}>
-                {busyLabel ?? (Platform.OS === 'web' ? 'Preview & print' : 'Preview PDF')}
-              </Text>
-            </Pressable>
+              fullWidth
+            />
 
-            <Pressable
-              onPress={() => void (mode === 'revise' ? saveRevision() : create())}
-              disabled={saving || !docNumber}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                (pressed || saving) && styles.buttonPressed,
-              ]}>
-              {saving ? (
-                <ActivityIndicator color={colors.ink} />
-              ) : (
-                <Ionicons name="document-text" size={18} color={colors.ink} />
-              )}
-              <Text style={styles.primaryButtonText}>
-                {saving
+            <Button
+              label={
+                saving
                   ? 'Saving…'
                   : mode === 'revise'
                     ? `Save revision ${currentRevision + 1}`
                     : Platform.OS === 'web'
                       ? 'Create & print'
-                      : 'Create & preview PDF'}
-              </Text>
-            </Pressable>
+                      : 'Create & preview PDF'
+              }
+              icon="document-text"
+              onPress={() => void (mode === 'revise' ? saveRevision() : create())}
+              loading={saving}
+              disabled={saving || !docNumber}
+              size="lg"
+              fullWidth
+            />
           </>
         )}
-      </ScrollView>
+      </Screen>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.cream,
-  },
-  container: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xl,
-    gap: spacing.md,
-  },
-  center: {
-    flex: 1,
-    backgroundColor: colors.cream,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.xl,
-    gap: spacing.sm,
-  },
-  blockText: {
-    color: colors.inkSoft,
-    fontSize: 15,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
   headerCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: 2,
-    ...shadows.card,
-  },
-  headerType: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  headerJob: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  headerCustomer: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
   },
   headerNumberRow: {
     flexDirection: 'row',
@@ -1226,60 +1242,18 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     marginTop: spacing.xs,
   },
-  headerNumber: {
-    color: colors.ocean,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  revChip: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-  },
-  revChipText: {
-    color: colors.ocean,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  staleChip: {
-    flexDirection: 'row',
+  doneCard: {
     alignItems: 'center',
-    gap: 3,
-    backgroundColor: colors.sunLight,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-  },
-  staleChipText: {
-    color: colors.ink,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
-    marginTop: spacing.sm,
-  },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.sm,
-    ...shadows.card,
+    padding: spacing.lg,
+  },
+  stackedButton: {
+    marginTop: spacing.xs,
   },
   itemHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-  },
-  itemHeaderText: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   itemRow: {
     flexDirection: 'row',
@@ -1289,7 +1263,8 @@ const styles = StyleSheet.create({
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
+    marginTop: spacing.xs,
   },
   nameCol: {
     flex: 1,
@@ -1305,105 +1280,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   input: {
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceSunk,
     borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.border,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm,
-    color: colors.ink,
+    color: colors.textPrimary,
     fontSize: 14,
-    fontWeight: '600',
-  },
-  notesInput: {
-    minHeight: 72,
-    textAlignVertical: 'top',
   },
   noteInput: {
     minHeight: 60,
     textAlignVertical: 'top',
     marginBottom: spacing.xs,
   },
+  notesInput: {
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
+  stackCard: {
+    gap: spacing.sm,
+  },
   noteToggle: {
     alignSelf: 'flex-start',
     paddingVertical: 2,
-  },
-  noteToggleText: {
-    color: colors.ocean,
-    fontSize: 12,
-    fontWeight: '700',
   },
   addRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
     paddingVertical: spacing.xs,
-  },
-  addRowText: {
-    color: colors.ocean,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  rowPressed: {
-    opacity: 0.6,
-  },
-  supplementHint: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  collapseToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-  },
-  collapseToggleText: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  changedDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.sun,
-  },
-  totalsBreakdown: {
-    backgroundColor: colors.cream,
-    borderRadius: radii.sm,
-    padding: spacing.sm,
-    gap: spacing.xs,
-  },
-  breakdownRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
-  breakdownLabel: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  breakdownValue: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '700',
-    flexShrink: 1,
-    textAlign: 'right',
-  },
-  breakdownStrong: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  editLabel: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   totalRow: {
     flexDirection: 'row',
@@ -1415,91 +1321,42 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2,
     marginTop: spacing.xs,
   },
-  totalLabel: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
   totalValue: {
-    color: colors.ink,
     fontSize: 18,
-    fontWeight: '800',
+    lineHeight: 23,
+    fontVariant: ['tabular-nums'],
   },
-  taxNote: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '600',
-    textAlign: 'right',
-  },
-  primaryButton: {
+  collapseToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 2,
-    paddingHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    alignSelf: 'stretch',
-    ...shadows.card,
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
   },
-  buttonPressed: {
-    opacity: 0.7,
+  changedDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.accentAction,
   },
-  primaryButtonText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
+  totalsBreakdown: {
+    backgroundColor: colors.surfaceSunk,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+    gap: spacing.xs,
   },
-  secondaryButton: {
+  breakdownRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.tan,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 2,
-    paddingHorizontal: spacing.lg,
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  breakdownValue: {
+    flexShrink: 1,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
+  },
+  hint: {
     marginTop: spacing.xs,
-    alignSelf: 'stretch',
-  },
-  secondaryButtonText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  doneCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.sm,
-    ...shadows.card,
-  },
-  doneTitle: {
-    color: colors.ink,
-    fontSize: 17,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  doneTotal: {
-    color: colors.ocean,
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  errorText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  warningText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
+    marginBottom: spacing.xs,
   },
 });

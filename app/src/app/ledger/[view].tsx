@@ -1,20 +1,25 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Platform,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { Field } from '@/components/forms/Field';
+import { StatusPill } from '@/components/StatusPill';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  Chip,
+  CountUp,
+  EmptyState,
+  FadeInUp,
+  Screen,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import { getDocumentUrl } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
 import {
@@ -23,6 +28,7 @@ import {
   updateFinanceEntry,
 } from '@/lib/documents';
 import { fetchFinancials, type LedgerEntry } from '@/lib/financials';
+import * as haptics from '@/lib/haptics';
 import { type Job } from '@/lib/types';
 import { shareDocument, viewDocument } from '@/lib/pdf';
 import { CONTRACTED_STAGES, fetchPipelineJobs } from '@/lib/pipeline';
@@ -300,6 +306,7 @@ export default function LedgerScreen() {
       message = 'Contract value saved. Generate the contract PDF from the iOS app.';
     }
 
+    haptics.success();
     setSavingContract(false);
     setEditingJobId(null);
     setStatusMsg(message);
@@ -320,26 +327,26 @@ export default function LedgerScreen() {
     }
   };
 
+  /**
+   * A filter row. `Chip` carries the selection haptic and the fill-not-outline
+   * selected state, so the row reads at arm's length on a roof.
+   */
   const chipRow = (
     options: { key: string; label: string }[],
     selected: string,
     onPick: (key: never) => void,
   ) => (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
       <View style={styles.chipRow}>
-        {options.map((option) => {
-          const active = selected === option.key;
-          return (
-            <Pressable
-              key={option.key}
-              onPress={() => onPick(option.key as never)}
-              style={[styles.chip, active && styles.chipActive]}>
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                {option.label}
-              </Text>
-            </Pressable>
-          );
-        })}
+        {options.map((option) => (
+          <Chip
+            key={option.key}
+            label={option.label}
+            tone="olive"
+            selected={selected === option.key}
+            onPress={() => onPick(option.key as never)}
+          />
+        ))}
       </View>
     </ScrollView>
   );
@@ -351,48 +358,61 @@ export default function LedgerScreen() {
     const stale = entry.document_meta?.pdf_state === 'stale';
     return (
       <View key={entry.id} style={[styles.entryRow, index > 0 && styles.rowBorderTop]}>
-        <Pressable
+        <AnimatedPressable
           onPress={() => void openPdf(entry)}
           disabled={!entry.document_path}
-          style={({ pressed }) => [
-            styles.entryBody,
-            pressed && entry.document_path != null && styles.rowPressed,
-          ]}>
+          haptic="tapLight"
+          scaleTo={0.99}
+          accessibilityRole="button"
+          accessibilityLabel={entry.document_number ?? 'Open PDF'}
+          style={styles.entryBody}>
           <View style={styles.entryText}>
-            <Text style={styles.entryTitle} numberOfLines={1}>
+            <AppText variant="bodyStrong" numberOfLines={1}>
               {entry.document_number ??
                 entry.description ??
                 (entry.type === 'payment' ? 'Payment' : 'Entry')}
               {revision > 1 ? ` · rev ${revision}` : ''}
-            </Text>
-            <Text style={styles.entryMeta}>
+            </AppText>
+            <AppText variant="caption" color={colors.textMuted}>
               {formatShortDate(entry.occurred_on)}
               {view === 'paid' && entry.counterparty ? ` · ${entry.counterparty}` : ''}
-              {stale ? ' · ⚠ PDF out of date' : ''}
-            </Text>
+            </AppText>
+            {stale ? (
+              <Chip label="PDF out of date" icon="warning" tone="danger" style={styles.staleChip} />
+            ) : null}
           </View>
-          <Text style={styles.entryAmount}>{formatMoney(entry.amount)}</Text>
-        </Pressable>
+          <AppText variant="bodyStrong" style={styles.figure}>
+            {formatMoney(entry.amount)}
+          </AppText>
+        </AnimatedPressable>
+
         {revisable ? (
-          <Pressable
+          <AnimatedPressable
             onPress={() => reviseEntry(entry)}
+            haptic="tapLight"
             hitSlop={6}
-            style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
-            <Ionicons name="pencil" size={15} color={colors.ocean} />
-          </Pressable>
+            accessibilityRole="button"
+            accessibilityLabel="Revise document"
+            style={styles.iconButton}>
+            <Ionicons name="pencil" size={15} color={colors.accentPrimary} />
+          </AnimatedPressable>
         ) : null}
+
         {entry.document_path ? (
-          <Pressable
+          <AnimatedPressable
             onPress={() => void sharePdf(entry)}
             disabled={busyId !== null}
+            haptic="tapLight"
             hitSlop={6}
-            style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
+            accessibilityRole="button"
+            accessibilityLabel="Share PDF"
+            style={styles.iconButton}>
             {busyId === entry.id ? (
-              <ActivityIndicator size="small" color={colors.ocean} />
+              <ActivityIndicator size="small" color={colors.accentPrimary} />
             ) : (
-              <Ionicons name="share-outline" size={15} color={colors.ocean} />
+              <Ionicons name="share-outline" size={15} color={colors.accentPrimary} />
             )}
-          </Pressable>
+          </AnimatedPressable>
         ) : null}
       </View>
     );
@@ -400,20 +420,16 @@ export default function LedgerScreen() {
 
   const body = () => {
     if (!loaded) {
-      return (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.ocean} />
-        </View>
-      );
+      return <SkeletonList count={5} height={92} />;
     }
     if (!role?.isAdmin || entries === null) {
       return (
-        <View style={styles.placeholderCard}>
-          <Ionicons name="lock-closed" size={22} color={colors.inkSoft} />
-          <Text style={styles.placeholderText}>
-            The company ledger is available to owners and operators.
-          </Text>
-        </View>
+        <Card>
+          <EmptyState
+            icon="lock-closed"
+            title="The company ledger is available to owners and operators."
+          />
+        </Card>
       );
     }
 
@@ -422,147 +438,180 @@ export default function LedgerScreen() {
         {view !== 'contracted' ? chipRow(PERIODS, period, setPeriod as never) : null}
         {view === 'invoices' ? chipRow(JOB_STATUS, jobStatus, setJobStatus as never) : null}
 
-        <View style={styles.totalCard}>
-          <Text style={styles.totalLabel}>
-            {count} {view === 'contracted' ? (count === 1 ? 'job' : 'jobs') : count === 1 ? 'entry' : 'entries'}
-          </Text>
-          <Text style={styles.totalValue}>{formatMoney(total)}</Text>
-        </View>
+        <Card style={styles.totalCard}>
+          <AppText variant="section" color={colors.ink}>
+            {count}{' '}
+            {view === 'contracted'
+              ? count === 1
+                ? 'job'
+                : 'jobs'
+              : count === 1
+                ? 'entry'
+                : 'entries'}
+          </AppText>
+          <CountUp value={total} prefix="$" decimals={2} style={styles.totalValue} />
+        </Card>
+
         {view === 'estimates' ? (
-          <Text style={styles.footnote}>
-            The Estimates tile counts each job's most recent estimate only; this list shows
-            every estimate written.
-          </Text>
+          <AppText variant="caption" color={colors.textMuted}>
+            The Estimates tile counts each job's most recent estimate only; this list shows every
+            estimate written.
+          </AppText>
         ) : null}
 
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        {statusMsg ? <Text style={styles.statusText}>{statusMsg}</Text> : null}
+        {error ? (
+          <AppText variant="caption" color={colors.danger} align="center">
+            {error}
+          </AppText>
+        ) : null}
+        {statusMsg ? (
+          <AppText variant="caption" color={colors.accentPrimary} align="center">
+            {statusMsg}
+          </AppText>
+        ) : null}
 
         {view === 'contracted'
-          ? contractedJobs.map(({ job, value }) => {
+          ? contractedJobs.map(({ job, value }, index) => {
               const editing = editingJobId === job.id;
               return (
-                <View key={job.id} style={styles.jobCard}>
-                  <Pressable
-                    onPress={() =>
-                      router.push({ pathname: '/job/[id]', params: { id: job.id } })
-                    }
-                    style={({ pressed }) => [pressed && styles.pressed]}>
-                    <View style={styles.jobCardHeader}>
-                      <View style={styles.jobChip}>
-                        <Text style={styles.jobChipText}>{job.label}</Text>
+                <FadeInUp key={job.id} index={index}>
+                  <Card style={styles.jobCard}>
+                    <AnimatedPressable
+                      onPress={() => router.push({ pathname: '/job/[id]', params: { id: job.id } })}
+                      haptic="tapLight"
+                      scaleTo={0.995}
+                      accessibilityRole="button"
+                      accessibilityLabel={job.name}>
+                      <View style={styles.jobCardHeader}>
+                        <Chip label={job.label} tone="olive" />
+                        <StatusPill stage={job.stage} />
                       </View>
-                      <Text style={styles.stageText}>{job.stage}</Text>
+                      <AppText variant="heading" style={styles.jobName}>
+                        {job.name}
+                      </AppText>
+                      {job.customer ? (
+                        <AppText variant="caption" color={colors.textMuted}>
+                          {job.customer}
+                        </AppText>
+                      ) : null}
+                    </AnimatedPressable>
+
+                    <View style={styles.valueRow}>
+                      <AppText variant="bodyStrong" color={colors.oliveDeep} style={styles.figure}>
+                        Contract value {formatMoney(value)}
+                      </AppText>
+                      <AnimatedPressable
+                        onPress={() => {
+                          setError(null);
+                          setStatusMsg(null);
+                          if (editing) {
+                            setEditingJobId(null);
+                          } else {
+                            setEditingJobId(job.id);
+                            setEditValue(value > 0 ? String(value) : '');
+                            setGenContract(true);
+                          }
+                        }}
+                        haptic="tapLight"
+                        hitSlop={6}
+                        accessibilityRole="button"
+                        accessibilityLabel="Edit contract value"
+                        style={styles.iconButton}>
+                        <Ionicons name="pencil" size={15} color={colors.accentPrimary} />
+                      </AnimatedPressable>
                     </View>
-                    <Text style={styles.jobName}>{job.name}</Text>
-                    {job.customer ? (
-                      <Text style={styles.jobCustomer}>{job.customer}</Text>
-                    ) : null}
-                  </Pressable>
-                  <View style={styles.valueRow}>
-                    <Text style={styles.jobValue}>Contract value {formatMoney(value)}</Text>
-                    <Pressable
-                      onPress={() => {
-                        setError(null);
-                        setStatusMsg(null);
-                        if (editing) {
-                          setEditingJobId(null);
-                        } else {
-                          setEditingJobId(job.id);
-                          setEditValue(value > 0 ? String(value) : '');
-                          setGenContract(true);
-                        }
-                      }}
-                      hitSlop={6}
-                      style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
-                      <Ionicons name="pencil" size={15} color={colors.ocean} />
-                    </Pressable>
-                  </View>
-                  {editing ? (
-                    <View style={styles.editCard}>
-                      <Text style={styles.editLabel}>Contract value ($)</Text>
-                      <TextInput
-                        style={styles.editInput}
-                        value={editValue}
-                        onChangeText={setEditValue}
-                        placeholder="0.00"
-                        placeholderTextColor={colors.inkSoft}
-                        keyboardType="decimal-pad"
-                      />
-                      <Pressable
-                        onPress={() => setGenContract((on) => !on)}
-                        style={({ pressed }) => [styles.toggleRow, pressed && styles.pressed]}>
-                        <Ionicons
-                          name={genContract ? 'checkbox' : 'square-outline'}
-                          size={18}
-                          color={colors.ocean}
+
+                    {editing ? (
+                      <Card tone="sunk" style={styles.editCard}>
+                        <Field
+                          label="Contract value ($)"
+                          value={editValue}
+                          onChangeText={setEditValue}
+                          placeholder="0.00"
+                          keyboardType="decimal-pad"
                         />
-                        <Text style={styles.toggleText}>Generate contract PDF</Text>
-                      </Pressable>
-                      <Text style={styles.toggleHint}>
-                        Creates {job.label}-Contract.pdf in the job's documents. Turn off for
-                        historical jobs where you upload the signed contract instead.
-                      </Text>
-                      <View style={styles.editButtons}>
-                        <Pressable
-                          onPress={() => setEditingJobId(null)}
-                          disabled={savingContract}
-                          hitSlop={8}>
-                          <Text style={styles.cancelText}>Cancel</Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => void saveContractValue(job)}
-                          disabled={savingContract}
-                          style={({ pressed }) => [
-                            styles.saveButton,
-                            (pressed || savingContract) && styles.pressed,
-                          ]}>
-                          {savingContract ? (
-                            <ActivityIndicator color={colors.ink} />
-                          ) : (
-                            <Text style={styles.saveButtonText}>Save</Text>
-                          )}
-                        </Pressable>
-                      </View>
-                    </View>
-                  ) : null}
-                </View>
+                        <AnimatedPressable
+                          onPress={() => setGenContract((on) => !on)}
+                          haptic="tapLight"
+                          scaleTo={0.99}
+                          accessibilityRole="checkbox"
+                          accessibilityState={{ checked: genContract }}
+                          accessibilityLabel="Generate contract PDF"
+                          style={styles.toggleRow}>
+                          <Ionicons
+                            name={genContract ? 'checkbox' : 'square-outline'}
+                            size={18}
+                            color={colors.accentPrimary}
+                          />
+                          <AppText variant="bodyStrong" color={colors.accentPrimary}>
+                            Generate contract PDF
+                          </AppText>
+                        </AnimatedPressable>
+                        <AppText variant="caption" color={colors.textMuted}>
+                          Creates {job.label}-Contract.pdf in the job's documents. Turn off for
+                          historical jobs where you upload the signed contract instead.
+                        </AppText>
+                        <View style={styles.editButtons}>
+                          <Button
+                            label="Cancel"
+                            variant="ghost"
+                            size="sm"
+                            disabled={savingContract}
+                            onPress={() => setEditingJobId(null)}
+                          />
+                          <Button
+                            label="Save"
+                            size="sm"
+                            loading={savingContract}
+                            disabled={savingContract}
+                            onPress={() => void saveContractValue(job)}
+                          />
+                        </View>
+                      </Card>
+                    ) : null}
+                  </Card>
+                </FadeInUp>
               );
             })
-          : groups.map((group) => (
-              <View key={group.key} style={styles.groupWrap}>
-                <Pressable
+          : groups.map((group, index) => (
+              <FadeInUp key={group.key} index={index} style={styles.groupWrap}>
+                <AnimatedPressable
                   onPress={() =>
                     group.job
                       ? router.push({ pathname: '/job/[id]', params: { id: group.job.id } })
                       : undefined
                   }
-                  style={({ pressed }) => [
-                    styles.groupHeader,
-                    pressed && group.job != null && styles.pressed,
-                  ]}>
-                  <View style={styles.groupHeaderText}>
-                    <Text style={styles.groupTitle} numberOfLines={1}>
-                      {group.job ? group.job.label : 'Company (no job)'}
-                      {group.job?.customer ? ` — ${group.job.customer}` : ''}
-                    </Text>
-                    {group.job && group.job.name !== group.job.label ? (
-                      <Text style={styles.groupSub} numberOfLines={1}>
-                        {group.job.name}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <Text style={styles.groupTotal}>{formatMoney(group.subtotal)}</Text>
-                </Pressable>
-                <View style={styles.groupCard}>{group.entries.map(renderEntry)}</View>
-              </View>
+                  disabled={!group.job}
+                  haptic="tapLight"
+                  scaleTo={0.995}
+                  accessibilityRole="button"
+                  accessibilityLabel={group.job ? group.job.label : 'Company (no job)'}
+                  style={styles.groupHeader}>
+                  <SectionHeader
+                    title={`${group.job ? group.job.label : 'Company (no job)'}${
+                      group.job?.customer ? ` — ${group.job.customer}` : ''
+                    }`}
+                    subtitle={
+                      group.job && group.job.name !== group.job.label ? group.job.name : undefined
+                    }
+                    style={styles.groupSection}
+                  />
+                  <AppText variant="bodyStrong" color={colors.textMuted} style={styles.figure}>
+                    {formatMoney(group.subtotal)}
+                  </AppText>
+                </AnimatedPressable>
+                <Card padded={false}>{group.entries.map(renderEntry)}</Card>
+              </FadeInUp>
             ))}
 
         {count === 0 ? (
-          <View style={styles.placeholderCard}>
-            <Ionicons name="file-tray" size={22} color={colors.inkSoft} />
-            <Text style={styles.placeholderText}>Nothing here for this filter.</Text>
-          </View>
+          <Card>
+            <EmptyState
+              icon="file-tray"
+              title="Nothing here for this filter."
+              body="Change the period or job filter above to widen the search."
+            />
+          </Card>
         ) : null}
       </>
     );
@@ -571,128 +620,54 @@ export default function LedgerScreen() {
   return (
     <>
       <Stack.Screen options={{ title: VIEW_TITLES[view] }} />
-      <ScrollView
-        style={styles.safe}
-        contentContainerStyle={styles.container}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.ocean} />
-        }>
+      <Screen edges={[]} refreshing={refreshing} onRefresh={onRefresh}>
         {body()}
-      </ScrollView>
+      </Screen>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.cream,
-  },
-  container: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xl,
-  },
-  center: {
-    paddingVertical: spacing.xxl,
-    alignItems: 'center',
-  },
-  chipScroll: {
-    marginBottom: spacing.sm,
-  },
   chipRow: {
     flexDirection: 'row',
     gap: spacing.xs,
-  },
-  chip: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs + 2,
-  },
-  chipActive: {
-    backgroundColor: colors.ocean,
-  },
-  chipText: {
-    color: colors.ocean,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  chipTextActive: {
-    color: colors.white,
   },
   totalCard: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: spacing.md,
     backgroundColor: colors.sunLight,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 4,
-    marginBottom: spacing.sm,
-  },
-  totalLabel: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   totalValue: {
-    color: colors.ink,
     fontSize: 18,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  footnote: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: spacing.sm,
+    lineHeight: 23,
   },
   groupWrap: {
-    marginBottom: spacing.md,
+    marginTop: spacing.xs,
   },
   groupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: spacing.sm,
     paddingHorizontal: spacing.xs,
-    paddingBottom: spacing.xs,
   },
-  groupHeaderText: {
+  groupSection: {
     flex: 1,
+    marginBottom: spacing.xs,
   },
-  groupTitle: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  groupSub: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  groupTotal: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '800',
+  figure: {
     fontVariant: ['tabular-nums'],
-  },
-  groupCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    ...shadows.card,
   },
   entryRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingRight: spacing.sm,
+    backgroundColor: colors.surface,
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
   },
   entryBody: {
     flex: 1,
@@ -701,143 +676,42 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.md,
   },
-  rowPressed: {
-    backgroundColor: colors.skySoft,
-  },
   entryText: {
     flex: 1,
     gap: 2,
   },
-  entryTitle: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  entryMeta: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  entryAmount: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
+  staleChip: {
+    marginTop: 2,
   },
   iconButton: {
     width: 28,
     height: 28,
     borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
+    backgroundColor: colors.oliveSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pressed: {
-    opacity: 0.7,
-  },
   jobCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.xs,
-    marginBottom: spacing.md,
-    ...shadows.card,
   },
   jobCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  jobChip: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-  },
-  jobChipText: {
-    color: colors.ocean,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  stageText: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
+    gap: spacing.sm,
   },
   jobName: {
-    color: colors.ink,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  jobCustomer: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  jobValue: {
-    color: colors.ocean,
-    fontSize: 14,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  placeholderCard: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginTop: spacing.sm,
-  },
-  placeholderText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  errorText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: spacing.sm,
-  },
-  statusText: {
-    color: colors.ocean,
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: spacing.sm,
+    marginTop: spacing.xs,
   },
   valueRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
-  },
-  editCard: {
-    backgroundColor: colors.cream,
-    borderRadius: radii.sm,
-    padding: spacing.md,
-    gap: spacing.xs,
     marginTop: spacing.xs,
   },
-  editLabel: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  editInput: {
-    backgroundColor: colors.white,
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    borderColor: colors.tan,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm - 2,
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
+  editCard: {
+    marginTop: spacing.xs,
   },
   toggleRow: {
     flexDirection: 'row',
@@ -845,40 +719,11 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     paddingTop: spacing.xs,
   },
-  toggleText: {
-    color: colors.ocean,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  toggleHint: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '600',
-  },
   editButtons: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: spacing.md,
     marginTop: spacing.xs,
-  },
-  cancelText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  saveButton: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.card,
-  },
-  saveButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
   },
 });

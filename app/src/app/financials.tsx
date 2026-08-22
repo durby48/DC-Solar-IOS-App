@@ -1,20 +1,21 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  SectionList,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { RefreshControl, SectionList, StyleSheet, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
-import { formatShortDate, todayISO } from '@/lib/dates';
+import { CashPositionPanel } from '@/components/financials/CashPositionPanel';
+import {
+  ExpenseForm,
+  ExpenseRow,
+  MonthHeader,
+  type JobOption,
+} from '@/components/financials/ExpenseLedger';
+import { formatMoney } from '@/components/financials/format';
+import { MirrorTiles } from '@/components/financials/MirrorTiles';
+import { OverviewTiles } from '@/components/financials/OverviewTiles';
+import { PnlSheet, type PnlRow } from '@/components/financials/PnlSheet';
+import { AppText, Button, Card, EmptyState, SectionHeader, SkeletonList } from '@/components/ui';
+import { colors, spacing } from '@/constants/theme';
+import { todayISO } from '@/lib/dates';
 import { deleteFinanceEntry, updateFinanceEntry } from '@/lib/documents';
 import {
   fetchFinancials,
@@ -28,6 +29,7 @@ import {
   fetchUnpaidWages,
   type CompanySettings,
 } from '@/lib/cashPosition';
+import * as haptics from '@/lib/haptics';
 import { type Job } from '@/lib/types';
 import { isCompanyJob } from '@/lib/stages';
 import {
@@ -40,201 +42,25 @@ import {
 import { useRole } from '@/lib/role';
 import { isValidISODate } from '@/lib/time';
 
-function formatMoney(amount: number): string {
-  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function formatRounded(amount: number): string {
-  return `$${Math.round(amount).toLocaleString('en-US')}`;
-}
-
-/** Compact picker option for tying an expense to a job. */
-interface JobOption {
-  id: string;
-  label: string;
-}
-
-function OverviewCard({ data }: { data: FinancialsData }) {
-  const tiles: [string, string, object?][] = [
-    ['Paid in', formatRounded(data.paid)],
-    ['Expenses', formatRounded(data.expenses)],
-    // Shown next to Expenses so the Net below is obviously the three together.
-    // Wages are a real cost that lives in employee_hours, not finance_entries.
-    ['Labor', formatRounded(data.labor)],
-    [
-      'Net',
-      `${data.net >= 0 ? '+' : '−'}${formatRounded(Math.abs(data.net))}`,
-      data.net >= 0 ? styles.netPositive : styles.netNegative,
-    ],
-    ['This month', formatRounded(data.expensesThisMonth)],
-    ['Contracted YTD', formatRounded(data.contractedYtd)],
-  ];
-  return (
-    <View style={styles.overviewCard}>
-      <View style={styles.overviewGrid}>
-        {tiles.map(([label, value, valueStyle]) => (
-          <View key={label} style={styles.overviewTile}>
-            <Text style={styles.tileLabel}>{label}</Text>
-            <Text
-              style={[styles.tileValue, valueStyle]}
-              numberOfLines={1}
-              adjustsFontSizeToFit>
-              {value}
-            </Text>
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
 /**
- * Pipeline-mirror card: the exact numbers from the Pipeline header, each
- * money tile tappable to its company-wide drill-down ledger.
- */
-function PipelineTotalsCard({ totals }: { totals: CompanyTotals }) {
-  const router = useRouter();
-  const pnl = totals.avgProfitPct;
-  const tiles: { label: string; amount: number; view: string; note?: string }[] = [
-    {
-      label: 'Estimates',
-      amount: totals.estimates,
-      view: 'estimates',
-      // Spelled out because otherwise deleting a superseded estimate looks
-      // like a broken total: only each job's NEWEST estimate is counted.
-      note:
-        totals.estimateCount > totals.estimateJobs
-          ? `newest of ${totals.estimateCount} on ${totals.estimateJobs} jobs`
-          : `${totals.estimateCount} on file`,
-    },
-    { label: 'Contracted', amount: totals.contracted, view: 'contracted' },
-    { label: 'Invoiced', amount: totals.invoiced, view: 'invoices' },
-    { label: 'Paid', amount: totals.paid, view: 'paid' },
-  ];
-  return (
-    <View style={styles.overviewCard}>
-      <View style={styles.overviewGrid}>
-        {tiles.map((tile) => (
-          <Pressable
-            key={tile.label}
-            onPress={() => router.push(`/ledger/${tile.view}` as never)}
-            style={({ pressed }) => [styles.overviewTile, pressed && styles.buttonPressed]}>
-            <View style={styles.tileLabelRow}>
-              <Text style={styles.tileLabel}>{tile.label}</Text>
-              <Ionicons name="chevron-forward" size={12} color={colors.ocean} />
-            </View>
-            <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
-              {formatRounded(tile.amount)}
-            </Text>
-            {tile.note ? <Text style={styles.tileNote}>{tile.note}</Text> : null}
-          </Pressable>
-        ))}
-      </View>
-      <View style={styles.profitRow}>
-        <View>
-          <Text style={styles.tileLabel}>Avg Profit</Text>
-          <Text style={styles.profitSublabel}>completed jobs</Text>
-        </View>
-        <Text
-          style={[
-            styles.profitValue,
-            pnl !== null && (pnl >= 0 ? styles.netPositive : styles.netNegative),
-          ]}
-          numberOfLines={1}
-          adjustsFontSizeToFit>
-          {pnl !== null ? `${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)}%` : '—'}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-
-/**
- * Cash position — why the bank balance is not the same number as profit.
+ * Financials — every dollar the company has taken in, paid out, or is still
+ * owed, plus the itemized expense ledger.
  *
- * Each subtraction is money physically in the account that the business has not
- * earned, and each addition is money earned that has not arrived. Working down
- * the list turns a balance into profit retained, which is the figure most
- * people mean when they ask "how are we doing".
+ * 2026-08-22: the screen was 1,600 lines of hand-rolled cards and it is now
+ * a composition of four panels under `components/financials/`:
+ *
+ *   OverviewTiles      the six headline figures
+ *   MirrorTiles        the pipeline totals, each tappable to its ledger
+ *   CashPositionPanel  bank balance reconciled down to profit retained
+ *   PnlSheet           the collapsible per-job P&L, overhead and capital
+ *   ExpenseLedger      the add-expense form, the month headers and the rows
+ *
+ * Nothing about WHAT is shown moved: the same queries, the same admin gate,
+ * the same arithmetic, the same Company-overhead warning. Only the drawing
+ * changed, and it changed by deleting local styles rather than restyling them.
  */
-function CashPositionCard({
-  bankBalance,
-  asOf,
-  capital,
-  owed,
-  unpaidWages,
-  inTransit,
-  byPerson,
-}: {
-  bankBalance: number | null;
-  asOf: string | null;
-  capital: number;
-  owed: number;
-  unpaidWages: number;
-  inTransit: number;
-  /** Who put the capital in, so the single figure can be broken out. */
-  byPerson: { who: string; amount: number }[];
-}) {
-  if (bankBalance === null) {
-    return (
-      <View style={styles.overviewCard}>
-        <Text style={styles.sectionTitle}>Cash position</Text>
-        <Text style={styles.cashEmpty}>
-          No bank balance recorded yet. Add one and this panel will reconcile it
-          against the ledger.
-        </Text>
-      </View>
-    );
-  }
-  const profitRetained = bankBalance - capital - owed - unpaidWages + inTransit;
-  const rows: { label: string; amount: number; note?: string }[] = [
-    { label: 'Bank balance', amount: bankBalance, note: asOf ? `as of ${formatShortDate(asOf)}` : undefined },
-    { label: 'Less capital invested', amount: -capital, note: 'contributed, never earned' },
-    { label: 'Less owed for out-of-pocket', amount: -owed, note: 'spent, not yet paid back' },
-    { label: 'Less wages worked, unpaid', amount: -unpaidWages, note: 'earned by the crew' },
-    { label: 'Plus receipts in transit', amount: inTransit, note: 'earned, not yet deposited' },
-  ];
-  return (
-    <View style={styles.overviewCard}>
-      <Text style={styles.sectionTitle}>Cash position</Text>
-      {rows
-        .filter((r) => r.amount !== 0 || r.label === 'Bank balance')
-        .map((r) => (
-          <View key={r.label} style={styles.cashRow}>
-            <View style={styles.cashLabelWrap}>
-              <Text style={styles.cashLabel}>{r.label}</Text>
-              {r.note ? <Text style={styles.cashNote}>{r.note}</Text> : null}
-            </View>
-            <Text style={styles.cashAmount}>
-              {r.amount < 0 ? `−${formatRounded(Math.abs(r.amount))}` : formatRounded(r.amount)}
-            </Text>
-          </View>
-        ))}
-      {byPerson.length ? (
-        <View style={styles.capitalBreakdown}>
-          <Text style={styles.cashNote}>
-            {`Invested: ${byPerson.map((p) => `${p.who} ${formatRounded(p.amount)}`).join(' · ')}`}
-          </Text>
-        </View>
-      ) : null}
-      <View style={[styles.cashRow, styles.cashTotalRow]}>
-        <Text style={styles.cashTotalLabel}>Profit retained</Text>
-        <Text
-          style={[
-            styles.cashTotalAmount,
-            profitRetained >= 0 ? styles.netPositive : styles.netNegative,
-          ]}>
-          {formatRounded(profitRetained)}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
 export default function FinancialsScreen() {
   const role = useRole();
-  const router = useRouter();
 
   const [data, setData] = useState<FinancialsData | null>(null);
   const [totals, setTotals] = useState<CompanyTotals | null>(null);
@@ -358,7 +184,7 @@ export default function FinancialsScreen() {
   };
 
   // Per-job P&L rows: revenue = payments received; profit % of revenue.
-  const pnlRows = useMemo(() => {
+  const pnlRows = useMemo<PnlRow[]>(() => {
     if (!data) return [];
     const paidByJob = new Map<string, number>();
     const expByJob = new Map<string, number>();
@@ -546,6 +372,7 @@ export default function FinancialsScreen() {
     });
     setSaving(false);
     if (result.ok) {
+      haptics.success();
       setFormOpen(false);
       resetForm();
       setStatus({ kind: 'success', message: `Expense of ${formatMoney(value)} recorded.` });
@@ -587,6 +414,7 @@ export default function FinancialsScreen() {
     });
     setSavingEdit(false);
     if (result.ok) {
+      haptics.success();
       setEditingId(null);
       setStatus({ kind: 'success', message: 'Expense updated.' });
       await load();
@@ -622,173 +450,45 @@ export default function FinancialsScreen() {
     item: LedgerEntry;
     index: number;
     section: { data: LedgerEntry[] };
-  }) => {
-    const confirming = confirmDeleteId === item.id;
-    const busyDelete = deletingId === item.id;
-    const editing = editingId === item.id;
-    const jobLabel = item.job_id ? jobLabels.get(item.job_id) : null;
-    return (
-      <View
-        style={[
-          styles.rowCard,
-          index > 0 && styles.rowBorderTop,
-          index === 0 && styles.rowFirst,
-          index === section.data.length - 1 && styles.rowLast,
-        ]}>
-        <View style={styles.row}>
-          <View style={styles.iconWrap}>
-            <Ionicons name="pricetag" size={18} color={colors.ocean} />
-          </View>
-          <View style={styles.rowBody}>
-            <Text style={styles.rowValue} numberOfLines={1}>
-              {item.description ?? item.counterparty ?? 'Expense'}
-            </Text>
-            <View style={styles.metaRow}>
-              {jobLabel ? (
-                <View style={styles.jobChip}>
-                  <Text style={styles.jobChipText}>{jobLabel}</Text>
-                </View>
-              ) : null}
-              <Text style={styles.metaText}>
-                {formatShortDate(item.occurred_on)}
-                {item.counterparty && item.description ? ` · ${item.counterparty}` : ''}
-              </Text>
-            </View>
-          </View>
-          <Text style={styles.amountText}>{formatMoney(item.amount)}</Text>
-          <Pressable
-            onPress={() => (editing ? setEditingId(null) : startEdit(item))}
-            hitSlop={6}
-            style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
-            <Ionicons name="pencil" size={15} color={colors.ocean} />
-          </Pressable>
-          <Pressable
-            onPress={() => void pressDelete(item)}
-            disabled={busyDelete}
-            hitSlop={6}
-            style={({ pressed }) => [
-              styles.iconButton,
-              confirming && styles.iconButtonDanger,
-              pressed && styles.buttonPressed,
-            ]}>
-            {busyDelete ? (
-              <ActivityIndicator size="small" color={colors.danger} />
-            ) : (
-              <Ionicons
-                name="trash"
-                size={15}
-                color={confirming ? colors.white : colors.inkSoft}
-              />
-            )}
-          </Pressable>
-        </View>
-        {confirming ? (
-          <Text style={styles.confirmHint}>Tap the trash again to delete this expense.</Text>
-        ) : null}
-        {editing ? (
-          <View style={styles.editCard}>
-            <Text style={styles.fieldLabel}>Amount ($)</Text>
-            <TextInput
-              style={styles.input}
-              value={editAmount}
-              onChangeText={setEditAmount}
-              placeholder="0.00"
-              placeholderTextColor={colors.inkSoft}
-              keyboardType="decimal-pad"
-            />
-            <Text style={styles.fieldLabel}>Date (YYYY-MM-DD)</Text>
-            <TextInput
-              style={styles.input}
-              value={editDate}
-              onChangeText={setEditDate}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={colors.inkSoft}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <Text style={styles.fieldLabel}>Description</Text>
-            <TextInput
-              style={styles.input}
-              value={editDescription}
-              onChangeText={setEditDescription}
-              placeholder="Description"
-              placeholderTextColor={colors.inkSoft}
-            />
-            {jobOptions.length > 0 ? (
-              <>
-                <Text style={styles.fieldLabel}>Job</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.jobPickerRow}>
-                    <Pressable
-                      onPress={() => setEditJobId(companyJobId)}
-                      style={[
-                        styles.pickChip,
-                        editJobId === companyJobId && styles.pickChipActive,
-                      ]}>
-                      <Text
-                        style={[
-                          styles.pickChipText,
-                          editJobId === companyJobId && styles.pickChipTextActive,
-                        ]}>
-                        Company
-                      </Text>
-                    </Pressable>
-                    {jobOptions.map((option) => (
-                      <Pressable
-                        key={option.id}
-                        onPress={() => setEditJobId(option.id)}
-                        style={[
-                          styles.pickChip,
-                          editJobId === option.id && styles.pickChipActive,
-                        ]}>
-                        <Text
-                          style={[
-                            styles.pickChipText,
-                            editJobId === option.id && styles.pickChipTextActive,
-                          ]}>
-                          {option.label}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </ScrollView>
-              </>
-            ) : null}
-            <View style={styles.editButtons}>
-              <Pressable onPress={() => setEditingId(null)} disabled={savingEdit} hitSlop={8}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => void saveEdit(item)}
-                disabled={savingEdit}
-                style={({ pressed }) => [
-                  styles.sunButton,
-                  styles.saveEditButton,
-                  (pressed || savingEdit) && styles.buttonPressed,
-                ]}>
-                {savingEdit ? (
-                  <ActivityIndicator color={colors.ink} />
-                ) : (
-                  <Text style={styles.sunButtonText}>Save</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
-      </View>
-    );
-  };
+  }) => (
+    <ExpenseRow
+      entry={item}
+      index={index}
+      isFirst={index === 0}
+      isLast={index === section.data.length - 1}
+      jobLabel={item.job_id ? (jobLabels.get(item.job_id) ?? null) : null}
+      editing={editingId === item.id}
+      confirming={confirmDeleteId === item.id}
+      busyDelete={deletingId === item.id}
+      savingEdit={savingEdit}
+      editAmount={editAmount}
+      onEditAmount={setEditAmount}
+      editDate={editDate}
+      onEditDate={setEditDate}
+      editDescription={editDescription}
+      onEditDescription={setEditDescription}
+      editJobId={editJobId}
+      onEditJobId={setEditJobId}
+      jobOptions={jobOptions}
+      companyJobId={companyJobId}
+      onToggleEdit={() => (editingId === item.id ? setEditingId(null) : startEdit(item))}
+      onCancelEdit={() => setEditingId(null)}
+      onSaveEdit={() => void saveEdit(item)}
+      onDelete={() => void pressDelete(item)}
+    />
+  );
 
   const placeholder = (message: string) => (
-    <View style={styles.placeholderCard}>
-      <Ionicons name="wallet" size={22} color={colors.inkSoft} />
-      <Text style={styles.placeholderText}>{message}</Text>
-    </View>
+    <Card>
+      <EmptyState icon="wallet" title={message} />
+    </Card>
   );
 
   const header = (
     <View>
-      {!loaded ? null : !role ? (
+      {!loaded ? (
+        <SkeletonList count={4} height={110} />
+      ) : !role ? (
         placeholder('Sign in to see company financials.')
       ) : !role.isAdmin ? (
         placeholder('Financials are available to owners and operators.')
@@ -796,8 +496,8 @@ export default function FinancialsScreen() {
         placeholder('Financials are not available right now.')
       ) : (
         <>
-          <OverviewCard data={data} />
-          <CashPositionCard
+          <OverviewTiles data={data} />
+          <CashPositionPanel
             bankBalance={settings?.bankBalance ?? null}
             asOf={settings?.bankBalanceAsOf ?? null}
             capital={capitalInvested.total}
@@ -806,265 +506,65 @@ export default function FinancialsScreen() {
             inTransit={receiptsInTransit}
             byPerson={capitalInvested.byPerson}
           />
-          {totals ? <PipelineTotalsCard totals={totals} /> : null}
+          {totals ? <MirrorTiles totals={totals} /> : null}
 
           {pnlRows.length > 0 ? (
-            <>
-              <Pressable
-                onPress={() => setPnlOpen((open) => !open)}
-                style={({ pressed }) => [styles.sectionToggle, pressed && styles.buttonPressed]}>
-                <Ionicons
-                  name={pnlOpen ? 'chevron-down' : 'chevron-forward'}
-                  size={18}
-                  color={colors.ocean}
-                />
-                <Text style={styles.sectionTitleInline}>Per-job P&amp;L</Text>
-                <Text style={styles.sectionToggleHint}>
-                  {pnlOpen ? 'Hide' : `${pnlRows.length} jobs`}
-                </Text>
-              </Pressable>
-              {pnlOpen ? (
-                <View style={styles.pnlCard}>
-                  {companyOverhead > 0 ? (
-                    <View style={[styles.pnlRow, styles.overheadRow]}>
-                      <View style={styles.pnlTopRow}>
-                        <Text style={styles.pnlTotalLabel}>Company overhead</Text>
-                        <Text style={styles.pnlPct}>
-                          {`−${formatRounded(companyOverhead)}`}
-                        </Text>
-                      </View>
-                      <Text style={styles.pnlDetail}>
-                        Not charged to any job — these are company costs, kept out
-                        of the per-job figures below.
-                      </Text>
-                      {companyMisfiledPayments.count > 0 ? (
-                        <Text style={[styles.pnlDetail, styles.misfiledNote]}>
-                          {`⚠ ${formatRounded(companyMisfiledPayments.total)} in ${
-                            companyMisfiledPayments.count === 1
-                              ? 'a payment'
-                              : `${companyMisfiledPayments.count} payments`
-                          } is filed under Company. Company earns no revenue — open the payment in the ledger and assign it to its job.`}
-                        </Text>
-                      ) : null}
-                    </View>
-                  ) : null}
-                  {capitalInvested.total > 0 ? (
-                    <View style={[styles.pnlRow, styles.capitalRow]}>
-                      <View style={styles.pnlTopRow}>
-                        <Text style={styles.pnlTotalLabel}>Capital invested</Text>
-                        <Text style={[styles.pnlPct, styles.netPositive]}>
-                          {`+${formatRounded(capitalInvested.total)}`}
-                        </Text>
-                      </View>
-                      <Text style={styles.pnlDetail} numberOfLines={2}>
-                        {capitalInvested.byPerson
-                          .map((p) => `${p.who} ${formatRounded(p.amount)}`)
-                          .join(' · ')}
-                      </Text>
-                      {capitalInvested.returned > 0 ? (
-                        <Text style={styles.pnlDetail}>
-                          {`${formatRounded(capitalInvested.contributed)} contributed · ${formatRounded(capitalInvested.returned)} taken back out`}
-                        </Text>
-                      ) : null}
-                      <Text style={styles.pnlDetail}>
-                        Money put into the business, net of anything withdrawn.
-                        Not revenue and not a cost — it is in none of the figures
-                        below.
-                      </Text>
-                    </View>
-                  ) : null}
-                  <View style={[styles.pnlRow, styles.pnlTotalRow]}>
-                    <View style={styles.pnlTopRow}>
-                      <Text style={styles.pnlTotalLabel}>All jobs</Text>
-                      <Text
-                        style={[
-                          styles.pnlPct,
-                          pnlTotals.pct !== null &&
-                            (pnlTotals.pct >= 0 ? styles.netPositive : styles.netNegative),
-                        ]}>
-                        {pnlTotals.pct !== null
-                          ? `${pnlTotals.pct >= 0 ? '+' : ''}${pnlTotals.pct.toFixed(1)}%`
-                          : '—'}
-                      </Text>
-                    </View>
-                    <Text style={styles.pnlDetail} numberOfLines={1}>
-                      {`Rev ${formatRounded(pnlTotals.revenue)} · Exp ${formatRounded(pnlTotals.expenses)} · ${
-                        Number.isInteger(pnlTotals.hours)
-                          ? pnlTotals.hours
-                          : pnlTotals.hours.toFixed(1)
-                      } h · Labor ${formatRounded(pnlTotals.labor)}`}
-                    </Text>
-                    <Text style={styles.pnlProfitLine} numberOfLines={1}>
-                      {`Profit ${pnlTotals.profit < 0 ? '−' : ''}${formatRounded(Math.abs(pnlTotals.profit))}${
-                        pnlTotals.perHour !== null
-                          ? ` · ${pnlTotals.perHour < 0 ? '−' : ''}${formatRounded(Math.abs(pnlTotals.perHour))}/h worked`
-                          : ''
-                      }`}
-                    </Text>
-                  </View>
-                  {pnlRows.map((row) => (
-                    <Pressable
-                      key={row.id}
-                      onPress={() =>
-                        router.push({ pathname: '/job/[id]', params: { id: row.id } })
-                      }
-                      style={({ pressed }) => [
-                        styles.pnlRow,
-                        styles.pnlRowBorder,
-                        pressed && styles.buttonPressed,
-                      ]}>
-                      <View style={styles.pnlTopRow}>
-                        <View style={styles.jobChip}>
-                          <Text style={styles.jobChipText}>{row.label}</Text>
-                        </View>
-                        <Text
-                          style={[
-                            styles.pnlPct,
-                            row.pct !== null &&
-                              (row.pct >= 0 ? styles.netPositive : styles.netNegative),
-                          ]}>
-                          {row.pct !== null
-                            ? `${row.pct >= 0 ? '+' : ''}${row.pct.toFixed(1)}%`
-                            : '—'}
-                        </Text>
-                      </View>
-                      <Text style={styles.pnlDetail} numberOfLines={1}>
-                        {`Rev ${formatRounded(row.revenue)} · Exp ${formatRounded(row.expenses)} · ${
-                          Number.isInteger(row.hours) ? row.hours : row.hours.toFixed(1)
-                        } h · Labor ${formatRounded(row.labor)}`}
-                      </Text>
-                      {row.revenue > 0 ? (
-                        <Text style={styles.pnlProfitLine} numberOfLines={1}>
-                          {`Profit ${row.profit < 0 ? '−' : ''}${formatRounded(Math.abs(row.profit))}${
-                            row.perHour !== null
-                              ? ` · ${row.perHour < 0 ? '−' : ''}${formatRounded(Math.abs(row.perHour))}/h worked`
-                              : ''
-                          }`}
-                        </Text>
-                      ) : null}
-                    </Pressable>
-                  ))}
-                </View>
-              ) : null}
-            </>
+            <PnlSheet
+              open={pnlOpen}
+              onToggle={() => setPnlOpen((open) => !open)}
+              rows={pnlRows}
+              totals={pnlTotals}
+              companyOverhead={companyOverhead}
+              misfiled={companyMisfiledPayments}
+              capital={capitalInvested}
+            />
           ) : null}
         </>
       )}
 
       {role?.isAdmin && data ? (
         <View style={styles.expensesHeaderRow}>
-          <Text style={styles.sectionTitle}>Expenses</Text>
-          <Pressable
+          <SectionHeader title="Expenses" icon="pricetag" style={styles.expensesTitle} />
+          <Button
+            label={formOpen ? 'Close' : '+ Add expense'}
+            size="sm"
+            variant={formOpen ? 'secondary' : 'primary'}
             onPress={() => {
               setStatus(null);
               setFormOpen((open) => !open);
             }}
-            style={({ pressed }) => [styles.newButton, pressed && styles.buttonPressed]}>
-            <Text style={styles.newButtonText}>{formOpen ? 'Close' : '+ Add expense'}</Text>
-          </Pressable>
+          />
         </View>
       ) : null}
 
       {formOpen && role?.isAdmin && data ? (
-        <View style={styles.formCard}>
-          <Text style={styles.fieldLabel}>Amount ($)</Text>
-          <TextInput
-            style={styles.input}
-            value={amount}
-            onChangeText={setAmount}
-            placeholder="0.00"
-            placeholderTextColor={colors.inkSoft}
-            keyboardType="decimal-pad"
-          />
-          <Text style={styles.fieldLabel}>Description</Text>
-          <TextInput
-            style={styles.input}
-            value={description}
-            onChangeText={setDescription}
-            placeholder="What was this for?"
-            placeholderTextColor={colors.inkSoft}
-          />
-          <Text style={styles.fieldLabel}>Paid to (optional)</Text>
-          <TextInput
-            style={styles.input}
-            value={paidTo}
-            onChangeText={setPaidTo}
-            placeholder="Vendor or store"
-            placeholderTextColor={colors.inkSoft}
-          />
-          <Text style={styles.fieldLabel}>Date (YYYY-MM-DD)</Text>
-          <TextInput
-            style={styles.input}
-            value={date}
-            onChangeText={setDate}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.inkSoft}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {jobOptions.length > 0 ? (
-            <>
-              <Text style={styles.fieldLabel}>Job (optional)</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                <View style={styles.jobPickerRow}>
-                  <Pressable
-                    onPress={() => setJobId(companyJobId)}
-                    style={[styles.pickChip, jobId === companyJobId && styles.pickChipActive]}>
-                    <Text
-                      style={[
-                        styles.pickChipText,
-                        jobId === companyJobId && styles.pickChipTextActive,
-                      ]}>
-                      Company
-                    </Text>
-                  </Pressable>
-                  {jobOptions.map((option) => (
-                    <Pressable
-                      key={option.id}
-                      onPress={() => setJobId(option.id)}
-                      style={[styles.pickChip, jobId === option.id && styles.pickChipActive]}>
-                      <Text
-                        style={[
-                          styles.pickChipText,
-                          jobId === option.id && styles.pickChipTextActive,
-                        ]}>
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </ScrollView>
-            </>
-          ) : null}
-          <Pressable
-            onPress={() => void saveExpense()}
-            disabled={saving}
-            style={({ pressed }) => [
-              styles.sunButton,
-              (pressed || saving) && styles.buttonPressed,
-            ]}>
-            {saving ? (
-              <ActivityIndicator color={colors.ink} />
-            ) : (
-              <>
-                <Ionicons name="pricetag" size={16} color={colors.ink} />
-                <Text style={styles.sunButtonText}>Record expense</Text>
-              </>
-            )}
-          </Pressable>
-        </View>
+        <ExpenseForm
+          amount={amount}
+          onAmount={setAmount}
+          description={description}
+          onDescription={setDescription}
+          paidTo={paidTo}
+          onPaidTo={setPaidTo}
+          date={date}
+          onDate={setDate}
+          jobId={jobId}
+          onJobId={setJobId}
+          jobOptions={jobOptions}
+          companyJobId={companyJobId}
+          saving={saving}
+          onSave={() => void saveExpense()}
+        />
       ) : null}
 
       {status ? (
-        <Text
-          style={[
-            styles.statusText,
-            status.kind === 'error' ? styles.statusError : styles.statusSuccess,
-          ]}>
+        <AppText
+          variant="caption"
+          align="center"
+          color={status.kind === 'error' ? colors.danger : colors.accentPrimary}
+          style={styles.status}>
           {status.message}
-        </Text>
+        </AppText>
       ) : null}
-
     </View>
   );
 
@@ -1084,40 +584,31 @@ export default function FinancialsScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={colors.ocean}
+            tintColor={colors.accentPrimary}
+            colors={[colors.accentPrimary]}
+            progressBackgroundColor={colors.surface}
           />
         }
         ListHeaderComponent={header}
-        renderSectionHeader={({ section }) => {
-          const open = openMonths.has(section.key);
-          return (
-            <Pressable
-              onPress={() => toggleMonth(section.key)}
-              style={({ pressed }) => [styles.monthHeader, pressed && styles.buttonPressed]}>
-              <View style={styles.monthLabelRow}>
-                <Ionicons
-                  name={open ? 'chevron-down' : 'chevron-forward'}
-                  size={15}
-                  color={colors.inkSoft}
-                />
-                <Text style={styles.monthLabel}>{section.label}</Text>
-                <Text style={styles.monthCount}>
-                  ({section.entries.length})
-                </Text>
-              </View>
-              <Text style={styles.monthTotal}>{formatMoney(section.total)}</Text>
-            </Pressable>
-          );
-        }}
+        renderSectionHeader={({ section }) => (
+          <MonthHeader
+            label={section.label}
+            count={section.entries.length}
+            total={section.total}
+            open={openMonths.has(section.key)}
+            onToggle={() => toggleMonth(section.key)}
+          />
+        )}
         renderItem={renderRow}
         ListEmptyComponent={
           loaded && role?.isAdmin && data ? (
-            <View style={styles.placeholderCard}>
-              <Ionicons name="pricetag" size={22} color={colors.inkSoft} />
-              <Text style={styles.placeholderText}>
-                No expenses recorded yet. Add the first one above.
-              </Text>
-            </View>
+            <Card>
+              <EmptyState
+                icon="pricetag"
+                title="No expenses recorded yet"
+                body="Add the first one above and it will file itself into this month."
+              />
+            </Card>
           ) : null
         }
       />
@@ -1128,466 +619,25 @@ export default function FinancialsScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceAlt,
   },
   container: {
     padding: spacing.lg,
     paddingBottom: spacing.xl,
   },
-  newButton: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    ...shadows.card,
-  },
-  newButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  overviewCard: {
-    backgroundColor: colors.card,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    ...shadows.card,
-  },
-  overviewGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.md,
-  },
-  overviewTile: {
-    width: '50%',
-    gap: 2,
-    paddingRight: spacing.sm,
-  },
-  tileLabel: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  tileValue: {
-    color: colors.ink,
-    fontSize: 20,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  netPositive: {
-    color: colors.success,
-  },
-  netNegative: {
-    color: colors.danger,
-  },
-  tileLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  profitRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
-  },
-  tileNote: {
-    color: colors.inkSoft,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  profitSublabel: {
-    color: colors.inkSoft,
-    fontSize: 10,
-  },
-  profitValue: {
-    color: colors.ink,
-    fontSize: 24,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  formCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    gap: spacing.xs,
-    marginBottom: spacing.md,
-    ...shadows.card,
-  },
-  fieldLabel: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  input: {
-    backgroundColor: colors.cream,
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    borderColor: colors.tan,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm - 2,
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  jobPickerRow: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-  },
-  pickChip: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-  },
-  pickChipActive: {
-    backgroundColor: colors.ocean,
-  },
-  pickChipText: {
-    color: colors.ocean,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  pickChipTextActive: {
-    color: colors.white,
-  },
-  sunButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 4,
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.sm,
-    ...shadows.card,
-  },
-  sunButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  saveEditButton: {
-    flexGrow: 0,
-    paddingHorizontal: spacing.lg,
-    marginTop: 0,
-  },
-  buttonPressed: {
-    opacity: 0.7,
-  },
-  placeholderCard: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  placeholderText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  monthHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: spacing.md,
-    marginBottom: spacing.xs,
-    paddingHorizontal: spacing.xs,
-  },
-  monthLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  monthCount: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
-  },
   expensesHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    marginBottom: spacing.xs,
-  },
-  sectionToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
-    paddingVertical: spacing.xs,
-  },
-  sectionTitleInline: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
-    flex: 1,
-  },
-  sectionToggleHint: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  pnlCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    marginBottom: spacing.sm,
-    ...shadows.card,
-  },
-  pnlRow: {
-    padding: spacing.md,
-    gap: 4,
-  },
-  pnlRowBorder: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
-  },
-  pnlTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  pnlPct: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  pnlDetail: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  pnlTotalRow: {
-    backgroundColor: colors.sunLight,
-  },
-  // Company overhead sits above the per-job rows and is visually separate from
-  // them — it is a cost of running the business, not of running a job.
-  overheadRow: {
-    backgroundColor: colors.skySoft,
-  },
-  misfiledNote: {
-    color: colors.coralDeep,
-    marginTop: spacing.xs,
-  },
-  cashRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  cashLabelWrap: {
-    flex: 1,
-  },
-  cashLabel: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  cashNote: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  cashAmount: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-  },
-  cashTotalRow: {
-    borderTopWidth: 1,
-    borderTopColor: colors.ink + '22',
-    marginTop: spacing.xs,
-    paddingTop: spacing.md,
-    alignItems: 'center',
-  },
-  cashTotalLabel: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  cashTotalAmount: {
-    fontSize: 20,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  capitalBreakdown: {
-    paddingBottom: spacing.xs,
-  },
-  cashEmpty: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: spacing.sm,
-  },
-  // Capital in, distinct from both the per-job totals and overhead out.
-  capitalRow: {
-    backgroundColor: colors.tealSoft,
-  },
-  pnlTotalLabel: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  pnlProfitLine: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  monthLabel: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  monthTotal: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  rowCard: {
-    backgroundColor: colors.white,
-  },
-  rowFirst: {
-    borderTopLeftRadius: radii.md,
-    borderTopRightRadius: radii.md,
-  },
-  rowLast: {
-    borderBottomLeftRadius: radii.md,
-    borderBottomRightRadius: radii.md,
-  },
-  rowBorderTop: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
-  },
-  row: {
-    flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    padding: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
   },
-  iconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rowBody: {
+  expensesTitle: {
     flex: 1,
-    gap: 2,
+    marginBottom: 0,
   },
-  rowValue: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  jobChip: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-  },
-  jobChipText: {
-    color: colors.ocean,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  metaText: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-    flexShrink: 1,
-  },
-  amountText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  iconButton: {
-    width: 28,
-    height: 28,
-    borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconButtonDanger: {
-    backgroundColor: colors.danger,
-  },
-  confirmHint: {
-    color: colors.danger,
-    fontSize: 12,
-    fontWeight: '700',
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-    textAlign: 'right',
-  },
-  editCard: {
-    backgroundColor: colors.cream,
-    marginHorizontal: spacing.md,
-    marginBottom: spacing.md,
-    borderRadius: radii.sm,
-    padding: spacing.md,
-    gap: spacing.xs,
-  },
-  editButtons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: spacing.md,
-    marginTop: spacing.xs,
-  },
-  cancelText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
+  status: {
     marginBottom: spacing.sm,
-  },
-  statusError: {
-    color: colors.danger,
-  },
-  statusSuccess: {
-    color: colors.ocean,
   },
 });

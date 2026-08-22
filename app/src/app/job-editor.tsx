@@ -1,18 +1,24 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { Field } from '@/components/forms/Field';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  ListRow,
+  Screen,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, spacing } from '@/constants/theme';
 import { fetchJob } from '@/lib/data';
+import * as haptics from '@/lib/haptics';
 import {
   createCustomer,
   createJob,
@@ -182,6 +188,7 @@ export default function JobEditorScreen() {
       setNcError(result.message);
       return;
     }
+    haptics.success();
     // Refresh the list; if the refetch fails, at least show the new row.
     const rows = await fetchCustomers();
     if (rows.length > 0) {
@@ -244,6 +251,7 @@ export default function JobEditorScreen() {
         setError(result.message);
         return;
       }
+      haptics.success();
       if (result.warning) {
         setWarning(result.warning);
         setTimeout(() => router.back(), 1600);
@@ -257,6 +265,7 @@ export default function JobEditorScreen() {
         setError(result.message);
         return;
       }
+      haptics.success();
       if (result.warning) setWarning(result.warning);
       router.replace({ pathname: '/job/[id]', params: { id: result.id } });
     }
@@ -268,9 +277,9 @@ export default function JobEditorScreen() {
     return (
       <>
         <Stack.Screen options={{ title: screenTitle }} />
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.ocean} />
-        </View>
+        <Screen edges={[]}>
+          <SkeletonList count={4} height={120} />
+        </Screen>
       </>
     );
   }
@@ -279,12 +288,15 @@ export default function JobEditorScreen() {
     return (
       <>
         <Stack.Screen options={{ title: screenTitle }} />
-        <View style={styles.center}>
-          <Ionicons name="lock-closed" size={28} color={colors.inkSoft} />
-          <Text style={styles.blockText}>
-            Editing projects is only available to admins. Please sign in with an admin account.
-          </Text>
-        </View>
+        <Screen edges={[]}>
+          <Card>
+            <EmptyState
+              icon="lock-closed"
+              title="Admins only"
+              body="Editing projects is only available to admins. Please sign in with an admin account."
+            />
+          </Card>
+        </Screen>
       </>
     );
   }
@@ -293,9 +305,15 @@ export default function JobEditorScreen() {
     return (
       <>
         <Stack.Screen options={{ title: screenTitle }} />
-        <View style={styles.center}>
-          <Text style={styles.blockText}>Job not found.</Text>
-        </View>
+        <Screen edges={[]}>
+          <Card>
+            <EmptyState
+              icon="help-circle"
+              title="Job not found."
+              body="It may have been deleted, or the link is out of date."
+            />
+          </Card>
+        </Screen>
       </>
     );
   }
@@ -303,391 +321,333 @@ export default function JobEditorScreen() {
   return (
     <>
       <Stack.Screen options={{ title: screenTitle }} />
-      <ScrollView
-        style={styles.safe}
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled">
-        <View style={styles.headerCard}>
-          <Text style={styles.headerLabel}>{isEdit ? 'Project' : 'New project'}</Text>
-          <View style={styles.numberChip}>
-            <Ionicons name="pricetag" size={14} color={colors.ocean} />
-            <Text style={styles.numberChipText}>{jobNumber ?? 'DC-…'}</Text>
-          </View>
+      <Screen edges={[]}>
+        <Card style={styles.headerCard}>
+          <AppText variant="section" color={colors.textMuted}>
+            {isEdit ? 'Project' : 'New project'}
+          </AppText>
+          <Chip label={jobNumber ?? 'DC-…'} icon="pricetag" tone="olive" />
           {!isEdit ? (
-            <Text style={styles.headerHint}>Job number is assigned automatically.</Text>
+            <AppText variant="caption" color={colors.textMuted}>
+              Job number is assigned automatically.
+            </AppText>
           ) : null}
-        </View>
+        </Card>
 
-        <Text style={styles.sectionTitle}>Details</Text>
-        <View style={styles.card}>
-          <Text style={styles.fieldLabel}>Name</Text>
-          <TextInput
-            style={styles.input}
+        <SectionHeader title="Details" icon="clipboard" />
+        <Card>
+          <Field
+            label="Name"
             value={name}
             onChangeText={setName}
             placeholder="e.g. Install 24 modules"
-            placeholderTextColor={colors.inkSoft}
           />
-          <Text style={styles.fieldLabel}>Description</Text>
-          <TextInput
-            style={[styles.input, styles.multiline]}
+          <Field
+            label="Description"
             value={description}
             onChangeText={setDescription}
             placeholder="Scope of work, notes for the crew…"
-            placeholderTextColor={colors.inkSoft}
             multiline
           />
-          <Text style={styles.fieldLabel}>Stage</Text>
-          <View style={styles.chipRow}>
-            {STAGES.map((s) => {
-              const selected = stage === s;
-              return (
-                <Pressable
-                  key={s}
-                  onPress={() => setStage(s)}
-                  style={[styles.chip, selected && styles.chipSelected]}>
-                  <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{s}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Text style={styles.fieldLabel}>Job type</Text>
-          <View style={styles.chipRow}>
-            {JOB_TYPES.map((t) => {
-              const selected = jobType === t;
-              return (
-                <Pressable
-                  key={t}
-                  onPress={() => setJobType(t)}
-                  style={[styles.chip, selected && styles.chipSelected]}>
-                  <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{t}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Text style={styles.fieldHint}>
-            Removal &amp; reinstall work takes longer per panel than a fresh install, so this
-            picks which finished jobs the hours forecast learns from.
-          </Text>
 
-          <Text style={styles.fieldLabel}>Modules / panels</Text>
-          <TextInput
-            style={styles.input}
+          <View style={styles.field}>
+            <AppText variant="section" color={colors.textMuted}>
+              Stage
+            </AppText>
+            <View style={styles.chipRow}>
+              {STAGES.map((s) => (
+                <Chip
+                  key={s}
+                  label={s}
+                  tone="olive"
+                  selected={stage === s}
+                  onPress={() => setStage(s)}
+                />
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.field}>
+            <AppText variant="section" color={colors.textMuted}>
+              Job type
+            </AppText>
+            <View style={styles.chipRow}>
+              {JOB_TYPES.map((t) => (
+                <Chip
+                  key={t}
+                  label={t}
+                  tone="ocean"
+                  selected={jobType === t}
+                  onPress={() => setJobType(t)}
+                />
+              ))}
+            </View>
+            <AppText variant="caption" color={colors.textMuted}>
+              Removal &amp; reinstall work takes longer per panel than a fresh install, so this
+              picks which finished jobs the hours forecast learns from.
+            </AppText>
+          </View>
+
+          <Field
+            label="Modules / panels"
             value={moduleCount}
             onChangeText={setModuleCount}
             placeholder="Leave blank to read it from the job name"
-            placeholderTextColor={colors.inkSoft}
             keyboardType="number-pad"
+            style={styles.tightField}
           />
-          <Text style={styles.fieldHint}>
-            Drives the panel totals on the pipeline header and the estimated hours on each
-            project card.
-          </Text>
+          <AppText variant="caption" color={colors.textMuted} style={styles.hint}>
+            Drives the panel totals on the pipeline header and the estimated hours on each project
+            card.
+          </AppText>
 
           {/* Critter guard is a FLAG, not a job type — most of it is installed
               as part of an R&R, so any job can carry it. */}
-          <Pressable
+          <AnimatedPressable
             onPress={() => setHasCritterGuard((on) => !on)}
-            style={({ pressed }) => [styles.checkRow, pressed && styles.checkRowPressed]}>
+            haptic="tapLight"
+            scaleTo={0.99}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: hasCritterGuard }}
+            accessibilityLabel="Critter guard installed on this job"
+            style={styles.checkRow}>
             <Ionicons
               name={hasCritterGuard ? 'checkbox' : 'square-outline'}
               size={20}
-              color={colors.ocean}
+              color={colors.accentPrimary}
             />
-            <Text style={styles.checkRowText}>Critter guard installed on this job</Text>
-          </Pressable>
+            <AppText variant="bodyStrong">Critter guard installed on this job</AppText>
+          </AnimatedPressable>
+
           {hasCritterGuard ? (
             <>
-              <Text style={styles.fieldLabel}>Critter guard panels (optional)</Text>
-              <TextInput
-                style={styles.input}
+              <Field
+                label="Critter guard panels (optional)"
                 value={critterPanels}
                 onChangeText={setCritterPanels}
                 placeholder="Blank = every panel on the job"
-                placeholderTextColor={colors.inkSoft}
                 keyboardType="number-pad"
+                style={styles.tightField}
               />
-              <Text style={styles.fieldHint}>
+              <AppText variant="caption" color={colors.textMuted} style={styles.hint}>
                 Only counted once the job reaches Complete. Leave blank if the guard covers the
                 whole array — the total then follows the module count automatically.
-              </Text>
+              </AppText>
             </>
           ) : null}
 
           {stage === 'Complete' ? (
-            <>
-              <Text style={styles.fieldLabel}>Completed date (YYYY-MM-DD)</Text>
-              <TextInput
-                style={styles.input}
-                value={completedOn}
-                onChangeText={setCompletedOn}
-                placeholder={`Leave blank for today (${todayISO()})`}
-                placeholderTextColor={colors.inkSoft}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </>
+            <Field
+              label="Completed date (YYYY-MM-DD)"
+              value={completedOn}
+              onChangeText={setCompletedOn}
+              placeholder={`Leave blank for today (${todayISO()})`}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
           ) : null}
-          <Text style={styles.fieldLabel}>Address</Text>
-          <TextInput
-            style={styles.input}
+
+          <Field
+            label="Address"
             value={address}
             onChangeText={setAddress}
             placeholder="Street, city, state"
-            placeholderTextColor={colors.inkSoft}
           />
-        </View>
+        </Card>
 
-        <Text style={styles.sectionTitle}>Project manager</Text>
-        <View style={styles.card}>
-          <Text style={styles.fieldLabel}>Name</Text>
-          <TextInput
-            style={styles.input}
+        <SectionHeader title="Project manager" icon="person-circle" />
+        <Card>
+          <Field
+            label="Name"
             value={projectManager}
             onChangeText={setProjectManager}
             placeholder="Who's running this job?"
-            placeholderTextColor={colors.inkSoft}
           />
-          <Text style={styles.fieldLabel}>Cell number</Text>
-          <TextInput
-            style={styles.input}
+          <Field
+            label="Cell number"
             value={pmPhone}
             onChangeText={setPmPhone}
             placeholder="(913) 555-0100"
-            placeholderTextColor={colors.inkSoft}
             keyboardType="phone-pad"
           />
-        </View>
+        </Card>
 
-        <Text style={styles.sectionTitle}>Customer</Text>
-        <View style={styles.card}>
+        <SectionHeader title="Customer" icon="people" />
+        <Card padded={false}>
           {customers.length > 4 ? (
-            <TextInput
-              style={styles.input}
-              value={customerSearch}
-              onChangeText={setCustomerSearch}
-              placeholder="Search customers"
-              placeholderTextColor={colors.inkSoft}
-            />
+            <View style={styles.inset}>
+              <Field
+                label="Search"
+                value={customerSearch}
+                onChangeText={setCustomerSearch}
+                placeholder="Search customers"
+                style={styles.lastField}
+              />
+            </View>
           ) : null}
-          <Pressable
+
+          <ListRow
+            title="No customer"
+            chevron={false}
+            divider
             onPress={() => setCustomerId(null)}
-            style={({ pressed }) => [styles.customerRow, pressed && styles.rowPressed]}>
-            <Text style={[styles.customerName, customerId === null && styles.customerSelected]}>
-              No customer
-            </Text>
-            {customerId === null ? (
-              <Ionicons name="checkmark-circle" size={20} color={colors.ocean} />
-            ) : null}
-          </Pressable>
-          {filteredCustomers.map((customer) => {
-            const selected = customer.id === customerId;
-            return (
-              <Pressable
-                key={customer.id}
-                onPress={() => setCustomerId(customer.id)}
-                style={({ pressed }) => [
-                  styles.customerRow,
-                  styles.rowBorderTop,
-                  pressed && styles.rowPressed,
-                ]}>
-                <View style={styles.customerBody}>
-                  <Text style={[styles.customerName, selected && styles.customerSelected]}>
-                    {customer.name}
-                  </Text>
-                  {customer.address ? (
-                    <Text style={styles.customerAddress} numberOfLines={1}>
-                      {customer.address}
-                    </Text>
-                  ) : null}
-                </View>
-                {selected ? (
-                  <Ionicons name="checkmark-circle" size={20} color={colors.ocean} />
-                ) : null}
-              </Pressable>
-            );
-          })}
+            right={
+              customerId === null ? (
+                <Ionicons name="checkmark-circle" size={20} color={colors.accentPrimary} />
+              ) : undefined
+            }
+          />
+
+          {filteredCustomers.map((customer, index) => (
+            <ListRow
+              key={customer.id}
+              title={customer.name}
+              subtitle={customer.address ?? undefined}
+              chevron={false}
+              divider={index < filteredCustomers.length - 1}
+              onPress={() => setCustomerId(customer.id)}
+              right={
+                customer.id === customerId ? (
+                  <Ionicons name="checkmark-circle" size={20} color={colors.accentPrimary} />
+                ) : undefined
+              }
+            />
+          ))}
+
           {customers.length === 0 ? (
-            <Text style={styles.emptyText}>No customers available.</Text>
+            <AppText variant="caption" color={colors.textMuted} style={styles.inset}>
+              No customers available.
+            </AppText>
           ) : filteredCustomers.length === 0 ? (
-            <Text style={styles.emptyText}>No customers match "{customerSearch.trim()}".</Text>
+            <AppText variant="caption" color={colors.textMuted} style={styles.inset}>
+              No customers match &quot;{customerSearch.trim()}&quot;.
+            </AppText>
           ) : null}
+
           {selectedCustomer && customerSearch ? (
-            <Text style={styles.selectedNote}>Selected: {selectedCustomer.name}</Text>
+            <AppText variant="caption" color={colors.accentPrimary} style={styles.inset}>
+              Selected: {selectedCustomer.name}
+            </AppText>
           ) : null}
 
           {!showNewCustomer ? (
-            <Pressable
+            <ListRow
+              icon="person-add"
+              title="+ New customer"
+              chevron={false}
+              style={styles.rowBorderTop}
               onPress={() => {
                 setShowNewCustomer(true);
                 setNcError(null);
               }}
-              style={({ pressed }) => [
-                styles.newCustomerToggle,
-                styles.rowBorderTop,
-                pressed && styles.rowPressed,
-              ]}>
-              <Ionicons name="person-add" size={16} color={colors.ocean} />
-              <Text style={styles.newCustomerToggleText}>+ New customer</Text>
-            </Pressable>
+            />
           ) : (
-            <View style={[styles.newCustomerForm, styles.rowBorderTop]}>
-              <Text style={styles.newCustomerTitle}>New customer</Text>
-              <Text style={styles.fieldLabel}>Name</Text>
-              <TextInput
-                style={styles.input}
+            <View style={[styles.inset, styles.rowBorderTop]}>
+              <AppText variant="heading" style={styles.newCustomerTitle}>
+                New customer
+              </AppText>
+              <Field
+                label="Name"
                 value={ncName}
                 onChangeText={setNcName}
                 placeholder="Customer name"
-                placeholderTextColor={colors.inkSoft}
               />
-              <Text style={styles.fieldLabel}>Phone</Text>
-              <TextInput
-                style={styles.input}
+              <Field
+                label="Phone"
                 value={ncPhone}
                 onChangeText={setNcPhone}
                 placeholder="(913) 555-0100"
-                placeholderTextColor={colors.inkSoft}
                 keyboardType="phone-pad"
               />
-              <Text style={styles.fieldLabel}>Email</Text>
-              <TextInput
-                style={styles.input}
+              <Field
+                label="Email"
                 value={ncEmail}
                 onChangeText={setNcEmail}
                 placeholder="name@example.com"
-                placeholderTextColor={colors.inkSoft}
                 keyboardType="email-address"
                 autoCapitalize="none"
               />
-              <Text style={styles.fieldLabel}>Address</Text>
-              <TextInput
-                style={styles.input}
+              <Field
+                label="Address"
                 value={ncAddress}
                 onChangeText={setNcAddress}
                 placeholder="Street, city, state"
-                placeholderTextColor={colors.inkSoft}
               />
-              {ncError ? <Text style={styles.errorText}>{ncError}</Text> : null}
+              {ncError ? (
+                <AppText variant="caption" color={colors.danger} align="center">
+                  {ncError}
+                </AppText>
+              ) : null}
               <View style={styles.newCustomerButtons}>
-                <Pressable
+                <Button
+                  label="Cancel"
+                  variant="ghost"
+                  size="sm"
+                  disabled={ncSaving}
                   onPress={resetNewCustomerForm}
+                />
+                <Button
+                  label="Add customer"
+                  size="sm"
+                  loading={ncSaving}
                   disabled={ncSaving}
-                  style={({ pressed }) => [styles.cancelButton, pressed && styles.buttonPressed]}>
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </Pressable>
-                <Pressable
                   onPress={addNewCustomer}
-                  disabled={ncSaving}
-                  style={({ pressed }) => [
-                    styles.addCustomerButton,
-                    (pressed || ncSaving) && styles.buttonPressed,
-                  ]}>
-                  {ncSaving ? (
-                    <ActivityIndicator color={colors.ink} size="small" />
-                  ) : (
-                    <Text style={styles.addCustomerButtonText}>Add customer</Text>
-                  )}
-                </Pressable>
+                />
               </View>
             </View>
           )}
-        </View>
+        </Card>
 
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        {warning ? <Text style={styles.warningText}>{warning}</Text> : null}
+        {error ? (
+          <AppText variant="caption" color={colors.danger} align="center">
+            {error}
+          </AppText>
+        ) : null}
+        {warning ? (
+          <AppText variant="caption" color={colors.danger} align="center">
+            {warning}
+          </AppText>
+        ) : null}
 
-        <Pressable
+        <Button
+          label={saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create project'}
+          icon={isEdit ? 'save' : 'add-circle'}
           onPress={save}
+          loading={saving}
           disabled={saving}
-          style={({ pressed }) => [
-            styles.primaryButton,
-            (pressed || saving) && styles.buttonPressed,
-          ]}>
-          {saving ? (
-            <ActivityIndicator color={colors.ink} />
-          ) : (
-            <Ionicons name={isEdit ? 'save' : 'add-circle'} size={18} color={colors.ink} />
-          )}
-          <Text style={styles.primaryButtonText}>
-            {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create project'}
-          </Text>
-        </Pressable>
-      </ScrollView>
+          size="lg"
+          fullWidth
+          style={styles.saveButton}
+        />
+      </Screen>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.cream,
-  },
-  container: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xl,
-    gap: spacing.md,
-  },
-  center: {
-    flex: 1,
-    backgroundColor: colors.cream,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.xl,
-    gap: spacing.sm,
-  },
-  blockText: {
-    color: colors.inkSoft,
-    fontSize: 15,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
   headerCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.xs,
-    ...shadows.card,
+    alignItems: 'flex-start',
   },
-  headerLabel: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+  field: {
+    gap: 4,
+    marginBottom: spacing.sm,
   },
-  numberChip: {
+  // Pulls a hint up under the field it explains.
+  tightField: {
+    marginBottom: spacing.xs,
+  },
+  hint: {
+    marginBottom: spacing.sm,
+  },
+  lastField: {
+    marginBottom: 0,
+  },
+  chipRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    alignSelf: 'flex-start',
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.xs + 2,
-    paddingHorizontal: spacing.sm + 4,
-  },
-  numberChipText: {
-    color: colors.ocean,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  headerHint: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
-    marginTop: spacing.sm,
-  },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
+    flexWrap: 'wrap',
     gap: spacing.sm,
-    ...shadows.card,
+    marginBottom: spacing.xs,
   },
   checkRow: {
     flexDirection: 'row',
@@ -695,131 +655,16 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingVertical: spacing.sm,
   },
-  checkRowPressed: {
-    opacity: 0.7,
-  },
-  checkRowText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  fieldHint: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: -spacing.xs,
-  },
-  fieldLabel: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginTop: spacing.xs,
-  },
-  input: {
-    backgroundColor: colors.cream,
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    borderColor: colors.tan,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  multiline: {
-    minHeight: 72,
-    textAlignVertical: 'top',
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  chip: {
-    backgroundColor: colors.cream,
-    borderWidth: 1,
-    borderColor: colors.tan,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.xs + 2,
+  inset: {
     paddingHorizontal: spacing.md,
-  },
-  chipSelected: {
-    backgroundColor: colors.sun,
-    borderColor: colors.sun,
-  },
-  chipText: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  chipTextSelected: {
-    color: colors.ink,
-  },
-  customerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    paddingVertical: spacing.sm + 2,
+    paddingVertical: spacing.sm,
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
-  },
-  rowPressed: {
-    backgroundColor: colors.skySoft,
-  },
-  customerBody: {
-    flex: 1,
-    gap: 2,
-  },
-  customerName: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  customerSelected: {
-    color: colors.ocean,
-    fontWeight: '800',
-  },
-  customerAddress: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  emptyText: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '600',
-    paddingVertical: spacing.xs,
-  },
-  selectedNote: {
-    color: colors.ocean,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  newCustomerToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.sm + 2,
-  },
-  newCustomerToggleText: {
-    color: colors.ocean,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  newCustomerForm: {
-    gap: spacing.sm,
-    paddingTop: spacing.sm,
+    borderTopColor: colors.border,
   },
   newCustomerTitle: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
   },
   newCustomerButtons: {
     flexDirection: 'row',
@@ -828,60 +673,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.xs,
   },
-  cancelButton: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-  },
-  cancelButtonText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  addCustomerButton: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addCustomerButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  errorText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  warningText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  primaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 2,
-    paddingHorizontal: spacing.lg,
+  saveButton: {
     marginTop: spacing.sm,
-    alignSelf: 'stretch',
-    ...shadows.card,
-  },
-  buttonPressed: {
-    opacity: 0.7,
-  },
-  primaryButtonText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
   },
 });
