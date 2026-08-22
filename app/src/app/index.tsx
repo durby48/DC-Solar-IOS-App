@@ -17,7 +17,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
-import { getAccountInfo } from '@/lib/account';
+import { landingRoute } from '@/lib/account';
 import { pendingChallenge, submitChallenge } from '@/lib/mfa';
 import { supabase } from '@/lib/supabase';
 import { verseOfTheDay } from '@/lib/verses';
@@ -45,8 +45,7 @@ export default function LoginScreen() {
 
   /** Send staff to the app and everyone else to the customer portal. */
   const routeByAccount = async () => {
-    const account = await getAccountInfo();
-    router.replace(account.kind === 'employee' ? '/(tabs)' : ('/customer' as never));
+    router.replace(await landingRoute());
   };
 
   const verifyCode = async () => {
@@ -90,7 +89,7 @@ export default function LoginScreen() {
       }
       await routeByAccount();
     } catch {
-      setError('Could not reach the server. Try demo mode below.');
+      setError('Could not reach the server. Check your connection and try again.');
     } finally {
       setLoading(false);
     }

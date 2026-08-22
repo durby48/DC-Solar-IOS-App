@@ -72,6 +72,24 @@ export async function getAccountInfo(): Promise<AccountInfo> {
   }
 }
 
+/**
+ * Where a freshly-signed-in account belongs.
+ *
+ * Only `employee` gets the crew shell; `customer`, `none` and `unknown` all go
+ * to the portal. That default is deliberate — an invited customer whose row we
+ * can't classify (offline, or the lookup failed) must never be dropped into the
+ * crew tabs, where every screen would then fail its own RLS check and look
+ * broken. The portal is the safe landing spot: it shows only what
+ * `my_projects` / `my_documents` / `my_balance` return, which is nothing at all
+ * for an account with no customer link.
+ *
+ * Routing only. Access is decided by RLS on the server, never by this.
+ */
+export async function landingRoute(): Promise<'/(tabs)' | '/customer'> {
+  const account = await getAccountInfo();
+  return account.kind === 'employee' ? '/(tabs)' : '/customer';
+}
+
 export type SignUpResult =
   | { ok: true; needsConfirmation: boolean }
   | { ok: false; message: string };

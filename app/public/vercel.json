@@ -1,8 +1,0 @@
-{
-  "cleanUrls": true,
-  "rewrites": [
-    { "source": "/job/:id", "destination": "/job/[id]" },
-    { "source": "/ledger/:view", "destination": "/ledger/[view]" }
-  ],
-  "trailingSlash": false
-}

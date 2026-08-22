@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { landingRoute } from '@/lib/account';
 import { supabase } from '@/lib/supabase';
 
 export default function SetPasswordScreen() {
@@ -22,6 +23,30 @@ export default function SetPasswordScreen() {
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Is there actually a session to set a password ON? Invite and recovery
+  // links are single-use and expire, so this screen is regularly opened with
+  // nothing behind it. `null` = still deciding.
+  const [hasSession, setHasSession] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // On web the session comes out of the `#access_token=` fragment that
+    // supabase-js parses at startup (`detectSessionInUrl`); `getSession()`
+    // waits for that to finish, so this is a real answer, not a race.
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!cancelled) setHasSession(Boolean(data.session));
+    });
+    // Belt and braces: if a session lands a beat later (slow storage read,
+    // token refresh), never leave someone staring at "expired" with a
+    // perfectly good link.
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session && !cancelled) setHasSession(true);
+    });
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
 
   const save = async () => {
     if (password.length < 8) {
@@ -47,13 +72,51 @@ export default function SetPasswordScreen() {
         setError(updateError.message);
         return;
       }
-      router.replace('/(tabs)');
+      // Staff land in the crew tabs, invited customers in the portal.
+      router.replace(await landingRoute());
     } catch {
       setError('Could not reach the server. Try again.');
     } finally {
       setLoading(false);
     }
   };
+
+  if (hasSession === null) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.centre}>
+          <ActivityIndicator color={colors.ink} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // No session behind the link. Say so plainly and give them the one action
+  // that helps — going back to sign in — rather than a form that can only fail.
+  if (!hasSession) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <ScrollView contentContainerStyle={styles.container}>
+          <View style={styles.card}>
+            <Text style={styles.title}>Link expired</Text>
+            <Text style={styles.subtitle}>
+              This link has expired or was already used — ask the office to
+              resend your invitation.
+            </Text>
+            <Pressable
+              style={({ pressed }) => [
+                styles.button,
+                styles.cardButton,
+                pressed && styles.pressed,
+              ]}
+              onPress={() => router.replace('/')}>
+              <Text style={styles.buttonText}>Back to sign in</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -117,6 +180,23 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  centre: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  card: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: colors.white,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.tan,
+    padding: spacing.lg,
+    gap: spacing.md,
+    alignItems: 'center',
+    ...shadows.card,
+  },
   container: {
     flexGrow: 1,
     justifyContent: 'center',
@@ -162,6 +242,10 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     alignItems: 'center',
     ...shadows.card,
+  },
+  cardButton: {
+    alignSelf: 'stretch',
+    paddingHorizontal: spacing.lg,
   },
   pressed: {
     opacity: 0.8,
