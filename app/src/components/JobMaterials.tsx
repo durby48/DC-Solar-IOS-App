@@ -1,16 +1,21 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as DocumentPicker from 'expo-document-picker';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  EmptyState,
+  FadeInUp,
+  Pill,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing, typography } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 import {
   fetchJobDocuments,
   getDocumentUrl,
@@ -41,6 +46,11 @@ function formatQty(qty: number): string {
  * pricing), plus uploaded materials PDFs with a heuristic line-item
  * extractor (extract-materials edge function) whose results are reviewed
  * before saving. Crew sees the list read-only; admins manage everything.
+ *
+ * 2026-08-22 restyle: kit primitives only — `Card`, `Pill` for the quantity
+ * badge, `Button` for every action, `EmptyState` for the three nothing-here
+ * cases and `SkeletonList` for the first load. The extraction review flow,
+ * the two-tap delete and the admin gating are unchanged.
  */
 export function JobMaterials({ jobId, isAdmin }: { jobId: string; isAdmin: boolean }) {
   const [materials, setMaterials] = useState<MaterialRow[]>([]);
@@ -112,6 +122,7 @@ export function JobMaterials({ jobId, isAdmin }: { jobId: string; isAdmin: boole
       setNewName('');
       setNewQty('1');
       setAddOpen(false);
+      haptics.success();
       await load();
     } else {
       setStatus({ kind: 'error', message: result.message });
@@ -139,6 +150,7 @@ export function JobMaterials({ jobId, isAdmin }: { jobId: string; isAdmin: boole
     setSavingEdit(false);
     if (result.ok) {
       setEditingId(null);
+      haptics.success();
       await load();
     } else {
       setStatus({ kind: 'error', message: result.message });
@@ -183,6 +195,7 @@ export function JobMaterials({ jobId, isAdmin }: { jobId: string; isAdmin: boole
       });
       setUploading(false);
       if (upload.ok) {
+        haptics.success();
         setStatus({
           kind: 'success',
           message: `${upload.document.file_name} uploaded — tap Extract to pull its line items.`,
@@ -247,6 +260,7 @@ export function JobMaterials({ jobId, isAdmin }: { jobId: string; isAdmin: boole
     setSavingReview(false);
     if (result.ok) {
       setReview(null);
+      haptics.success();
       setStatus({
         kind: 'success',
         message: `${chosen.length} item${chosen.length === 1 ? '' : 's'} added from ${review.doc.file_name}.`,
@@ -262,228 +276,235 @@ export function JobMaterials({ jobId, isAdmin }: { jobId: string; isAdmin: boole
     const confirming = confirmDeleteId === row.id;
     const busyDelete = deletingId === row.id;
     return (
-      <View key={row.id} style={index > 0 ? styles.rowBorderTop : undefined}>
-        <View style={styles.row}>
-          <View style={styles.qtyChip}>
-            <Text style={styles.qtyChipText}>× {formatQty(row.qty)}</Text>
+      <FadeInUp key={row.id} index={index}>
+        <View style={index > 0 ? styles.rowBorderTop : undefined}>
+          <View style={styles.row}>
+            <Pill
+              label={`× ${formatQty(row.qty)}`}
+              bg={colors.sunLight}
+              fg={colors.ink}
+              style={styles.qtyPill}
+            />
+            <AppText variant="body" numberOfLines={2} style={styles.rowName}>
+              {row.name}
+            </AppText>
+            {isAdmin ? (
+              <>
+                <AnimatedPressable
+                  onPress={() => (editing ? setEditingId(null) : startEdit(row))}
+                  haptic="tapLight"
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${row.name}`}
+                  style={styles.iconButton}>
+                  <Ionicons name="pencil" size={15} color={colors.accentPrimary} />
+                </AnimatedPressable>
+                <AnimatedPressable
+                  onPress={() => void pressDelete(row)}
+                  disabled={busyDelete}
+                  haptic="tapLight"
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={confirming ? 'Confirm delete' : `Delete ${row.name}`}
+                  style={[styles.iconButton, confirming && styles.iconButtonDanger]}>
+                  {busyDelete ? (
+                    <ActivityIndicator size="small" color={colors.danger} />
+                  ) : (
+                    <Ionicons
+                      name="trash"
+                      size={15}
+                      color={confirming ? colors.white : colors.textMuted}
+                    />
+                  )}
+                </AnimatedPressable>
+              </>
+            ) : null}
           </View>
-          <Text style={styles.rowName} numberOfLines={2}>
-            {row.name}
-          </Text>
-          {isAdmin ? (
-            <>
-              <Pressable
-                onPress={() => (editing ? setEditingId(null) : startEdit(row))}
-                hitSlop={6}
-                style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
-                <Ionicons name="pencil" size={15} color={colors.ocean} />
-              </Pressable>
-              <Pressable
-                onPress={() => void pressDelete(row)}
-                disabled={busyDelete}
-                hitSlop={6}
-                style={({ pressed }) => [
-                  styles.iconButton,
-                  confirming && styles.iconButtonDanger,
-                  pressed && styles.pressed,
-                ]}>
-                {busyDelete ? (
-                  <ActivityIndicator size="small" color={colors.danger} />
-                ) : (
-                  <Ionicons
-                    name="trash"
-                    size={15}
-                    color={confirming ? colors.white : colors.inkSoft}
-                  />
-                )}
-              </Pressable>
-            </>
+          {confirming ? (
+            <AppText
+              variant="caption"
+              align="right"
+              color={colors.danger}
+              style={styles.confirmHint}>
+              Tap the trash again to delete this item.
+            </AppText>
+          ) : null}
+          {editing ? (
+            <Card tone="sunk" style={styles.editCard}>
+              <AppText variant="section" color={colors.textMuted}>
+                Item
+              </AppText>
+              <TextInput
+                style={styles.input}
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="Item name"
+                placeholderTextColor={colors.textMuted}
+              />
+              <AppText variant="section" color={colors.textMuted}>
+                Quantity
+              </AppText>
+              <TextInput
+                style={styles.input}
+                value={editQty}
+                onChangeText={setEditQty}
+                placeholder="1"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="decimal-pad"
+              />
+              <View style={styles.editButtons}>
+                <Button
+                  label="Cancel"
+                  onPress={() => setEditingId(null)}
+                  variant="ghost"
+                  size="sm"
+                  disabled={savingEdit}
+                />
+                <Button
+                  label="Save"
+                  onPress={() => void saveEdit(row)}
+                  loading={savingEdit}
+                  size="sm"
+                />
+              </View>
+            </Card>
           ) : null}
         </View>
-        {confirming ? (
-          <Text style={styles.confirmHint}>Tap the trash again to delete this item.</Text>
-        ) : null}
-        {editing ? (
-          <View style={styles.editCard}>
-            <Text style={styles.fieldLabel}>Item</Text>
-            <TextInput
-              style={styles.input}
-              value={editName}
-              onChangeText={setEditName}
-              placeholder="Item name"
-              placeholderTextColor={colors.inkSoft}
-            />
-            <Text style={styles.fieldLabel}>Quantity</Text>
-            <TextInput
-              style={styles.input}
-              value={editQty}
-              onChangeText={setEditQty}
-              placeholder="1"
-              placeholderTextColor={colors.inkSoft}
-              keyboardType="decimal-pad"
-            />
-            <View style={styles.editButtons}>
-              <Pressable onPress={() => setEditingId(null)} disabled={savingEdit} hitSlop={8}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => void saveEdit(row)}
-                disabled={savingEdit}
-                style={({ pressed }) => [
-                  styles.sunButton,
-                  styles.saveEditButton,
-                  (pressed || savingEdit) && styles.pressed,
-                ]}>
-                {savingEdit ? (
-                  <ActivityIndicator color={colors.ink} />
-                ) : (
-                  <Text style={styles.sunButtonText}>Save</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
-      </View>
+      </FadeInUp>
     );
   };
 
   return (
     <>
-      <Text style={styles.sectionTitle}>Materials</Text>
+      <SectionHeader title="Materials" icon="hammer" style={styles.section} />
 
       {state === 'loading' ? (
-        <View style={styles.placeholderCard}>
-          <ActivityIndicator color={colors.ocean} />
-        </View>
+        <SkeletonList count={3} height={44} />
       ) : state === 'unavailable' ? (
-        <View style={styles.placeholderCard}>
-          <Ionicons name="hammer" size={22} color={colors.inkSoft} />
-          <Text style={styles.placeholderText}>
-            Materials need the latest database migration.
-          </Text>
-        </View>
+        <EmptyState
+          icon="hammer"
+          title="Materials aren't available"
+          body="This list needs the latest database migration before it can load."
+        />
       ) : (
         <>
           {materials.length === 0 ? (
-            <View style={styles.placeholderCard}>
-              <Ionicons name="hammer" size={22} color={colors.inkSoft} />
-              <Text style={styles.placeholderText}>
-                {isAdmin
-                  ? 'No materials yet — add items or upload a materials PDF below.'
-                  : 'No materials listed yet.'}
-              </Text>
-            </View>
+            <EmptyState
+              icon="hammer"
+              title="No materials yet"
+              body={
+                isAdmin
+                  ? 'Add items by hand, or upload a materials PDF below and pull its line items out.'
+                  : 'The office adds the parts list here once it is ordered.'
+              }
+            />
           ) : (
-            <View style={styles.card}>{materials.map(renderRow)}</View>
+            <Card padded={false}>{materials.map(renderRow)}</Card>
           )}
 
           {isAdmin ? (
             addOpen ? (
-              <View style={styles.formCard}>
-                <Text style={styles.fieldLabel}>Item</Text>
+              <Card style={styles.formCard}>
+                <AppText variant="section" color={colors.textMuted}>
+                  Item
+                </AppText>
                 <TextInput
                   style={styles.input}
                   value={newName}
                   onChangeText={setNewName}
                   placeholder="e.g. IronRidge XR-100 rail 168in"
-                  placeholderTextColor={colors.inkSoft}
+                  placeholderTextColor={colors.textMuted}
                 />
-                <Text style={styles.fieldLabel}>Quantity</Text>
+                <AppText variant="section" color={colors.textMuted}>
+                  Quantity
+                </AppText>
                 <TextInput
                   style={styles.input}
                   value={newQty}
                   onChangeText={setNewQty}
                   placeholder="1"
-                  placeholderTextColor={colors.inkSoft}
+                  placeholderTextColor={colors.textMuted}
                   keyboardType="decimal-pad"
                 />
                 <View style={styles.editButtons}>
-                  <Pressable onPress={() => setAddOpen(false)} disabled={savingAdd} hitSlop={8}>
-                    <Text style={styles.cancelText}>Cancel</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => void saveAdd()}
+                  <Button
+                    label="Cancel"
+                    onPress={() => setAddOpen(false)}
+                    variant="ghost"
+                    size="sm"
                     disabled={savingAdd}
-                    style={({ pressed }) => [
-                      styles.sunButton,
-                      styles.saveEditButton,
-                      (pressed || savingAdd) && styles.pressed,
-                    ]}>
-                    {savingAdd ? (
-                      <ActivityIndicator color={colors.ink} />
-                    ) : (
-                      <Text style={styles.sunButtonText}>Add</Text>
-                    )}
-                  </Pressable>
+                  />
+                  <Button
+                    label="Add"
+                    onPress={() => void saveAdd()}
+                    loading={savingAdd}
+                    size="sm"
+                  />
                 </View>
-              </View>
+              </Card>
             ) : (
-              <Pressable
+              <Button
+                label="Add item"
                 onPress={() => {
                   setStatus(null);
                   setAddOpen(true);
                 }}
-                style={({ pressed }) => [styles.addToggle, pressed && styles.pressed]}>
-                <Ionicons name="add-circle" size={18} color={colors.ocean} />
-                <Text style={styles.addToggleText}>Add item</Text>
-              </Pressable>
+                variant="ghost"
+                size="sm"
+                icon="add-circle"
+                style={styles.inlineButton}
+              />
             )
           ) : null}
 
           {docs.length > 0 ? (
             <>
-              <Text style={styles.subTitle}>Materials PDFs</Text>
-              <View style={styles.card}>
+              <SectionHeader title="Materials PDFs" style={styles.subSection} />
+              <Card padded={false}>
                 {docs.map((doc, index) => (
-                  <View
-                    key={doc.id}
-                    style={[styles.row, index > 0 && styles.rowBorderTop]}>
+                  <View key={doc.id} style={[styles.row, index > 0 && styles.rowBorderTop]}>
                     <View style={styles.iconWrap}>
-                      <Ionicons name="document-text" size={18} color={colors.ocean} />
+                      <Ionicons name="document-text" size={18} color={colors.accentPrimary} />
                     </View>
-                    <Pressable
+                    <AnimatedPressable
                       onPress={() => void openDoc(doc)}
-                      style={({ pressed }) => [styles.docBody, pressed && styles.pressed]}>
-                      <Text style={styles.rowName} numberOfLines={1}>
+                      haptic="tapLight"
+                      scaleTo={0.99}
+                      accessibilityRole="button"
+                      accessibilityLabel={doc.file_name}
+                      style={styles.docBody}>
+                      <AppText variant="body" numberOfLines={1}>
                         {doc.file_name}
-                      </Text>
-                    </Pressable>
+                      </AppText>
+                    </AnimatedPressable>
                     {isAdmin ? (
-                      <Pressable
+                      <Button
+                        label="Extract"
                         onPress={() => void runExtract(doc)}
+                        size="sm"
+                        icon="scan"
+                        loading={extractingId === doc.id}
                         disabled={extractingId !== null}
-                        style={({ pressed }) => [
-                          styles.extractButton,
-                          pressed && styles.pressed,
-                        ]}>
-                        {extractingId === doc.id ? (
-                          <ActivityIndicator size="small" color={colors.ink} />
-                        ) : (
-                          <>
-                            <Ionicons name="scan" size={14} color={colors.ink} />
-                            <Text style={styles.extractButtonText}>Extract</Text>
-                          </>
-                        )}
-                      </Pressable>
+                      />
                     ) : null}
                   </View>
                 ))}
-              </View>
+              </Card>
             </>
           ) : null}
 
           {review ? (
-            <View style={styles.formCard}>
-              <Text style={styles.reviewTitle}>
+            <Card style={styles.formCard}>
+              <AppText variant="heading">
                 Found {review.items.length} item{review.items.length === 1 ? '' : 's'} in{' '}
                 {review.doc.file_name}
-              </Text>
-              <Text style={styles.reviewHint}>
-                Uncheck anything that isn't a real line item, then add. Quantities can be
+              </AppText>
+              <AppText variant="caption" color={colors.textMuted}>
+                Uncheck anything that isn&apos;t a real line item, then add. Quantities can be
                 edited after adding.
-              </Text>
+              </AppText>
               {review.items.map((item, index) => (
-                <Pressable
+                <AnimatedPressable
                   key={`${item.name}-${index}`}
                   onPress={() =>
                     setReview((prev) =>
@@ -497,143 +518,98 @@ export function JobMaterials({ jobId, isAdmin }: { jobId: string; isAdmin: boole
                         : prev,
                     )
                   }
-                  style={({ pressed }) => [styles.reviewRow, pressed && styles.pressed]}>
+                  haptic="tapLight"
+                  scaleTo={0.99}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: item.checked }}
+                  accessibilityLabel={item.name}
+                  style={styles.reviewRow}>
                   <Ionicons
                     name={item.checked ? 'checkbox' : 'square-outline'}
                     size={18}
-                    color={colors.ocean}
+                    color={colors.accentPrimary}
                   />
-                  <Text style={styles.reviewQty}>× {formatQty(item.qty)}</Text>
-                  <Text style={styles.reviewName} numberOfLines={2}>
+                  <AppText variant="bodyStrong" style={styles.reviewQty}>
+                    × {formatQty(item.qty)}
+                  </AppText>
+                  <AppText variant="body" numberOfLines={2} style={styles.reviewName}>
                     {item.name}
-                  </Text>
-                </Pressable>
+                  </AppText>
+                </AnimatedPressable>
               ))}
               <View style={styles.editButtons}>
-                <Pressable onPress={() => setReview(null)} disabled={savingReview} hitSlop={8}>
-                  <Text style={styles.cancelText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => void saveReview()}
+                <Button
+                  label="Cancel"
+                  onPress={() => setReview(null)}
+                  variant="ghost"
+                  size="sm"
                   disabled={savingReview}
-                  style={({ pressed }) => [
-                    styles.sunButton,
-                    styles.saveEditButton,
-                    (pressed || savingReview) && styles.pressed,
-                  ]}>
-                  {savingReview ? (
-                    <ActivityIndicator color={colors.ink} />
-                  ) : (
-                    <Text style={styles.sunButtonText}>
-                      Add {review.items.filter((i) => i.checked).length} items
-                    </Text>
-                  )}
-                </Pressable>
+                />
+                <Button
+                  label={`Add ${review.items.filter((i) => i.checked).length} items`}
+                  onPress={() => void saveReview()}
+                  loading={savingReview}
+                  size="sm"
+                />
               </View>
-            </View>
+            </Card>
           ) : null}
 
           {isAdmin ? (
-            <Pressable
+            <Button
+              label="Upload materials PDF"
               onPress={() => void pickAndUpload()}
-              disabled={uploading}
-              style={({ pressed }) => [
-                styles.outlineButton,
-                (pressed || uploading) && styles.pressed,
-              ]}>
-              {uploading ? (
-                <ActivityIndicator color={colors.ink} />
-              ) : (
-                <Ionicons name="cloud-upload" size={16} color={colors.ink} />
-              )}
-              <Text style={styles.outlineButtonText}>Upload materials PDF</Text>
-            </Pressable>
+              variant="secondary"
+              icon="cloud-upload"
+              loading={uploading}
+              fullWidth
+            />
           ) : null}
         </>
       )}
 
       {status ? (
-        <Text
-          style={[
-            styles.statusText,
-            status.kind === 'error' ? styles.statusError : styles.statusSuccess,
-          ]}>
+        <AppText
+          variant="caption"
+          align="center"
+          color={status.kind === 'error' ? colors.danger : colors.success}>
           {status.message}
-        </Text>
+        </AppText>
       ) : null}
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
+  section: {
     marginTop: spacing.sm,
   },
-  subTitle: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+  subSection: {
     marginTop: spacing.xs,
-  },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    ...shadows.card,
-  },
-  placeholderCard: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  placeholderText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     padding: spacing.md,
+    backgroundColor: colors.surface,
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
   },
-  qtyChip: {
-    backgroundColor: colors.sunLight,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+  qtyPill: {
     minWidth: 44,
     alignItems: 'center',
   },
-  qtyChipText: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
   rowName: {
     flex: 1,
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
   },
   iconWrap: {
     width: 32,
     height: 32,
     borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
+    backgroundColor: colors.oliveSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -644,123 +620,45 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
+    backgroundColor: colors.oliveSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   iconButtonDanger: {
     backgroundColor: colors.danger,
   },
-  pressed: {
-    opacity: 0.7,
-  },
   confirmHint: {
-    color: colors.danger,
-    fontSize: 12,
-    fontWeight: '700',
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.sm,
-    textAlign: 'right',
+    backgroundColor: colors.surface,
   },
   editCard: {
-    backgroundColor: colors.cream,
     marginHorizontal: spacing.md,
     marginBottom: spacing.md,
-    borderRadius: radii.sm,
-    padding: spacing.md,
     gap: spacing.xs,
   },
   formCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.xs,
-    ...shadows.card,
-  },
-  fieldLabel: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   input: {
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surface,
     borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.borderStrong,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm - 2,
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
+    color: colors.textPrimary,
+    ...typography.body,
   },
   editButtons: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: spacing.md,
+    gap: spacing.sm,
     marginTop: spacing.xs,
   },
-  cancelText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  sunButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 4,
-    paddingHorizontal: spacing.md,
-    ...shadows.card,
-  },
-  sunButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  saveEditButton: {
-    flexGrow: 0,
-    paddingHorizontal: spacing.lg,
-  },
-  addToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-  },
-  addToggleText: {
-    color: colors.ocean,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  extractButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs + 2,
-  },
-  extractButtonText: {
-    color: colors.ink,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  reviewTitle: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  reviewHint: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
+  inlineButton: {
+    paddingHorizontal: 0,
   },
   reviewRow: {
     flexDirection: 'row',
@@ -769,44 +667,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs + 2,
   },
   reviewQty: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
     minWidth: 40,
   },
   reviewName: {
     flex: 1,
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  outlineButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.tan,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 4,
-    paddingHorizontal: spacing.md,
-  },
-  outlineButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  statusError: {
-    color: colors.danger,
-  },
-  statusSuccess: {
-    color: colors.ocean,
   },
 });

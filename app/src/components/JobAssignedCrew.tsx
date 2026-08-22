@@ -1,8 +1,8 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { AppText, Card, Chip, SectionHeader } from '@/components/ui';
+import { colors, spacing } from '@/constants/theme';
 import {
   assignToJob,
   fetchAssignmentsByJob,
@@ -14,6 +14,12 @@ import { fetchEmployeeOptions, type EmployeeOption } from '@/lib/myhours';
 /**
  * Assigned crew for a job. Everyone sees who's expected on the job;
  * admins tap employee chips to assign/unassign (filled chip = assigned).
+ *
+ * 2026-08-22 restyle: the hand-rolled chips are `Chip tone="olive"` now, whose
+ * selected state is a FILL change rather than an outline — the same thing the
+ * old `chipOn` style did, just from the kit. The in-flight chip swaps its
+ * icon for a sync glyph instead of hosting a spinner; every chip is disabled
+ * while a write is in the air, exactly as before.
  */
 export function JobAssignedCrew({ jobId, isAdmin }: { jobId: string; isAdmin: boolean }) {
   const [assigned, setAssigned] = useState<Assignment[] | null>(null);
@@ -56,8 +62,8 @@ export function JobAssignedCrew({ jobId, isAdmin }: { jobId: string; isAdmin: bo
 
   return (
     <>
-      <Text style={styles.sectionTitle}>Assigned crew</Text>
-      <View style={styles.card}>
+      <SectionHeader title="Assigned crew" icon="people" style={styles.section} />
+      <Card style={styles.card}>
         {isAdmin ? (
           <>
             <View style={styles.chipWrap}>
@@ -65,100 +71,53 @@ export function JobAssignedCrew({ jobId, isAdmin }: { jobId: string; isAdmin: bo
                 const on = isAssigned(option.email);
                 const busy = busyEmail === option.email;
                 return (
-                  <Pressable
+                  <Chip
                     key={option.email}
-                    onPress={() => void toggle(option)}
+                    label={option.name}
+                    tone="olive"
+                    selected={on}
+                    icon={busy ? 'sync' : on ? 'checkmark-circle' : 'add-circle-outline'}
                     disabled={busyEmail !== null}
-                    style={[styles.chip, on && styles.chipOn]}>
-                    {busy ? (
-                      <ActivityIndicator
-                        size="small"
-                        color={on ? colors.white : colors.ocean}
-                      />
-                    ) : (
-                      <>
-                        <Ionicons
-                          name={on ? 'checkmark-circle' : 'add-circle-outline'}
-                          size={14}
-                          color={on ? colors.white : colors.ocean}
-                        />
-                        <Text style={[styles.chipText, on && styles.chipTextOn]}>
-                          {option.name}
-                        </Text>
-                      </>
-                    )}
-                  </Pressable>
+                    onPress={() => void toggle(option)}
+                  />
                 );
               })}
             </View>
-            <Text style={styles.hint}>Tap a name to assign or remove them.</Text>
+            <AppText variant="caption" color={colors.textMuted}>
+              Tap a name to assign or remove them.
+            </AppText>
           </>
         ) : assigned.length > 0 ? (
           <View style={styles.chipWrap}>
             {assigned.map((a) => (
-              <View key={a.email} style={[styles.chip, styles.chipOn]}>
-                <Ionicons name="person" size={13} color={colors.white} />
-                <Text style={[styles.chipText, styles.chipTextOn]}>{a.name}</Text>
-              </View>
+              <Chip key={a.email} label={a.name} tone="olive" selected icon="person" />
             ))}
           </View>
         ) : (
-          <Text style={styles.hint}>No crew assigned yet.</Text>
+          <AppText variant="caption" color={colors.textMuted}>
+            No crew assigned yet.
+          </AppText>
         )}
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      </View>
+        {error ? (
+          <AppText variant="caption" color={colors.danger}>
+            {error}
+          </AppText>
+        ) : null}
+      </Card>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
+  section: {
     marginTop: spacing.sm,
   },
   card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.sm,
-    ...shadows.card,
   },
   chipWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs + 2,
-    minHeight: 28,
-  },
-  chipOn: {
-    backgroundColor: colors.ocean,
-  },
-  chipText: {
-    color: colors.ocean,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  chipTextOn: {
-    color: colors.white,
-  },
-  hint: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  errorText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '600',
   },
 });

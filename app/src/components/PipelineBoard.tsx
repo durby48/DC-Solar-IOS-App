@@ -1,13 +1,23 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { PropertyArt } from '@/components/PropertyArt';
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  Chip,
+  Pill,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
 import { forecastJob, type ForecastModel } from '@/lib/forecast';
+import { haptics } from '@/lib/haptics';
 import { updateJobStage } from '@/lib/jobs';
 import { type Job } from '@/lib/types';
 import { type JobLaborHours, type JobMoney, type NextDate } from '@/lib/pipeline';
@@ -15,6 +25,7 @@ import {
   COMPANY_LABEL,
   LABEL_COLORS,
   STAGES,
+  STAGE_GRADIENT,
   isCompanyJob,
   stageOrDefault,
   type Stage,
@@ -54,6 +65,12 @@ import { formatTimeLabel } from '@/lib/time';
  *
  * Money renders only when `money` is present. RLS already makes that admin-only
  * — crew get null — so the split is enforced server-side, not just hidden here.
+ *
+ * 2026-08-22 restyle: column headers are painted with `STAGE_GRADIENT` (see
+ * `columnHeaderTone` for why the title always sits on the readable end), the
+ * cards are `Card` + `AnimatedPressable`, and the ‹ › arrows are ghost
+ * `Button`s. The column widths, the two faces and every write path are
+ * unchanged.
  */
 
 const COLUMN_WIDTH = 284;
@@ -70,6 +87,47 @@ function formatHours(h: number): string {
 
 function jobStage(job: Job): Stage {
   return stageOrDefault((job as unknown as { stage?: unknown }).stage, job.status);
+}
+
+/**
+ * How one column's header is painted.
+ *
+ * Stage columns take `STAGE_GRADIENT`, run diagonally with the saturated stop
+ * held back to the bottom-right corner, so the title and the count sit on the
+ * soft end where dark text is legible — `stages.ts` is explicit that the deep
+ * end of these ramps is not a text ground.
+ *
+ * The foreground is the stage's own deep hue, which `LABEL_COLORS` already
+ * carries for most stages. Two need an override, both listed in `HEADER_INK`.
+ * Company isn't a stage and has no ramp — it keeps its solid ink slab, which
+ * is exactly the point of that column.
+ */
+const HEADER_INK: Partial<Record<StageLabel, string>> = {
+  // Complete's pill is the one inverted pill — cream on olive. Cream on
+  // `oliveSoft` would vanish, so the header takes the deep olive.
+  Complete: colors.oliveDeep,
+  // Pending Install's pill fg is `ocean`, which is roughly 2:1 on `skySoft`.
+  // That passes as a 12pt pill sitting on white; it does not pass as a 15pt
+  // column title on the tint itself, so this one header drops the hue and
+  // takes ink. The gradient behind it still says which stage this is.
+  'Pending Install': colors.ink,
+};
+
+function columnHeaderTone(stage: StageLabel): {
+  gradient: readonly [string, string] | null;
+  bg: string;
+  fg: string;
+} {
+  if (stage === COMPANY_LABEL) {
+    const tone = LABEL_COLORS[stage];
+    return { gradient: null, bg: tone.bg, fg: tone.fg };
+  }
+  const ramp = STAGE_GRADIENT[stage];
+  return {
+    gradient: ramp,
+    bg: ramp[0],
+    fg: HEADER_INK[stage] ?? LABEL_COLORS[stage].fg,
+  };
 }
 
 function BoardCard({
@@ -123,78 +181,87 @@ function BoardCard({
   const open = () => router.push({ pathname: '/job/[id]', params: { id: job.id } });
 
   return (
-    <View style={styles.card}>
+    <Card padded={false}>
       <PropertyArt seed={job.id} imageUrl={artUrl} radius={radii.md} scrim={0.8} />
-      <Pressable
+      <AnimatedPressable
         onPress={open}
-        style={({ pressed }) => [styles.cardBody, pressed && styles.cardPressed]}>
+        haptic="tapLight"
+        scaleTo={0.985}
+        accessibilityRole="button"
+        accessibilityLabel={job.job_number ? `${job.job_number} ${job.name}` : job.name}
+        style={styles.cardBody}>
         {face === 'overview' ? (
           <>
             <View style={styles.cardTop}>
-              {job.job_number ? (
-                <View style={styles.chip}>
-                  <Text style={styles.chipText}>{job.job_number}</Text>
-                </View>
-              ) : null}
+              {job.job_number ? <Chip label={job.job_number} tone="olive" /> : null}
               {next ? (
-                <Text style={styles.cardDate}>
+                <AppText variant="caption" color={colors.textSecondary}>
                   {formatShortDate(next.work_date)}
                   {time ? ` · ${time}` : ''}
-                </Text>
+                </AppText>
               ) : stage === 'Complete' && completedOn ? (
-                <Text style={styles.cardDate}>{formatShortDate(completedOn)}</Text>
+                <AppText variant="caption" color={colors.textSecondary}>
+                  {formatShortDate(completedOn)}
+                </AppText>
               ) : null}
             </View>
 
-            <Text style={styles.cardName} numberOfLines={2}>
+            <AppText variant="bodyStrong" numberOfLines={2} style={styles.cardName}>
               {job.name}
-            </Text>
+            </AppText>
 
             {job.address ? (
-              <Text style={styles.cardAddress} numberOfLines={1}>
+              <AppText variant="caption" color={colors.textSecondary} numberOfLines={1}>
                 {job.address}
-              </Text>
+              </AppText>
             ) : null}
 
             {job.customer?.name ? (
               <View style={styles.customerRow}>
                 <CustomerAvatar customer={job.customer} size={22} />
-                <Text style={styles.cardCustomer} numberOfLines={1}>
+                <AppText
+                  variant="caption"
+                  color={colors.textSecondary}
+                  numberOfLines={1}
+                  style={styles.cardCustomer}>
                   {job.customer.name}
-                </Text>
+                </AppText>
               </View>
             ) : null}
 
             {company ? (
-              <Text style={styles.cardMoney} numberOfLines={1}>
+              <AppText
+                variant="caption"
+                color={colors.textPrimary}
+                numberOfLines={1}
+                style={styles.numeric}>
                 {money ? `Overhead ${formatCurrency(money.expenses)}` : 'Company overhead'}
-              </Text>
+              </AppText>
             ) : money ? (
-              <Text style={styles.cardMoney} numberOfLines={1}>
+              <AppText
+                variant="caption"
+                color={colors.textPrimary}
+                numberOfLines={1}
+                style={styles.numeric}>
                 {`Inv ${formatCurrency(money.invoiced)} · Paid ${formatCurrency(money.paid)}`}
-              </Text>
+              </AppText>
             ) : null}
           </>
         ) : (
           <>
             <View style={styles.cardTop}>
-              {job.job_number ? (
-                <View style={styles.chip}>
-                  <Text style={styles.chipText}>{job.job_number}</Text>
-                </View>
-              ) : null}
+              {job.job_number ? <Chip label={job.job_number} tone="olive" /> : null}
               <View style={styles.typeChipRow}>
                 {extra.has_critter_guard ? (
-                  <View style={styles.critterChip}>
-                    <Text style={styles.critterChipText}>Critter</Text>
-                  </View>
+                  <Pill label="Critter" bg={colors.limeSoft} fg={colors.limeDeep} />
                 ) : null}
                 {extra.job_type ? (
-                  <View style={styles.typeChip}>
-                    <Text style={styles.typeChipText} numberOfLines={1}>
-                      {extra.job_type}
-                    </Text>
-                  </View>
+                  <Pill
+                    label={extra.job_type}
+                    bg={colors.violetSoft}
+                    fg={colors.violetDeep}
+                    style={styles.typePill}
+                  />
                 ) : null}
               </View>
             </View>
@@ -202,9 +269,9 @@ function BoardCard({
             {/* The phone card can drop the name on page 2 — you swiped that one
                 card, so you know which it is. On a board of eight columns you
                 do not, and a job with no number would otherwise be anonymous. */}
-            <Text style={styles.cardName} numberOfLines={1}>
+            <AppText variant="bodyStrong" numberOfLines={1} style={styles.cardName}>
               {job.name}
-            </Text>
+            </AppText>
 
             {/* Modules and an hours forecast describe installed work. The
                 overhead container has neither, so it gets the overhead figure
@@ -214,18 +281,24 @@ function BoardCard({
               <>
                 <View style={styles.statRow}>
                   <View style={styles.stat}>
-                    <Text style={styles.statLabel}>Modules</Text>
-                    <Text style={styles.statValue}>{modules ?? '—'}</Text>
+                    <AppText variant="section" color={colors.textMuted}>
+                      Modules
+                    </AppText>
+                    <AppText variant="numeric" style={styles.statValue}>
+                      {modules ?? '—'}
+                    </AppText>
                   </View>
                   <View style={styles.stat}>
-                    <Text style={styles.statLabel}>Est. hours</Text>
-                    <Text style={styles.statValue}>
+                    <AppText variant="section" color={colors.textMuted}>
+                      Est. hours
+                    </AppText>
+                    <AppText variant="numeric" style={styles.statValue}>
                       {forecast ? formatHours(forecast.hours) : '—'}
-                    </Text>
+                    </AppText>
                   </View>
                 </View>
 
-                <Text style={styles.forecastNote} numberOfLines={2}>
+                <AppText variant="caption" color={colors.textMuted} numberOfLines={2}>
                   {forecast
                     ? forecast.low !== null && forecast.high !== null
                       ? `${formatHours(forecast.low)}–${formatHours(forecast.high)} · from ${forecast.samples} finished ${forecast.basis} jobs`
@@ -233,7 +306,7 @@ function BoardCard({
                     : modules
                       ? 'No finished jobs to forecast from yet'
                       : 'Set a module count to forecast'}
-                </Text>
+                </AppText>
               </>
             )}
 
@@ -242,10 +315,12 @@ function BoardCard({
               // nothing that implies a per-job margin.
               <View style={styles.moneyRow}>
                 <View style={styles.moneyCell}>
-                  <Text style={styles.statLabel}>Overhead</Text>
-                  <Text style={styles.moneyValue} numberOfLines={1}>
+                  <AppText variant="section" color={colors.textMuted}>
+                    Overhead
+                  </AppText>
+                  <AppText variant="bodyStrong" numberOfLines={1} style={styles.numeric}>
                     {formatCurrency(money.expenses)}
-                  </Text>
+                  </AppText>
                 </View>
               </View>
             ) : money ? (
@@ -259,91 +334,103 @@ function BoardCard({
                     ] as [string, string][]
                   ).map(([label, value]) => (
                     <View key={label} style={styles.moneyCell}>
-                      <Text style={styles.statLabel}>{label}</Text>
-                      <Text style={styles.moneyValue} numberOfLines={1}>
+                      <AppText variant="section" color={colors.textMuted}>
+                        {label}
+                      </AppText>
+                      <AppText variant="caption" numberOfLines={1} style={styles.numeric}>
                         {value}
-                      </Text>
+                      </AppText>
                     </View>
                   ))}
                 </View>
                 {money.estimateCount > 1 ? (
-                  <Text style={styles.estimateNote} numberOfLines={1}>
+                  <AppText
+                    variant="caption"
+                    color={colors.textMuted}
+                    numberOfLines={1}
+                    style={styles.italic}>
                     {`Est is the newest of ${money.estimateCount} estimates`}
-                  </Text>
+                  </AppText>
                 ) : null}
                 <View style={styles.profitRow}>
-                  <Text style={styles.statLabel}>Profit</Text>
-                  <Text
-                    style={[
-                      styles.profitValue,
-                      profitPct !== null &&
-                        (profitPct >= 0 ? styles.profitPositive : styles.profitNegative),
-                    ]}>
+                  <AppText variant="section" color={colors.textMuted}>
+                    Profit
+                  </AppText>
+                  <AppText
+                    variant="bodyStrong"
+                    color={
+                      profitPct === null
+                        ? colors.textSecondary
+                        : profitPct >= 0
+                          ? colors.success
+                          : colors.danger
+                    }
+                    style={styles.numeric}>
                     {profitPct !== null
                       ? `${profitPct >= 0 ? '+' : ''}${profitPct.toFixed(1)}%`
                       : '—'}
-                  </Text>
+                  </AppText>
                 </View>
               </>
             ) : null}
           </>
         )}
-      </Pressable>
+      </AnimatedPressable>
 
       <View style={styles.footerRow}>
         {/* Sits outside the card-body Pressable so flipping the card never
             navigates to the job. */}
-        <Pressable
+        <AnimatedPressable
           onPress={() => setFace(face === 'overview' ? 'details' : 'overview')}
+          haptic="tapLight"
+          scaleTo={0.94}
           accessibilityRole="button"
           accessibilityLabel={
             face === 'overview'
               ? `Show details and money for ${job.name}`
               : `Show overview for ${job.name}`
           }
-          style={({ pressed }) => [styles.faceButton, pressed && styles.faceButtonPressed]}>
-          <Ionicons name="swap-horizontal" size={13} color={colors.inkSoft} />
-          <Text style={styles.faceButtonText}>
+          style={styles.faceButton}>
+          <Ionicons name="swap-horizontal" size={13} color={colors.accentPrimary} />
+          <AppText variant="caption" color={colors.accentPrimary}>
             {face === 'overview' ? 'Details' : 'Overview'}
-          </Text>
+          </AppText>
           <View style={styles.dots}>
             {(['overview', 'details'] as CardFace[]).map((f) => (
               <View key={f} style={[styles.dot, face === f && styles.dotActive]} />
             ))}
           </View>
-        </Pressable>
+        </AnimatedPressable>
 
         {isAdmin && !company ? (
           <View style={styles.moveRow}>
-            {moving ? <ActivityIndicator size="small" color={colors.ocean} /> : null}
-            <Pressable
+            {moving ? <ActivityIndicator size="small" color={colors.accentPrimary} /> : null}
+            <Button
+              label="‹"
               onPress={() => onMove(job, -1)}
+              variant="ghost"
+              size="sm"
+              haptic="tapLight"
               disabled={index <= 0 || moving}
-              accessibilityRole="button"
               accessibilityLabel={`Move ${job.name} back a stage`}
-              style={({ pressed }) => [
-                styles.moveButton,
-                (index <= 0 || moving) && styles.moveDisabled,
-                pressed && index > 0 && !moving && styles.moveHover,
-              ]}>
-              <Ionicons name="chevron-back" size={14} color={colors.inkSoft} />
-            </Pressable>
-            <Pressable
+              style={styles.moveButton}
+              textStyle={styles.moveGlyph}
+            />
+            <Button
+              label="›"
               onPress={() => onMove(job, 1)}
+              variant="ghost"
+              size="sm"
+              haptic="tapLight"
               disabled={index >= STAGES.length - 1 || moving}
-              accessibilityRole="button"
               accessibilityLabel={`Move ${job.name} forward a stage`}
-              style={({ pressed }) => [
-                styles.moveButton,
-                (index >= STAGES.length - 1 || moving) && styles.moveDisabled,
-                pressed && index < STAGES.length - 1 && !moving && styles.moveHover,
-              ]}>
-              <Ionicons name="chevron-forward" size={14} color={colors.inkSoft} />
-            </Pressable>
+              style={styles.moveButton}
+              textStyle={styles.moveGlyph}
+            />
           </View>
         ) : null}
       </View>
-    </View>
+    </Card>
   );
 }
 
@@ -387,13 +474,21 @@ export function PipelineBoard({
     setError(null);
     const result = await updateJobStage(job.id, target);
     setMovingId(null);
-    if (result.ok) onChanged();
-    else setError(result.message);
+    if (result.ok) {
+      haptics.success();
+      onChanged();
+    } else {
+      setError(result.message);
+    }
   };
 
   return (
     <View style={styles.wrap}>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? (
+        <AppText variant="caption" color={colors.danger} style={styles.error}>
+          {error}
+        </AppText>
+      ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={styles.columns}>
         {columns.map((stage) => {
           const company = stage === COMPANY_LABEL;
@@ -415,33 +510,55 @@ export function PipelineBoard({
                 0,
               )
             : 0;
-          const tone = LABEL_COLORS[stage];
+          const tone = columnHeaderTone(stage);
+          const header = (
+            <>
+              <View style={styles.columnTitleRow}>
+                <AppText
+                  variant="bodyStrong"
+                  color={tone.fg}
+                  numberOfLines={1}
+                  style={styles.columnTitle}>
+                  {stage}
+                </AppText>
+                <View style={styles.countPill}>
+                  <AppText variant="caption" color={tone.fg}>
+                    {columnJobs.length}
+                  </AppText>
+                </View>
+              </View>
+              {money && value > 0 ? (
+                <AppText variant="caption" color={tone.fg} style={styles.columnValue}>
+                  {formatCurrency(value)}
+                </AppText>
+              ) : null}
+            </>
+          );
           return (
             <View key={stage} style={styles.column}>
-              <View style={[styles.columnHeader, { backgroundColor: tone.bg }]}>
-                <View style={styles.columnTitleRow}>
-                  <Text style={[styles.columnTitle, { color: tone.fg }]} numberOfLines={1}>
-                    {stage}
-                  </Text>
-                  <View style={styles.countPill}>
-                    <Text style={[styles.countPillText, { color: tone.fg }]}>
-                      {columnJobs.length}
-                    </Text>
-                  </View>
-                </View>
-                {money && value > 0 ? (
-                  <Text style={[styles.columnValue, { color: tone.fg }]}>
-                    {formatCurrency(value)}
-                  </Text>
-                ) : null}
-              </View>
+              {tone.gradient ? (
+                <LinearGradient
+                  colors={tone.gradient}
+                  // Diagonal, with the saturated stop pinned to the far corner:
+                  // the copy lives top-left, on the soft end.
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  locations={[0.45, 1]}
+                  style={styles.columnHeader}>
+                  {header}
+                </LinearGradient>
+              ) : (
+                <View style={[styles.columnHeader, { backgroundColor: tone.bg }]}>{header}</View>
+              )}
 
               <ScrollView
                 style={styles.columnScroll}
                 contentContainerStyle={styles.columnBody}
                 showsVerticalScrollIndicator={false}>
                 {columnJobs.length === 0 ? (
-                  <Text style={styles.emptyColumn}>Nothing here</Text>
+                  <AppText variant="caption" color={colors.textMuted} style={styles.emptyColumn}>
+                    Nothing here
+                  </AppText>
                 ) : (
                   columnJobs.map((job) => (
                     <BoardCard
@@ -472,9 +589,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   error: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '700',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xs,
   },
@@ -489,7 +603,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.55)',
     borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.border,
     overflow: 'hidden',
   },
   columnHeader: {
@@ -504,8 +618,6 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   columnTitle: {
-    fontSize: 14,
-    fontWeight: '800',
     flexShrink: 1,
   },
   countPill: {
@@ -516,13 +628,7 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     alignItems: 'center',
   },
-  countPillText: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
   columnValue: {
-    fontSize: 12,
-    fontWeight: '700',
     fontVariant: ['tabular-nums'],
     opacity: 0.9,
   },
@@ -534,25 +640,13 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   emptyColumn: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
     fontStyle: 'italic',
     padding: spacing.sm,
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    ...shadows.card,
   },
   cardBody: {
     padding: spacing.sm + 2,
     gap: spacing.xs,
     minHeight: 96,
-  },
-  cardPressed: {
-    opacity: 0.85,
   },
   cardTop: {
     flexDirection: 'row',
@@ -560,31 +654,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.xs,
   },
-  chip: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 1,
-  },
-  chipText: {
-    color: colors.ocean,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  cardDate: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  cardAddress: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '600',
-  },
   cardName: {
-    color: colors.ink,
     fontSize: 13,
-    fontWeight: '700',
     lineHeight: 17,
   },
   customerRow: {
@@ -593,16 +664,13 @@ const styles = StyleSheet.create({
     gap: spacing.xs + 2,
   },
   cardCustomer: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
     flexShrink: 1,
   },
-  cardMoney: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '800',
+  numeric: {
     fontVariant: ['tabular-nums'],
+  },
+  italic: {
+    fontStyle: 'italic',
   },
   // ---- details face ----
   typeChipRow: {
@@ -611,30 +679,8 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     flexShrink: 1,
   },
-  typeChip: {
-    backgroundColor: 'rgba(255,255,255,0.75)',
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.line,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 1,
+  typePill: {
     flexShrink: 1,
-  },
-  typeChipText: {
-    color: colors.inkSoft,
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  critterChip: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 1,
-  },
-  critterChipText: {
-    color: colors.ocean,
-    fontSize: 10,
-    fontWeight: '800',
   },
   statRow: {
     flexDirection: 'row',
@@ -643,24 +689,9 @@ const styles = StyleSheet.create({
   stat: {
     flex: 1,
   },
-  statLabel: {
-    color: colors.inkSoft,
-    fontSize: 10,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
   statValue: {
-    color: colors.ink,
     fontSize: 15,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  forecastNote: {
-    color: colors.inkSoft,
-    fontSize: 10,
-    fontWeight: '600',
-    lineHeight: 13,
+    lineHeight: 20,
   },
   moneyRow: {
     flexDirection: 'row',
@@ -670,35 +701,11 @@ const styles = StyleSheet.create({
   moneyCell: {
     flex: 1,
   },
-  moneyValue: {
-    color: colors.ink,
-    fontSize: 12,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  estimateNote: {
-    color: colors.inkSoft,
-    fontSize: 10,
-    fontWeight: '600',
-    fontStyle: 'italic',
-  },
   profitRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: spacing.xs,
-  },
-  profitValue: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  profitPositive: {
-    color: colors.ocean,
-  },
-  profitNegative: {
-    color: colors.danger,
   },
 
   // ---- footer: face toggle + stage arrows ----
@@ -716,19 +723,10 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.border,
     backgroundColor: 'rgba(255,255,255,0.75)',
     paddingHorizontal: spacing.sm,
     height: 24,
-  },
-  faceButtonPressed: {
-    backgroundColor: colors.skySoft,
-    borderColor: colors.ocean,
-  },
-  faceButtonText: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '800',
   },
   dots: {
     flexDirection: 'row',
@@ -740,10 +738,10 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.line,
+    backgroundColor: colors.border,
   },
   dotActive: {
-    backgroundColor: colors.ocean,
+    backgroundColor: colors.accentPrimary,
   },
   moveRow: {
     flexDirection: 'row',
@@ -752,19 +750,17 @@ const styles = StyleSheet.create({
   },
   moveButton: {
     width: 30,
+    minHeight: 24,
     height: 24,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
     borderRadius: radii.sm,
-    backgroundColor: 'rgba(255,255,255,0.75)',
     borderWidth: 1,
-    borderColor: colors.line,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: colors.border,
+    backgroundColor: 'rgba(255,255,255,0.75)',
   },
-  moveHover: {
-    backgroundColor: colors.skySoft,
-    borderColor: colors.ocean,
-  },
-  moveDisabled: {
-    opacity: 0.3,
+  moveGlyph: {
+    fontSize: 18,
+    lineHeight: 20,
   },
 });

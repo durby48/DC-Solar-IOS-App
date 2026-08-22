@@ -1,17 +1,20 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  Chip,
+  Pill,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing, typography } from '@/constants/theme';
 import { formatShortDate, todayISO } from '@/lib/dates';
+import { haptics } from '@/lib/haptics';
 import {
   addMyHours,
   deleteMyHours,
@@ -33,6 +36,11 @@ function formatHours(h: number): string {
  * see every employee's entries, can edit/delete all of them, and can log
  * hours on any employee's behalf via the picker. Clocked time keeps
  * flowing from the clock in/out card separately.
+ *
+ * 2026-08-22 restyle: kit primitives throughout — `Card`, `Pill` for the
+ * hours badge, `Chip` for the employee picker, `Button` for save, and a
+ * `SkeletonList` where the first-load spinner was. The two-tap delete
+ * confirm, the 0–24 hour validation and the admin/crew split are unchanged.
  */
 export function JobMyHours({
   jobId,
@@ -133,6 +141,7 @@ export function JobMyHours({
     if (result.ok) {
       setFormOpen(false);
       setEditingId(null);
+      haptics.success();
       setStatus({
         kind: 'success',
         message: editingId ? 'Hours updated.' : `${formatHours(hours)} logged.`,
@@ -171,20 +180,22 @@ export function JobMyHours({
 
   return (
     <>
-      <Text style={styles.sectionTitle}>{isAdmin ? 'Hours' : 'My hours'}</Text>
-      <View style={styles.card}>
+      <SectionHeader
+        title={isAdmin ? 'Hours' : 'My hours'}
+        icon="time-outline"
+        style={styles.section}
+      />
+      <Card style={styles.card}>
         {state === 'loading' ? (
-          <View style={styles.centerPad}>
-            <ActivityIndicator color={colors.ocean} />
-          </View>
+          <SkeletonList count={2} height={28} radius={radii.sm} />
         ) : (
           <>
             {entries.length === 0 ? (
-              <Text style={styles.emptyText}>
+              <AppText variant="caption" color={colors.textMuted}>
                 {isAdmin
                   ? 'No hour entries on this job yet. Log hours for yourself or any employee below.'
                   : 'No hours logged yet. Clocked time counts automatically — add hours here when you worked without clocking in.'}
-              </Text>
+              </AppText>
             ) : (
               entries.map((entry, index) => {
                 const confirming = confirmDeleteId === entry.id;
@@ -192,49 +203,60 @@ export function JobMyHours({
                 return (
                   <View key={entry.id} style={index > 0 ? styles.rowBorderTop : undefined}>
                     <View style={styles.row}>
-                      <View style={styles.hoursChip}>
-                        <Text style={styles.hoursChipText}>{formatHours(entry.hours)}</Text>
-                      </View>
+                      <Pill
+                        label={formatHours(entry.hours)}
+                        bg={colors.sunLight}
+                        fg={colors.ink}
+                        style={styles.hoursPill}
+                      />
                       <View style={styles.rowBody}>
-                        <Text style={styles.rowDate}>
+                        <AppText variant="bodyStrong">
                           {isAdmin && entry.employee
                             ? `${entry.employee} · ${formatShortDate(entry.occurred_on)}`
                             : formatShortDate(entry.occurred_on)}
-                        </Text>
+                        </AppText>
                         {entry.description ? (
-                          <Text style={styles.rowNote} numberOfLines={1}>
+                          <AppText variant="caption" color={colors.textMuted} numberOfLines={1}>
                             {entry.description}
-                          </Text>
+                          </AppText>
                         ) : null}
                       </View>
-                      <Pressable
+                      <AnimatedPressable
                         onPress={() => openEdit(entry)}
+                        haptic="tapLight"
                         hitSlop={6}
-                        style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
-                        <Ionicons name="pencil" size={14} color={colors.ocean} />
-                      </Pressable>
-                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Edit hours"
+                        style={styles.iconButton}>
+                        <Ionicons name="pencil" size={14} color={colors.accentPrimary} />
+                      </AnimatedPressable>
+                      <AnimatedPressable
                         onPress={() => void pressDelete(entry)}
                         disabled={busy}
+                        haptic="tapLight"
                         hitSlop={6}
-                        style={({ pressed }) => [
-                          styles.iconButton,
-                          confirming && styles.iconButtonDanger,
-                          pressed && styles.pressed,
-                        ]}>
+                        accessibilityRole="button"
+                        accessibilityLabel={confirming ? 'Confirm delete' : 'Delete hours'}
+                        style={[styles.iconButton, confirming && styles.iconButtonDanger]}>
                         {busy ? (
                           <ActivityIndicator size="small" color={colors.danger} />
                         ) : (
                           <Ionicons
                             name="trash"
                             size={14}
-                            color={confirming ? colors.white : colors.inkSoft}
+                            color={confirming ? colors.white : colors.textMuted}
                           />
                         )}
-                      </Pressable>
+                      </AnimatedPressable>
                     </View>
                     {confirming ? (
-                      <Text style={styles.confirmHint}>Tap the trash again to delete.</Text>
+                      <AppText
+                        variant="caption"
+                        align="right"
+                        color={colors.danger}
+                        style={styles.confirmHint}>
+                        Tap the trash again to delete.
+                      </AppText>
                     ) : null}
                   </View>
                 );
@@ -243,140 +265,121 @@ export function JobMyHours({
 
             {entries.length > 0 ? (
               <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Logged here</Text>
-                <Text style={styles.totalValue}>{formatHours(total)}</Text>
+                <AppText variant="section" color={colors.accentPrimary}>
+                  Logged here
+                </AppText>
+                <AppText variant="numeric" style={styles.totalValue}>
+                  {formatHours(total)}
+                </AppText>
               </View>
             ) : null}
 
             {formOpen ? (
-              <View style={styles.formArea}>
+              <Card tone="sunk" style={styles.formArea}>
                 {isAdmin && !editingId && employees.length > 0 ? (
                   <>
-                    <Text style={styles.fieldLabel}>For</Text>
+                    <AppText variant="section" color={colors.textMuted}>
+                      For
+                    </AppText>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                       <View style={styles.pickRow}>
-                        {employees.map((option) => {
-                          const active = targetEmail === option.email;
-                          return (
-                            <Pressable
-                              key={option.email}
-                              onPress={() => setTargetEmail(option.email)}
-                              style={[styles.pickChip, active && styles.pickChipActive]}>
-                              <Text
-                                style={[
-                                  styles.pickChipText,
-                                  active && styles.pickChipTextActive,
-                                ]}>
-                                {option.name}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
+                        {employees.map((option) => (
+                          <Chip
+                            key={option.email}
+                            label={option.name}
+                            tone="olive"
+                            selected={targetEmail === option.email}
+                            onPress={() => setTargetEmail(option.email)}
+                          />
+                        ))}
                       </View>
                     </ScrollView>
                   </>
                 ) : null}
-                <Text style={styles.fieldLabel}>Hours (e.g. 2 or 2.5)</Text>
+                <AppText variant="section" color={colors.textMuted}>
+                  Hours (e.g. 2 or 2.5)
+                </AppText>
                 <TextInput
                   style={styles.input}
                   value={hoursText}
                   onChangeText={setHoursText}
                   placeholder="0"
-                  placeholderTextColor={colors.inkSoft}
+                  placeholderTextColor={colors.textMuted}
                   keyboardType="decimal-pad"
                 />
-                <Text style={styles.fieldLabel}>Date (YYYY-MM-DD)</Text>
+                <AppText variant="section" color={colors.textMuted}>
+                  Date (YYYY-MM-DD)
+                </AppText>
                 <TextInput
                   style={styles.input}
                   value={dateText}
                   onChangeText={setDateText}
                   placeholder="YYYY-MM-DD"
-                  placeholderTextColor={colors.inkSoft}
+                  placeholderTextColor={colors.textMuted}
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
-                <Text style={styles.fieldLabel}>Note (optional)</Text>
+                <AppText variant="section" color={colors.textMuted}>
+                  Note (optional)
+                </AppText>
                 <TextInput
                   style={styles.input}
                   value={noteText}
                   onChangeText={setNoteText}
                   placeholder="e.g. finished rail teardown"
-                  placeholderTextColor={colors.inkSoft}
+                  placeholderTextColor={colors.textMuted}
                 />
                 <View style={styles.formButtons}>
-                  <Pressable
+                  <Button
+                    label="Cancel"
                     onPress={() => {
                       setFormOpen(false);
                       setEditingId(null);
                     }}
+                    variant="ghost"
+                    size="sm"
                     disabled={saving}
-                    hitSlop={8}>
-                    <Text style={styles.cancelText}>Cancel</Text>
-                  </Pressable>
-                  <Pressable
+                  />
+                  <Button
+                    label={editingId ? 'Save' : 'Log hours'}
                     onPress={() => void save()}
-                    disabled={saving}
-                    style={({ pressed }) => [
-                      styles.saveButton,
-                      (pressed || saving) && styles.pressed,
-                    ]}>
-                    {saving ? (
-                      <ActivityIndicator color={colors.ink} />
-                    ) : (
-                      <Text style={styles.saveButtonText}>
-                        {editingId ? 'Save' : 'Log hours'}
-                      </Text>
-                    )}
-                  </Pressable>
+                    loading={saving}
+                    size="sm"
+                  />
                 </View>
-              </View>
+              </Card>
             ) : (
-              <Pressable
+              <Button
+                label="Log hours"
                 onPress={openAdd}
-                style={({ pressed }) => [styles.addRow, pressed && styles.pressed]}>
-                <Ionicons name="add-circle" size={18} color={colors.ocean} />
-                <Text style={styles.addRowText}>Log hours</Text>
-              </Pressable>
+                variant="ghost"
+                size="sm"
+                icon="add-circle"
+                style={styles.addRow}
+              />
             )}
           </>
         )}
-      </View>
+      </Card>
 
       {status ? (
-        <Text
-          style={[
-            styles.statusText,
-            status.kind === 'error' ? styles.statusError : styles.statusSuccess,
-          ]}>
+        <AppText
+          variant="caption"
+          align="center"
+          color={status.kind === 'error' ? colors.danger : colors.success}>
           {status.message}
-        </Text>
+        </AppText>
       ) : null}
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
+  section: {
     marginTop: spacing.sm,
   },
   card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.xs,
-    ...shadows.card,
-  },
-  centerPad: {
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  emptyText: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '600',
   },
   row: {
     flexDirection: 'row',
@@ -386,41 +389,21 @@ const styles = StyleSheet.create({
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
   },
-  hoursChip: {
-    backgroundColor: colors.sunLight,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+  hoursPill: {
     minWidth: 52,
     alignItems: 'center',
-  },
-  hoursChipText: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
   },
   rowBody: {
     flex: 1,
     gap: 1,
   },
-  rowDate: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  rowNote: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
   iconButton: {
     width: 26,
     height: 26,
     borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
+    backgroundColor: colors.oliveSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -428,10 +411,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.danger,
   },
   confirmHint: {
-    color: colors.danger,
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'right',
     paddingBottom: spacing.xs,
   },
   totalRow: {
@@ -439,118 +418,40 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
     paddingTop: spacing.xs + 2,
   },
-  totalLabel: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
   totalValue: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
+    fontSize: 16,
+    lineHeight: 21,
   },
   formArea: {
-    backgroundColor: colors.cream,
-    borderRadius: radii.sm,
-    padding: spacing.md,
     gap: spacing.xs,
     marginTop: spacing.xs,
   },
-  fieldLabel: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
   input: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.borderStrong,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm - 2,
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
+    color: colors.textPrimary,
+    ...typography.body,
   },
   formButtons: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: spacing.md,
+    gap: spacing.sm,
     marginTop: spacing.xs,
-  },
-  cancelText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  saveButton: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.card,
-  },
-  saveButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  addRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-  },
-  addRowText: {
-    color: colors.ocean,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  pressed: {
-    opacity: 0.7,
   },
   pickRow: {
     flexDirection: 'row',
     gap: spacing.xs,
     paddingVertical: spacing.xs,
   },
-  pickChip: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-  },
-  pickChipActive: {
-    backgroundColor: colors.ocean,
-  },
-  pickChipText: {
-    color: colors.ocean,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  pickChipTextActive: {
-    color: colors.white,
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  statusError: {
-    color: colors.danger,
-  },
-  statusSuccess: {
-    color: colors.ocean,
+  addRow: {
+    paddingHorizontal: 0,
   },
 });

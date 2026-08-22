@@ -1,13 +1,12 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Platform,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Text,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -18,8 +17,16 @@ import { PipelineBoard } from '@/components/PipelineBoard';
 import { PipelineHero } from '@/components/PipelineHero';
 import { PropertyArt } from '@/components/PropertyArt';
 import { StatusPill } from '@/components/StatusPill';
-import { EmptyState } from '@/components/ui';
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  Pill,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import { type FetchStatus } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
 import { type Job } from '@/lib/types';
@@ -40,6 +47,7 @@ import { useRole } from '@/lib/role';
 import {
   COMPANY_LABEL,
   STAGES,
+  STAGE_GRADIENT,
   isCompanyJob,
   labelForJob,
   stageOrDefault,
@@ -49,6 +57,27 @@ import { formatTimeLabel } from '@/lib/time';
 
 /** Below this the browser window can't show the columns usefully. */
 const BOARD_MIN_WIDTH = 900;
+
+type FilterChip = Stage | 'All' | 'Active' | typeof COMPANY_LABEL;
+
+/**
+ * The accent strip under a filter chip.
+ *
+ * `STAGE_GRADIENT` runs soft → saturated, and `stages.ts` is explicit that its
+ * deep end is not a text ground — so the stage's colour arrives here as a
+ * 3px strip under the chip rather than as the chip's fill. That is the
+ * documented use for these ramps ("accent strips, progress fills"), it makes
+ * the filter row read as the same colour system as the board columns, and it
+ * costs the chip label nothing in contrast.
+ *
+ * All/Active aren't stages and get no strip; Company gets ink, the same
+ * deliberately-unlike-a-stage neutral its pill uses.
+ */
+function stripFor(chip: FilterChip): readonly [string, string] | null {
+  if (chip === 'All' || chip === 'Active') return null;
+  if (chip === COMPANY_LABEL) return [colors.inkSoft, colors.ink];
+  return STAGE_GRADIENT[chip];
+}
 
 function formatCurrency(amount: number): string {
   return `$${Math.round(amount).toLocaleString('en-US')}`;
@@ -73,6 +102,13 @@ function formatHours(h: number): string {
  * Money renders only when `money` is present, which RLS already makes
  * admin-only — crew simply get null, so this is enforced server-side rather
  * than merely hidden in the UI.
+ *
+ * 2026-08-22 restyle: chrome only. The card is a `Card`, the pages are
+ * `AnimatedPressable`s, the chips are `Chip`/`Pill` and the type comes from
+ * `AppText` — but the structure is untouched, because the phone list is the
+ * right layout on a phone and is explicitly not to change: same art sibling,
+ * same paging ScrollView at the same `pageWidth`, same two pages in the same
+ * order, same page dots.
  */
 function PipelineCard({
   job,
@@ -131,7 +167,7 @@ function PipelineCard({
   const open = () => router.push({ pathname: '/job/[id]', params: { id: job.id } });
 
   return (
-    <View style={styles.card}>
+    <Card padded={false} style={styles.card}>
       <PropertyArt seed={job.id} imageUrl={artUrl} radius={radii.md} />
       <ScrollView
         horizontal
@@ -142,60 +178,65 @@ function PipelineCard({
         }
         style={{ width: pageWidth }}>
         {/* ---- page 1: who and when ---- */}
-        <Pressable
+        <AnimatedPressable
           onPress={open}
-          style={({ pressed }) => [styles.page, { width: pageWidth }, pressed && styles.cardPressed]}>
+          haptic="tapLight"
+          scaleTo={0.99}
+          accessibilityRole="button"
+          accessibilityLabel={job.job_number ? `${job.job_number} ${job.name}` : job.name}
+          style={[styles.page, { width: pageWidth }]}>
           <View style={styles.topRow}>
-            {job.job_number ? (
-              <View style={styles.chip}>
-                <Text style={styles.chipText}>{job.job_number}</Text>
-              </View>
-            ) : null}
+            {job.job_number ? <Chip label={job.job_number} tone="olive" /> : null}
             <StatusPill stage={labelForJob(job)} />
           </View>
-          <Text style={styles.name} numberOfLines={2}>
+          <AppText variant="heading" numberOfLines={2}>
             {job.name}
-          </Text>
+          </AppText>
           {job.customer?.name ? (
             <View style={styles.customerRow}>
               <CustomerAvatar customer={job.customer} size={26} />
-              <Text style={styles.customer} numberOfLines={1}>
+              <AppText variant="bodyStrong" color={colors.textSecondary} numberOfLines={1}>
                 {job.customer.name}
-              </Text>
+              </AppText>
             </View>
           ) : null}
-          {job.address ? <Text style={styles.address}>{job.address}</Text> : null}
-          <Text
-            style={
-              (stage === 'Complete' && completedOn) || next ? styles.nextDate : styles.noDate
+          {job.address ? (
+            <AppText variant="body" color={colors.textSecondary}>
+              {job.address}
+            </AppText>
+          ) : null}
+          <AppText
+            variant="caption"
+            color={
+              (stage === 'Complete' && completedOn) || next
+                ? colors.accentPrimary
+                : colors.textMuted
             }>
             {nextLabel}
-          </Text>
+          </AppText>
           {myHours !== undefined && myHours > 0 ? (
-            <Text style={styles.hoursRow}>{`Your hours: ${myHours.toFixed(1)} h`}</Text>
+            <AppText variant="caption" color={colors.textSecondary}>
+              {`Your hours: ${myHours.toFixed(1)} h`}
+            </AppText>
           ) : null}
-        </Pressable>
+        </AnimatedPressable>
 
         {/* ---- page 2: how much ---- */}
-        <Pressable
+        <AnimatedPressable
           onPress={open}
-          style={({ pressed }) => [styles.page, { width: pageWidth }, pressed && styles.cardPressed]}>
+          haptic="tapLight"
+          scaleTo={0.99}
+          accessibilityRole="button"
+          accessibilityLabel={`Money and forecast for ${job.name}`}
+          style={[styles.page, { width: pageWidth }]}>
           <View style={styles.topRow}>
-            {job.job_number ? (
-              <View style={styles.chip}>
-                <Text style={styles.chipText}>{job.job_number}</Text>
-              </View>
-            ) : null}
+            {job.job_number ? <Chip label={job.job_number} tone="olive" /> : null}
             <View style={styles.typeChipRow}>
               {extra.has_critter_guard ? (
-                <View style={styles.critterChip}>
-                  <Text style={styles.critterChipText}>Critter guard</Text>
-                </View>
+                <Pill label="Critter guard" bg={colors.limeSoft} fg={colors.limeDeep} />
               ) : null}
               {extra.job_type ? (
-                <View style={styles.typeChip}>
-                  <Text style={styles.typeChipText}>{extra.job_type}</Text>
-                </View>
+                <Pill label={extra.job_type} bg={colors.violetSoft} fg={colors.violetDeep} />
               ) : null}
             </View>
           </View>
@@ -205,54 +246,60 @@ function PipelineCard({
             <>
               <View style={styles.statRow}>
                 <View style={styles.stat}>
-                  <Text style={styles.statLabel}>Overhead</Text>
-                  <Text style={styles.statValue}>
+                  <AppText variant="section" color={colors.textMuted} style={styles.statLabel}>
+                    Overhead
+                  </AppText>
+                  <AppText variant="numeric">
                     {money ? formatCurrency(money.expenses) : '—'}
-                  </Text>
+                  </AppText>
                 </View>
                 <View style={styles.stat}>
-                  <Text style={styles.statLabel}>Hours logged</Text>
-                  <Text style={styles.statValue}>
-                    {labor ? formatHours(labor.hours) : '—'}
-                  </Text>
+                  <AppText variant="section" color={colors.textMuted} style={styles.statLabel}>
+                    Hours logged
+                  </AppText>
+                  <AppText variant="numeric">{labor ? formatHours(labor.hours) : '—'}</AppText>
                 </View>
               </View>
-              <Text style={styles.forecastNote}>
-                Company costs — shop, tools, insurance, software. Never charged to a
-                job and never counted as job profit.
-              </Text>
+              <AppText variant="caption" color={colors.textSecondary}>
+                Company costs — shop, tools, insurance, software. Never charged to a job and
+                never counted as job profit.
+              </AppText>
               {money && money.paid > 0 ? (
-                <Text style={styles.misfiledNote}>
+                <AppText variant="caption" color={colors.coralDeep} style={styles.misfiledNote}>
                   {`⚠ ${formatCurrency(money.paid)} in payments is filed here. Company earns no revenue — assign it to its job from the payment row.`}
-                </Text>
+                </AppText>
               ) : null}
             </>
           ) : null}
 
           {company ? null : (
-          <View style={styles.statRow}>
-            <View style={styles.stat}>
-              <Text style={styles.statLabel}>Modules</Text>
-              <Text style={styles.statValue}>{modules ?? '—'}</Text>
+            <View style={styles.statRow}>
+              <View style={styles.stat}>
+                <AppText variant="section" color={colors.textMuted} style={styles.statLabel}>
+                  Modules
+                </AppText>
+                <AppText variant="numeric">{modules ?? '—'}</AppText>
+              </View>
+              <View style={styles.stat}>
+                <AppText variant="section" color={colors.textMuted} style={styles.statLabel}>
+                  Est. hours
+                </AppText>
+                <AppText variant="numeric">
+                  {forecast ? formatHours(forecast.hours) : '—'}
+                </AppText>
+              </View>
             </View>
-            <View style={styles.stat}>
-              <Text style={styles.statLabel}>Est. hours</Text>
-              <Text style={styles.statValue}>
-                {forecast ? formatHours(forecast.hours) : '—'}
-              </Text>
-            </View>
-          </View>
           )}
           {company ? null : forecast ? (
-            <Text style={styles.forecastNote}>
+            <AppText variant="caption" color={colors.textSecondary}>
               {forecast.low !== null && forecast.high !== null
                 ? `${formatHours(forecast.low)}–${formatHours(forecast.high)} · from ${forecast.samples} finished ${forecast.basis} jobs`
                 : `from 1 finished ${forecast.basis} job — treat as rough`}
-            </Text>
+            </AppText>
           ) : (
-            <Text style={styles.forecastNote}>
+            <AppText variant="caption" color={colors.textSecondary}>
               {modules ? 'No finished jobs to forecast from yet' : 'Set a module count to forecast'}
-            </Text>
+            </AppText>
           )}
 
           {!company && money ? (
@@ -264,32 +311,42 @@ function PipelineCard({
                   ['Paid', formatCurrency(money.paid)],
                 ] as [string, string][]).map(([label, value]) => (
                   <View key={label} style={styles.moneyCell}>
-                    <Text style={styles.statLabel}>{label}</Text>
-                    <Text style={styles.moneyValue}>{value}</Text>
+                    <AppText variant="section" color={colors.textMuted} style={styles.statLabel}>
+                      {label}
+                    </AppText>
+                    <AppText variant="bodyStrong" style={styles.numeric}>
+                      {value}
+                    </AppText>
                   </View>
                 ))}
               </View>
               {money.estimateCount > 1 ? (
-                <Text style={styles.estimateNote}>
+                <AppText variant="caption" color={colors.textMuted}>
                   {`Est is the newest of ${money.estimateCount} estimates`}
-                </Text>
+                </AppText>
               ) : null}
               <View style={styles.profitRowNew}>
-                <Text style={styles.statLabel}>Profit</Text>
-                <Text
-                  style={[
-                    styles.profitValueNew,
-                    profitPct !== null &&
-                      (profitPct >= 0 ? styles.profitPositive : styles.profitNegative),
-                  ]}>
+                <AppText variant="section" color={colors.textMuted} style={styles.statLabel}>
+                  Profit
+                </AppText>
+                <AppText
+                  variant="bodyStrong"
+                  color={
+                    profitPct === null
+                      ? colors.textPrimary
+                      : profitPct >= 0
+                        ? colors.success
+                        : colors.danger
+                  }
+                  style={styles.profitValueNew}>
                   {profitPct !== null
                     ? `${profitPct >= 0 ? '+' : ''}${profitPct.toFixed(1)}%`
                     : '—'}
-                </Text>
+                </AppText>
               </View>
             </>
           ) : null}
-        </Pressable>
+        </AnimatedPressable>
       </ScrollView>
 
       <View style={styles.dots} pointerEvents="none">
@@ -297,7 +354,7 @@ function PipelineCard({
           <View key={i} style={[styles.dot, page === i && styles.dotActive]} />
         ))}
       </View>
-    </View>
+    </Card>
   );
 }
 
@@ -315,9 +372,7 @@ export default function PipelineScreen() {
   const [labor, setLabor] = useState<Map<string, JobLaborHours> | null>(null);
   const [model, setModel] = useState<ForecastModel | null>(null);
   const [myHours, setMyHours] = useState<Map<string, number>>(new Map());
-  const [stageFilter, setStageFilter] = useState<
-    Stage | 'All' | 'Active' | typeof COMPANY_LABEL
-  >('All');
+  const [stageFilter, setStageFilter] = useState<FilterChip>('All');
   const [artUrls, setArtUrls] = useState<Map<string, string>>(new Map());
 
   const load = useCallback(async () => {
@@ -392,12 +447,38 @@ export default function PipelineScreen() {
     return projectJobs.filter((job) => jobStage(job) === stageFilter);
   }, [jobs, projectJobs, companyJobs, stageFilter]);
 
-  const filterChips: (Stage | 'All' | 'Active' | typeof COMPANY_LABEL)[] = [
+  const filterChips: FilterChip[] = [
     'All',
     'Active',
     ...STAGES,
     ...(companyJobs.length > 0 ? [COMPANY_LABEL] : []),
   ];
+
+  const newProjectButton = role?.isAdmin ? (
+    <Button
+      label="New project"
+      // The /job-editor route is a standalone screen; cast keeps this tab
+      // decoupled from its typed-route generation.
+      onPress={() => router.push('/job-editor' as never)}
+      size="sm"
+      icon="add"
+    />
+  ) : null;
+
+  const emptyPipeline =
+    status === 'unavailable' ? (
+      <EmptyState
+        icon="cloud-offline"
+        title="Couldn't load the pipeline"
+        body="Pull to retry."
+      />
+    ) : (
+      <EmptyState
+        icon="briefcase"
+        title="No projects yet"
+        body="New projects show up here as soon as they're created."
+      />
+    );
 
   // app.dcsolarkc.com gets a stage-column job board; iOS keeps the phone list,
   // which is the right layout on a phone and is explicitly not to change. A
@@ -410,14 +491,8 @@ export default function PipelineScreen() {
         <ScrollView contentContainerStyle={styles.boardPage}>
           <View style={styles.boardHeader}>
             <View style={styles.headerRow}>
-              <Text style={styles.title}>Pipeline</Text>
-              {role?.isAdmin ? (
-                <Pressable
-                  onPress={() => router.push('/job-editor' as never)}
-                  style={({ pressed }) => [styles.newButton, pressed && styles.pressed]}>
-                  <Text style={styles.newButtonText}>+ New project</Text>
-                </Pressable>
-              ) : null}
+              <AppText variant="display">Pipeline</AppText>
+              {newProjectButton}
             </View>
             <PipelineHero />
           </View>
@@ -431,21 +506,7 @@ export default function PipelineScreen() {
             isAdmin={role?.isAdmin ?? false}
             onChanged={load}
           />
-          {loaded && jobs.length === 0 ? (
-            status === 'unavailable' ? (
-              <EmptyState
-                icon="cloud-offline"
-                title="Couldn't load the pipeline"
-                body="Pull to retry."
-              />
-            ) : (
-              <EmptyState
-                icon="briefcase"
-                title="No projects yet"
-                body="New projects show up here as soon as they're created."
-              />
-            )
-          ) : null}
+          {loaded && jobs.length === 0 ? emptyPipeline : null}
         </ScrollView>
       </SafeAreaView>
     );
@@ -461,22 +522,15 @@ export default function PipelineScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={colors.ocean}
+            tintColor={colors.accentPrimary}
+            colors={[colors.accentPrimary]}
           />
         }
         ListHeaderComponent={
           <View>
             <View style={styles.headerRow}>
-              <Text style={styles.title}>Pipeline</Text>
-              {role?.isAdmin ? (
-                <Pressable
-                  // The /job-editor route is a standalone screen; cast keeps
-                  // this tab decoupled from its typed-route generation.
-                  onPress={() => router.push('/job-editor' as never)}
-                  style={({ pressed }) => [styles.newButton, pressed && styles.pressed]}>
-                  <Text style={styles.newButtonText}>+ New project</Text>
-                </Pressable>
-              ) : null}
+              <AppText variant="display">Pipeline</AppText>
+              {newProjectButton}
             </View>
             <PipelineHero />
             <ScrollView
@@ -496,19 +550,26 @@ export default function PipelineScreen() {
                         : chip === 'Active'
                           ? projectJobs.length - (stageCounts.get('Complete') ?? 0)
                           : (stageCounts.get(chip) ?? 0);
+                  const strip = stripFor(chip);
                   return (
-                    <Pressable
-                      key={chip}
-                      onPress={() => setStageFilter(chip)}
-                      style={[styles.filterChip, active && styles.filterChipActive]}>
-                      <Text
-                        style={[
-                          styles.filterChipText,
-                          active && styles.filterChipTextActive,
-                        ]}>
-                        {`${chip} (${count})`}
-                      </Text>
-                    </Pressable>
+                    <View key={chip} style={styles.filterItem}>
+                      <Chip
+                        label={`${chip} (${count})`}
+                        tone="olive"
+                        selected={active}
+                        onPress={() => setStageFilter(chip)}
+                      />
+                      {strip ? (
+                        <LinearGradient
+                          colors={strip}
+                          start={{ x: 0, y: 0.5 }}
+                          end={{ x: 1, y: 0.5 }}
+                          style={[styles.filterStrip, !active && styles.filterStripIdle]}
+                        />
+                      ) : (
+                        <View style={styles.filterStrip} />
+                      )}
+                    </View>
                   );
                 })}
               </View>
@@ -530,24 +591,19 @@ export default function PipelineScreen() {
         )}
         ListEmptyComponent={
           loaded ? (
-            status === 'unavailable' ? (
-              <EmptyState
-                icon="cloud-offline"
-                title="Couldn't load the pipeline"
-                body="Pull to retry."
-              />
-            ) : jobs.length === 0 ? (
-              <EmptyState
-                icon="briefcase"
-                title="No projects yet"
-                body="New projects show up here as soon as they're created."
-              />
+            status === 'unavailable' || jobs.length === 0 ? (
+              emptyPipeline
             ) : (
-              <Text style={styles.empty}>
-                {stageFilter === 'Active'
-                  ? 'No active projects.'
-                  : `No projects in ${stageFilter}.`}
-              </Text>
+              <EmptyState
+                icon="funnel"
+                title={
+                  stageFilter === 'Active'
+                    ? 'No active projects'
+                    : `Nothing in ${stageFilter}`
+                }
+                body="Every project is in another stage right now. Pick a different filter above."
+                action={{ label: 'Show all', onPress: () => setStageFilter('All') }}
+              />
             )
           ) : null
         }
@@ -559,7 +615,7 @@ export default function PipelineScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceAlt,
   },
   container: {
     padding: spacing.lg,
@@ -571,26 +627,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.md,
   },
-  title: {
-    color: colors.ink,
-    fontSize: 28,
-    fontWeight: '800',
-  },
-  newButton: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    ...shadows.card,
-  },
-  newButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  pressed: {
-    opacity: 0.85,
-  },
   filterScroll: {
     marginBottom: spacing.md,
   },
@@ -598,22 +634,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.xs,
   },
-  filterChip: {
-    backgroundColor: colors.skySoft,
+  filterItem: {
+    gap: 4,
+    alignItems: 'stretch',
+  },
+  filterStrip: {
+    height: 3,
     borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs + 2,
+    marginHorizontal: spacing.xs,
   },
-  filterChipActive: {
-    backgroundColor: colors.ocean,
-  },
-  filterChipText: {
-    color: colors.ocean,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  filterChipTextActive: {
-    color: colors.white,
+  filterStripIdle: {
+    opacity: 0.45,
   },
   boardPage: {
     paddingTop: spacing.lg,
@@ -626,16 +657,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   card: {
-    backgroundColor: colors.card,
-    borderRadius: radii.md,
     // The property artwork is an absolutely-positioned sibling underneath;
-    // `overflow: hidden` keeps it inside the rounded corners.
-    overflow: 'hidden',
+    // `Card`'s clip keeps it inside the rounded corners.
     minHeight: 150,
-    ...shadows.card,
-  },
-  cardPressed: {
-    opacity: 0.8,
   },
   page: {
     padding: spacing.md,
@@ -652,28 +676,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xs,
   },
-  critterChip: {
-    backgroundColor: colors.limeSoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-  },
-  critterChipText: {
-    color: colors.limeDeep,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  typeChip: {
-    backgroundColor: colors.violetSoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-  },
-  typeChipText: {
-    color: colors.violetDeep,
-    fontSize: 12,
-    fontWeight: '800',
-  },
   statRow: {
     flexDirection: 'row',
     gap: spacing.lg,
@@ -683,33 +685,15 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   statLabel: {
-    color: colors.inkSoft,
     fontSize: 10,
-    fontWeight: '800',
-    textTransform: 'uppercase',
+    lineHeight: 14,
     letterSpacing: 0.6,
   },
-  statValue: {
-    color: colors.ink,
-    fontSize: 22,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
-  },
-  estimateNote: {
-    color: colors.inkSoft,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  forecastNote: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '700',
-  },
   misfiledNote: {
-    color: colors.coralDeep,
-    fontSize: 11,
-    fontWeight: '700',
     marginTop: spacing.xs,
+  },
+  numeric: {
+    fontVariant: ['tabular-nums'],
   },
   moneyRowNew: {
     flexDirection: 'row',
@@ -717,16 +701,10 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     paddingTop: spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
+    borderTopColor: colors.border,
   },
   moneyCell: {
     gap: 2,
-  },
-  moneyValue: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
   },
   profitRowNew: {
     flexDirection: 'row',
@@ -735,16 +713,9 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   profitValueNew: {
-    color: colors.ink,
     fontSize: 18,
-    fontWeight: '800',
+    lineHeight: 23,
     fontVariant: ['tabular-nums'],
-  },
-  profitPositive: {
-    color: colors.success,
-  },
-  profitNegative: {
-    color: colors.danger,
   },
   dots: {
     position: 'absolute',
@@ -760,57 +731,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(61,53,46,0.22)',
   },
   dotActive: {
-    backgroundColor: colors.ocean,
+    backgroundColor: colors.accentPrimary,
   },
   topRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: spacing.xs,
-  },
-  chip: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-  },
-  chipText: {
-    color: colors.ocean,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  name: {
-    color: colors.ink,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  customer: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  address: {
-    color: colors.inkSoft,
-    fontSize: 14,
-  },
-  nextDate: {
-    color: colors.ocean,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  noDate: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  hoursRow: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  empty: {
-    color: colors.inkSoft,
-    fontSize: 15,
-    marginTop: spacing.lg,
   },
 });

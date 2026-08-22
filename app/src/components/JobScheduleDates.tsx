@@ -1,18 +1,18 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Alert, Platform, StyleSheet, TextInput, View } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  EmptyState,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing, typography } from '@/constants/theme';
 import {
   addJobScheduleDate,
   deleteJobScheduleDate,
@@ -21,6 +21,7 @@ import {
   type ScheduleDate,
 } from '@/lib/data';
 import { formatShortDate, parseISODate } from '@/lib/dates';
+import { haptics } from '@/lib/haptics';
 import {
   formatTimeLabel,
   isValidHHMM,
@@ -44,6 +45,11 @@ function timeToDate(time: string): Date {
 /**
  * "Scheduled days" card for a job. All members see the list; admins can add
  * and remove days — RLS is the real barrier, `isAdmin` only draws the buttons.
+ *
+ * 2026-08-22 restyle: `Card`, `Button`, `EmptyState` and `SkeletonList` from
+ * the kit. Both platform splits stay exactly as they were: the native date/
+ * time pickers vs. the web text fields, and the Alert-on-native vs.
+ * remove-immediately-on-web confirmation.
  */
 export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: boolean }) {
   const [dates, setDates] = useState<ScheduleDate[]>([]);
@@ -100,6 +106,7 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
     const result = await addJobScheduleDate({ jobId, workDate, startTime });
     if (result.ok) {
       setDates((prev) => sortDates([...prev, result.date]));
+      haptics.success();
       resetForm();
     } else {
       setSaving(false);
@@ -165,6 +172,7 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
     const result = await updateJobScheduleDate(entry.id, startTime);
     if (result.ok) {
       setDates((prev) => sortDates(prev.map((d) => (d.id === entry.id ? result.date : d))));
+      haptics.success();
       cancelEdit();
     } else {
       setEditSaving(false);
@@ -195,57 +203,71 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
 
   return (
     <>
-      <Text style={styles.sectionTitle}>Scheduled days</Text>
+      <SectionHeader title="Scheduled days" icon="calendar" style={styles.section} />
       {loading ? (
-        <View style={styles.placeholderCard}>
-          <ActivityIndicator color={colors.ocean} />
-        </View>
+        <SkeletonList count={2} height={56} />
       ) : dates.length === 0 ? (
-        <View style={styles.placeholderCard}>
-          <Ionicons name="calendar" size={22} color={colors.inkSoft} />
-          <Text style={styles.placeholderText}>No days scheduled yet</Text>
-        </View>
+        <EmptyState
+          icon="calendar"
+          title="No days scheduled yet"
+          body={
+            canEdit
+              ? 'Add the days the crew is expected on site and they show up on the calendar.'
+              : 'Days appear here once the office schedules them.'
+          }
+        />
       ) : (
-        <View style={styles.card}>
+        <Card padded={false}>
           {dates.map((entry, index) => {
             const isEditing = editingId === entry.id;
             const rowContent = (
               <>
                 <View style={styles.iconWrap}>
-                  <Ionicons name="calendar" size={18} color={colors.ocean} />
+                  <Ionicons name="calendar" size={18} color={colors.accentPrimary} />
                 </View>
                 <View style={styles.rowBody}>
-                  <Text style={styles.rowValue}>
+                  <AppText variant="bodyStrong">
                     {formatShortDate(entry.work_date)} —{' '}
                     {formatTimeLabel(entry.start_time) ?? 'time TBD'}
-                  </Text>
-                  {entry.note ? <Text style={styles.rowNote}>{entry.note}</Text> : null}
+                  </AppText>
+                  {entry.note ? (
+                    <AppText variant="caption" color={colors.textMuted}>
+                      {entry.note}
+                    </AppText>
+                  ) : null}
                 </View>
                 {canEdit ? (
                   <Ionicons
                     name={isEditing ? 'chevron-up' : 'create-outline'}
                     size={16}
-                    color={colors.inkSoft}
+                    color={colors.textMuted}
                   />
                 ) : null}
                 {canEdit ? (
-                  <Pressable
+                  <AnimatedPressable
                     onPress={() => confirmRemove(entry)}
+                    haptic="tapLight"
                     hitSlop={8}
-                    style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}>
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${formatShortDate(entry.work_date)}`}
+                    style={styles.removeButton}>
                     <Ionicons name="close" size={16} color={colors.danger} />
-                  </Pressable>
+                  </AnimatedPressable>
                 ) : null}
               </>
             );
             return (
               <View key={entry.id} style={index > 0 ? styles.rowBorderTop : null}>
                 {canEdit ? (
-                  <Pressable
+                  <AnimatedPressable
                     onPress={() => (isEditing ? cancelEdit() : startEdit(entry))}
-                    style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
+                    haptic="tapLight"
+                    scaleTo={0.99}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit ${formatShortDate(entry.work_date)}`}
+                    style={styles.row}>
                     {rowContent}
-                  </Pressable>
+                  </AnimatedPressable>
                 ) : (
                   <View style={styles.row}>{rowContent}</View>
                 )}
@@ -254,37 +276,52 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
                   <View style={styles.editForm}>
                     {Platform.OS === 'web' ? (
                       <View style={styles.fieldRow}>
-                        <Text style={styles.fieldLabel}>Start time</Text>
+                        <AppText variant="section" color={colors.textMuted}>
+                          Start time
+                        </AppText>
                         <TextInput
                           value={editTimeText}
                           onChangeText={setEditTimeText}
                           placeholder="HH:MM (blank = TBD)"
-                          placeholderTextColor={colors.inkSoft}
+                          placeholderTextColor={colors.textMuted}
                           style={styles.input}
                           autoCapitalize="none"
                         />
                         {editTimeText ? (
-                          <Pressable onPress={() => setEditTimeText('')} hitSlop={4}>
-                            <Text style={styles.skipTime}>Clear</Text>
-                          </Pressable>
+                          <AnimatedPressable onPress={() => setEditTimeText('')} hitSlop={4}>
+                            <AppText
+                              variant="caption"
+                              color={colors.textMuted}
+                              style={styles.skipTime}>
+                              Clear
+                            </AppText>
+                          </AnimatedPressable>
                         ) : null}
                       </View>
                     ) : (
                       <>
-                        <Pressable
+                        <AnimatedPressable
                           onPress={() => setEditPickerOpen((open) => !open)}
-                          style={({ pressed }) => [styles.fieldRow, pressed && styles.pressed]}>
-                          <Text style={styles.fieldLabel}>Start time</Text>
-                          <Text style={styles.fieldValue}>
+                          haptic="tapLight"
+                          style={styles.fieldRow}>
+                          <AppText variant="section" color={colors.textMuted}>
+                            Start time
+                          </AppText>
+                          <AppText variant="bodyStrong" color={colors.accentPrimary}>
                             {editDraftTime
                               ? (formatTimeLabel(toHHMM(editDraftTime)) ?? 'TBD')
                               : 'Time TBD'}
-                          </Text>
-                        </Pressable>
+                          </AppText>
+                        </AnimatedPressable>
                         {editDraftTime ? (
-                          <Pressable onPress={() => setEditDraftTime(null)} hitSlop={4}>
-                            <Text style={styles.skipTime}>Clear time (set TBD)</Text>
-                          </Pressable>
+                          <AnimatedPressable onPress={() => setEditDraftTime(null)} hitSlop={4}>
+                            <AppText
+                              variant="caption"
+                              color={colors.textMuted}
+                              style={styles.skipTime}>
+                              Clear time (set TBD)
+                            </AppText>
+                          </AnimatedPressable>
                         ) : null}
                         {editPickerOpen ? (
                           <DateTimePicker
@@ -303,68 +340,67 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
                       </>
                     )}
                     <View style={styles.formButtons}>
-                      <Pressable
+                      <Button
+                        label="Cancel"
                         onPress={cancelEdit}
+                        variant="ghost"
+                        size="sm"
                         disabled={editSaving}
-                        style={({ pressed }) => [styles.cancelButton, pressed && styles.pressed]}>
-                        <Text style={styles.cancelButtonText}>Cancel</Text>
-                      </Pressable>
-                      <Pressable
+                      />
+                      <Button
+                        label="Save time"
                         onPress={() => void saveEditedTime(entry)}
-                        disabled={editSaving}
-                        style={({ pressed }) => [
-                          styles.saveButton,
-                          (pressed || editSaving) && styles.pressed,
-                        ]}>
-                        {editSaving ? (
-                          <ActivityIndicator color={colors.ink} size="small" />
-                        ) : (
-                          <Text style={styles.saveButtonText}>Save time</Text>
-                        )}
-                      </Pressable>
+                        loading={editSaving}
+                        size="sm"
+                      />
                     </View>
                   </View>
                 ) : null}
               </View>
             );
           })}
-        </View>
+        </Card>
       )}
 
       {canEdit && !showForm ? (
-        <Pressable
+        <Button
+          label="Add day"
           onPress={() => {
             cancelEdit();
             setShowForm(true);
           }}
-          style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}>
-          <Ionicons name="add" size={18} color={colors.ink} />
-          <Text style={styles.addButtonText}>Add day</Text>
-        </Pressable>
+          variant="secondary"
+          size="sm"
+          icon="add"
+        />
       ) : null}
 
       {canEdit && showForm ? (
-        <View style={styles.formCard}>
+        <Card style={styles.formCard}>
           {Platform.OS === 'web' ? (
             <>
               <View style={styles.fieldRow}>
-                <Text style={styles.fieldLabel}>Date</Text>
+                <AppText variant="section" color={colors.textMuted}>
+                  Date
+                </AppText>
                 <TextInput
                   value={dateText}
                   onChangeText={setDateText}
                   placeholder="YYYY-MM-DD"
-                  placeholderTextColor={colors.inkSoft}
+                  placeholderTextColor={colors.textMuted}
                   style={styles.input}
                   autoCapitalize="none"
                 />
               </View>
               <View style={styles.fieldRow}>
-                <Text style={styles.fieldLabel}>Start time</Text>
+                <AppText variant="section" color={colors.textMuted}>
+                  Start time
+                </AppText>
                 <TextInput
                   value={timeText}
                   onChangeText={setTimeText}
                   placeholder="HH:MM (blank = TBD)"
-                  placeholderTextColor={colors.inkSoft}
+                  placeholderTextColor={colors.textMuted}
                   style={styles.input}
                   autoCapitalize="none"
                 />
@@ -372,26 +408,34 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
             </>
           ) : (
             <>
-              <Pressable
+              <AnimatedPressable
                 onPress={() => setPickerMode(pickerMode === 'date' ? null : 'date')}
-                style={({ pressed }) => [styles.fieldRow, pressed && styles.pressed]}>
-                <Text style={styles.fieldLabel}>Date</Text>
-                <Text style={styles.fieldValue}>
+                haptic="tapLight"
+                style={styles.fieldRow}>
+                <AppText variant="section" color={colors.textMuted}>
+                  Date
+                </AppText>
+                <AppText variant="bodyStrong" color={colors.accentPrimary}>
                   {draftDate ? formatShortDate(toISODate(draftDate)) : 'Pick a date'}
-                </Text>
-              </Pressable>
-              <Pressable
+                </AppText>
+              </AnimatedPressable>
+              <AnimatedPressable
                 onPress={() => setPickerMode(pickerMode === 'time' ? null : 'time')}
-                style={({ pressed }) => [styles.fieldRow, pressed && styles.pressed]}>
-                <Text style={styles.fieldLabel}>Start time</Text>
-                <Text style={styles.fieldValue}>
+                haptic="tapLight"
+                style={styles.fieldRow}>
+                <AppText variant="section" color={colors.textMuted}>
+                  Start time
+                </AppText>
+                <AppText variant="bodyStrong" color={colors.accentPrimary}>
                   {draftTime ? (formatTimeLabel(toHHMM(draftTime)) ?? 'TBD') : 'Time TBD'}
-                </Text>
-              </Pressable>
+                </AppText>
+              </AnimatedPressable>
               {draftTime ? (
-                <Pressable onPress={() => setDraftTime(null)} hitSlop={4}>
-                  <Text style={styles.skipTime}>Skip time (leave TBD)</Text>
-                </Pressable>
+                <AnimatedPressable onPress={() => setDraftTime(null)} hitSlop={4}>
+                  <AppText variant="caption" color={colors.textMuted} style={styles.skipTime}>
+                    Skip time (leave TBD)
+                  </AppText>
+                </AnimatedPressable>
               ) : null}
               {pickerMode ? (
                 <DateTimePicker
@@ -416,72 +460,46 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
           )}
 
           <View style={styles.formButtons}>
-            <Pressable
+            <Button
+              label="Cancel"
               onPress={resetForm}
+              variant="ghost"
+              size="sm"
               disabled={saving}
-              style={({ pressed }) => [styles.cancelButton, pressed && styles.pressed]}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </Pressable>
-            <Pressable
+            />
+            <Button
+              label="Save day"
               onPress={Platform.OS === 'web' ? submitWeb : submitNative}
-              disabled={saving}
-              style={({ pressed }) => [
-                styles.saveButton,
-                (pressed || saving) && styles.pressed,
-              ]}>
-              {saving ? (
-                <ActivityIndicator color={colors.ink} size="small" />
-              ) : (
-                <Text style={styles.saveButtonText}>Save day</Text>
-              )}
-            </Pressable>
+              loading={saving}
+              size="sm"
+            />
           </View>
-        </View>
+        </Card>
       ) : null}
 
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {error ? (
+        <AppText variant="caption" align="center" color={colors.danger}>
+          {error}
+        </AppText>
+      ) : null}
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
+  section: {
     marginTop: spacing.sm,
-  },
-  placeholderCard: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  placeholderText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    ...shadows.card,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
     padding: spacing.md,
+    backgroundColor: colors.surface,
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
-  },
-  rowPressed: {
-    backgroundColor: colors.skySoft,
+    borderTopColor: colors.border,
   },
   editForm: {
     paddingHorizontal: spacing.md,
@@ -492,7 +510,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
+    backgroundColor: colors.oliveSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -500,49 +518,16 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
-  rowValue: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  rowNote: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
   removeButton: {
     width: 28,
     height: 28,
     borderRadius: radii.pill,
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.sunLight,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.lg,
-    alignSelf: 'flex-start',
-  },
-  addButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
   },
   formCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.sm,
-    ...shadows.card,
   },
   fieldRow: {
     flexDirection: 'row',
@@ -551,70 +536,26 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingVertical: spacing.xs,
   },
-  fieldLabel: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  fieldValue: {
-    color: colors.ocean,
-    fontSize: 15,
-    fontWeight: '700',
-  },
   skipTime: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '600',
     textDecorationLine: 'underline',
   },
   input: {
     flex: 1,
     maxWidth: 220,
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.borderStrong,
     borderRadius: radii.sm,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs + 2,
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
-    backgroundColor: colors.cream,
+    color: colors.textPrimary,
+    backgroundColor: colors.surfaceAlt,
+    ...typography.body,
   },
   formButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
+    alignItems: 'center',
     gap: spacing.sm,
     marginTop: spacing.xs,
-  },
-  cancelButton: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.pill,
-  },
-  cancelButtonText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  saveButton: {
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  errorText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
   },
 });

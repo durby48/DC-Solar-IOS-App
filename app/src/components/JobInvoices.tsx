@@ -5,16 +5,28 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AnimatedPressable,
+  AppText,
+  Button,
+  Card,
+  Chip,
+  Confetti,
+  EmptyState,
+  FadeInUp,
+  Pill,
+  SectionHeader,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing, typography } from '@/constants/theme';
 import { getDocumentUrl } from '@/lib/data';
+import { haptics } from '@/lib/haptics';
 import { shareDocument, viewDocument } from '@/lib/pdf';
 import { formatShortDate, todayISO } from '@/lib/dates';
 import {
@@ -48,13 +60,11 @@ function entryIcon(entry: FinanceEntry): keyof typeof Ionicons.glyphMap {
 }
 
 /** Money in is green, money out is coral, paperwork stays ink. */
-function amountStyle(entry: FinanceEntry) {
+function amountColor(entry: FinanceEntry): string {
   // Investment is money in, same as a payment — it just isn't revenue.
-  if (entry.type === 'payment' || entry.type === 'investment') {
-    return { color: colors.mintDeep };
-  }
-  if (entry.type === 'expense') return { color: colors.coralDeep };
-  return undefined;
+  if (entry.type === 'payment' || entry.type === 'investment') return colors.mintDeep;
+  if (entry.type === 'expense') return colors.coralDeep;
+  return colors.textPrimary;
 }
 
 function entryTitle(entry: FinanceEntry): string {
@@ -93,6 +103,16 @@ function isStale(entry: FinanceEntry): boolean {
  * confirm — both admin-only via RLS (needs the finance-entries migration).
  * The parent must gate rendering on isAdmin; pass
  * `onEntriesChanged` so sibling finance summaries can refresh after edits.
+ *
+ * 2026-08-22 restyle: the kit's `Card` / `Button` / `Chip` / `Pill` /
+ * `EmptyState` / `SkeletonList` replace the local card, sun-button, chip and
+ * placeholder styles. Money recorded is now CELEBRATED — a payment that saves
+ * fires a success haptic and a confetti burst at the Record payment control,
+ * which is the third of the three moments the design calls worth marking
+ * (clock-in, job → Complete, payment recorded). Saving an inline revision,
+ * duplicating an estimate as an invoice and splitting a deposit each get the
+ * success haptic without the confetti — they matter, but not that much.
+ * Every flow, validation and RLS assumption is unchanged.
  */
 export function JobInvoices({
   job,
@@ -109,6 +129,8 @@ export function JobInvoices({
   const [paymentInputOpen, setPaymentInputOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [savingPayment, setSavingPayment] = useState(false);
+  // One-shot confetti burst after a payment is recorded.
+  const [celebrating, setCelebrating] = useState(false);
   // Inline row editing (admin corrections).
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState('');
@@ -240,6 +262,7 @@ export function JobInvoices({
       setStatus({ kind: 'error', message: result.message });
       return;
     }
+    haptics.success();
     await load();
     onEntriesChanged?.();
     router.push({
@@ -288,6 +311,7 @@ export function JobInvoices({
     setSavingSplit(false);
     if (result.ok) {
       setSplitId(null);
+      haptics.success();
       setStatus({
         kind: 'success',
         message:
@@ -337,6 +361,7 @@ export function JobInvoices({
     setSavingEdit(false);
     if (result.ok) {
       setEditingId(null);
+      haptics.success();
       setStatus({ kind: 'success', message: 'Entry updated.' });
       await load();
       onEntriesChanged?.();
@@ -384,6 +409,9 @@ export function JobInvoices({
     if (result.ok) {
       setPaymentInputOpen(false);
       setPaymentAmount('');
+      // Money in the door is worth a buzz and a burst.
+      haptics.success();
+      setCelebrating(true);
       setStatus({ kind: 'success', message: `Payment of ${formatMoney(amount)} recorded.` });
       load();
     } else {
@@ -422,459 +450,463 @@ export function JobInvoices({
     const editing = editingId === entry.id;
     const revisable = isRevisable(entry);
     return (
-      <View key={entry.id} style={index > 0 ? styles.rowBorderTop : undefined}>
-        <Pressable
-          onPress={() => openEntry(entry)}
-          style={({ pressed }) => [
-            styles.row,
-            pressed && entry.document_path != null && styles.rowPressed,
-          ]}>
-          <View style={styles.iconWrap}>
-            <Ionicons name={entryIcon(entry)} size={18} color={colors.ocean} />
-          </View>
-          <View style={styles.rowBody}>
-            <Text style={styles.rowValue} numberOfLines={1}>
-              {entryTitle(entry)}
-            </Text>
-            <View style={styles.metaRow}>
-              {entry.status ? (
-                <View style={styles.statusChip}>
-                  <Text style={styles.statusChipText}>{entry.status}</Text>
-                </View>
-              ) : null}
-              {isStale(entry) ? (
-                <View style={styles.staleChip}>
-                  <Ionicons name="warning" size={11} color={colors.ink} />
-                  <Text style={styles.staleChipText}>
-                    {entry.document_path ? 'PDF out of date' : 'No PDF yet'}
-                  </Text>
-                </View>
-              ) : null}
-              <Text style={styles.metaText} numberOfLines={1}>
-                {formatShortDate(entry.occurred_on)}
-              </Text>
+      <FadeInUp key={entry.id} index={index}>
+        <View style={index > 0 ? styles.rowBorderTop : undefined}>
+          <AnimatedPressable
+            onPress={() => openEntry(entry)}
+            haptic={entry.document_path ? 'tapLight' : undefined}
+            scaleTo={0.995}
+            accessibilityRole="button"
+            accessibilityLabel={entryTitle(entry)}
+            style={styles.row}>
+            <View style={styles.iconWrap}>
+              <Ionicons name={entryIcon(entry)} size={18} color={colors.accentPrimary} />
             </View>
-          </View>
-          {/* Amount and the action buttons share a right-hand column, stacked.
-              They used to sit inline with the date, which let five-figure
-              amounts collide with the recorded date on narrow phones. */}
-          <View style={styles.rowRight}>
-            <Text style={[styles.amountText, amountStyle(entry)]} numberOfLines={1}>
-              {formatMoney(entry.amount)}
-            </Text>
-            <View style={styles.actionRow}>
-              {entry.document_path ? (
-                <Pressable
-                  onPress={() => void shareEntry(entry)}
-                  disabled={sharingId !== null}
-                  hitSlop={6}
-                  style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
-                  {sharingId === entry.id ? (
-                    <ActivityIndicator size="small" color={colors.ocean} />
-                  ) : (
-                    <Ionicons name="share-outline" size={15} color={colors.ocean} />
-                  )}
-                </Pressable>
-              ) : null}
-              {entry.type === 'payment' ? (
-                <Pressable
-                  onPress={() => (splitId === entry.id ? setSplitId(null) : void startSplit(entry))}
-                  hitSlop={6}
-                  style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
-                  <Ionicons name="git-branch" size={15} color={colors.ocean} />
-                </Pressable>
-              ) : null}
-              {revisable && (entry.revision ?? 1) > 1 ? (
-                <Pressable
-                  onPress={() => void toggleHistory(entry)}
-                  hitSlop={6}
-                  style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
-                  <Ionicons name="time-outline" size={15} color={colors.ocean} />
-                </Pressable>
-              ) : null}
-              {entry.type === 'estimate' && entry.document_number ? (
-                <Pressable
-                  onPress={() => void duplicateAsInvoice(entry)}
-                  disabled={duplicatingId !== null}
-                  hitSlop={6}
-                  style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
-                  {duplicatingId === entry.id ? (
-                    <ActivityIndicator size="small" color={colors.ocean} />
-                  ) : (
-                    <Ionicons name="copy-outline" size={15} color={colors.ocean} />
-                  )}
-                </Pressable>
-              ) : null}
-              {/* Documents go to the builder, where the line items, the notes
-                  and the PDF all move together. Payments, expenses,
-                  investments and the document-less "Contract value" row have
-                  nothing to re-render, so they keep the inline editor. */}
-              <Pressable
-                onPress={() =>
-                  revisable ? openBuilder(entry) : editing ? cancelEdit() : startEdit(entry)
-                }
-                hitSlop={6}
-                style={({ pressed }) => [styles.iconButton, pressed && styles.buttonPressed]}>
-                <Ionicons name="pencil" size={15} color={colors.ocean} />
-              </Pressable>
-              <Pressable
-                onPress={() => void pressDelete(entry)}
-                disabled={busyDelete}
-                hitSlop={6}
-                style={({ pressed }) => [
-                  styles.iconButton,
-                  confirming && styles.iconButtonDanger,
-                  pressed && styles.buttonPressed,
-                ]}>
-                {busyDelete ? (
-                  <ActivityIndicator size="small" color={colors.danger} />
-                ) : (
-                  <Ionicons
-                    name="trash"
-                    size={15}
-                    color={confirming ? colors.white : colors.inkSoft}
+            <View style={styles.rowBody}>
+              <AppText variant="bodyStrong" numberOfLines={1}>
+                {entryTitle(entry)}
+              </AppText>
+              <View style={styles.metaRow}>
+                {entry.status ? (
+                  <Pill
+                    label={entry.status}
+                    bg={colors.sunLight}
+                    fg={colors.ink}
+                    textStyle={styles.capitalize}
                   />
-                )}
-              </Pressable>
+                ) : null}
+                {isStale(entry) ? (
+                  <Chip
+                    label={entry.document_path ? 'PDF out of date' : 'No PDF yet'}
+                    tone="sun"
+                    icon="warning"
+                  />
+                ) : null}
+                <AppText variant="caption" color={colors.textMuted} numberOfLines={1}>
+                  {formatShortDate(entry.occurred_on)}
+                </AppText>
+              </View>
             </View>
-          </View>
-        </Pressable>
-        {confirming ? (
-          <Text style={styles.confirmHint}>Tap the trash again to delete this entry.</Text>
-        ) : null}
-        {historyId === entry.id ? (
-          <View style={styles.editCard}>
-            <Text style={styles.splitTitle}>Revision history</Text>
-            {historyLoading ? (
-              <ActivityIndicator color={colors.ocean} />
-            ) : history.length === 0 ? (
-              <Text style={styles.splitHint}>
-                No archived revisions yet — this document was written before revisions were
-                tracked.
-              </Text>
-            ) : (
-              history.map((revision) => (
-                <View key={revision.id} style={styles.historyRow}>
-                  <Text style={styles.historyText} numberOfLines={1}>
-                    rev {revision.revision} · {formatShortDate(revision.occurred_on)} ·{' '}
-                    {formatMoney(revision.amount)}
-                  </Text>
-                  {revision.document_path ? (
-                    <Pressable onPress={() => void openRevision(entry, revision)} hitSlop={8}>
-                      <Text style={styles.historyLink}>view</Text>
-                    </Pressable>
-                  ) : (
-                    <Text style={styles.historyMuted}>no PDF</Text>
-                  )}
-                </View>
-              ))
-            )}
-          </View>
-        ) : null}
-        {splitId === entry.id ? (
-          <View style={styles.editCard}>
-            <Text style={styles.splitTitle}>
-              Split {formatMoney(entry.amount)} across jobs
-            </Text>
-            <Text style={styles.splitHint}>
-              For an ACH deposit covering several invoices. Amounts are yours to set — they
-              don&apos;t have to match the invoiced figures.
-            </Text>
-            {splitRows.map((row, index) => (
-              <View key={index} style={styles.splitRow}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.splitChips}>
-                    {splitJobs.map((option) => (
-                      <Pressable
-                        key={option.id}
-                        onPress={() =>
-                          setSplitRows((rows) =>
-                            rows.map((r, i) => (i === index ? { ...r, jobId: option.id } : r)),
-                          )
-                        }
-                        style={[
-                          styles.splitChip,
-                          row.jobId === option.id && styles.splitChipActive,
-                        ]}>
-                        <Text
-                          style={[
-                            styles.splitChipText,
-                            row.jobId === option.id && styles.splitChipTextActive,
-                          ]}>
-                          {option.label}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </ScrollView>
-                <TextInput
-                  style={styles.splitAmount}
-                  value={row.amount}
-                  onChangeText={(text) =>
-                    setSplitRows((rows) =>
-                      rows.map((r, i) => (i === index ? { ...r, amount: text } : r)),
-                    )
+            {/* Amount and the action buttons share a right-hand column, stacked.
+                They used to sit inline with the date, which let five-figure
+                amounts collide with the recorded date on narrow phones. */}
+            <View style={styles.rowRight}>
+              <AppText
+                variant="bodyStrong"
+                color={amountColor(entry)}
+                numberOfLines={1}
+                style={styles.amountText}>
+                {formatMoney(entry.amount)}
+              </AppText>
+              <View style={styles.actionRow}>
+                {entry.document_path ? (
+                  <AnimatedPressable
+                    onPress={() => void shareEntry(entry)}
+                    disabled={sharingId !== null}
+                    haptic="tapLight"
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityLabel="Share document"
+                    style={styles.iconButton}>
+                    {sharingId === entry.id ? (
+                      <ActivityIndicator size="small" color={colors.accentPrimary} />
+                    ) : (
+                      <Ionicons name="share-outline" size={15} color={colors.accentPrimary} />
+                    )}
+                  </AnimatedPressable>
+                ) : null}
+                {entry.type === 'payment' ? (
+                  <AnimatedPressable
+                    onPress={() => (splitId === entry.id ? setSplitId(null) : void startSplit(entry))}
+                    haptic="tapLight"
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityLabel="Split this payment across jobs"
+                    style={styles.iconButton}>
+                    <Ionicons name="git-branch" size={15} color={colors.accentPrimary} />
+                  </AnimatedPressable>
+                ) : null}
+                {revisable && (entry.revision ?? 1) > 1 ? (
+                  <AnimatedPressable
+                    onPress={() => void toggleHistory(entry)}
+                    haptic="tapLight"
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityLabel="Revision history"
+                    style={styles.iconButton}>
+                    <Ionicons name="time-outline" size={15} color={colors.accentPrimary} />
+                  </AnimatedPressable>
+                ) : null}
+                {entry.type === 'estimate' && entry.document_number ? (
+                  <AnimatedPressable
+                    onPress={() => void duplicateAsInvoice(entry)}
+                    disabled={duplicatingId !== null}
+                    haptic="tapMedium"
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityLabel="Duplicate as invoice"
+                    style={styles.iconButton}>
+                    {duplicatingId === entry.id ? (
+                      <ActivityIndicator size="small" color={colors.accentPrimary} />
+                    ) : (
+                      <Ionicons name="copy-outline" size={15} color={colors.accentPrimary} />
+                    )}
+                  </AnimatedPressable>
+                ) : null}
+                {/* Documents go to the builder, where the line items, the notes
+                    and the PDF all move together. Payments, expenses,
+                    investments and the document-less "Contract value" row have
+                    nothing to re-render, so they keep the inline editor. */}
+                <AnimatedPressable
+                  onPress={() =>
+                    revisable ? openBuilder(entry) : editing ? cancelEdit() : startEdit(entry)
                   }
-                  placeholder="0.00"
-                  placeholderTextColor={colors.inkSoft}
-                  keyboardType="decimal-pad"
+                  haptic="tapLight"
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit entry"
+                  style={styles.iconButton}>
+                  <Ionicons name="pencil" size={15} color={colors.accentPrimary} />
+                </AnimatedPressable>
+                <AnimatedPressable
+                  onPress={() => void pressDelete(entry)}
+                  disabled={busyDelete}
+                  haptic="tapLight"
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={confirming ? 'Confirm delete' : 'Delete entry'}
+                  style={[styles.iconButton, confirming && styles.iconButtonDanger]}>
+                  {busyDelete ? (
+                    <ActivityIndicator size="small" color={colors.danger} />
+                  ) : (
+                    <Ionicons
+                      name="trash"
+                      size={15}
+                      color={confirming ? colors.white : colors.textMuted}
+                    />
+                  )}
+                </AnimatedPressable>
+              </View>
+            </View>
+          </AnimatedPressable>
+          {confirming ? (
+            <AppText
+              variant="caption"
+              align="right"
+              color={colors.danger}
+              style={styles.confirmHint}>
+              Tap the trash again to delete this entry.
+            </AppText>
+          ) : null}
+          {historyId === entry.id ? (
+            <Card tone="sunk" style={styles.editCard}>
+              <AppText variant="heading">Revision history</AppText>
+              {historyLoading ? (
+                <SkeletonList count={2} height={20} radius={radii.sm} />
+              ) : history.length === 0 ? (
+                <AppText variant="caption" color={colors.textMuted}>
+                  No archived revisions yet — this document was written before revisions were
+                  tracked.
+                </AppText>
+              ) : (
+                history.map((revision) => (
+                  <View key={revision.id} style={styles.historyRow}>
+                    <AppText variant="caption" numberOfLines={1} style={styles.historyText}>
+                      rev {revision.revision} · {formatShortDate(revision.occurred_on)} ·{' '}
+                      {formatMoney(revision.amount)}
+                    </AppText>
+                    {revision.document_path ? (
+                      <AnimatedPressable
+                        onPress={() => void openRevision(entry, revision)}
+                        haptic="tapLight"
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={`View revision ${revision.revision}`}>
+                        <AppText variant="caption" color={colors.accentLink}>
+                          view
+                        </AppText>
+                      </AnimatedPressable>
+                    ) : (
+                      <AppText variant="caption" color={colors.textMuted}>
+                        no PDF
+                      </AppText>
+                    )}
+                  </View>
+                ))
+              )}
+            </Card>
+          ) : null}
+          {splitId === entry.id ? (
+            <Card tone="sunk" style={styles.editCard}>
+              <AppText variant="heading">Split {formatMoney(entry.amount)} across jobs</AppText>
+              <AppText variant="caption" color={colors.textMuted} style={styles.splitHint}>
+                For an ACH deposit covering several invoices. Amounts are yours to set — they
+                don&apos;t have to match the invoiced figures.
+              </AppText>
+              {splitRows.map((row, index) => (
+                <View key={index} style={styles.splitRow}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={styles.splitChips}>
+                      {splitJobs.map((option) => (
+                        <Chip
+                          key={option.id}
+                          label={option.label}
+                          tone="olive"
+                          selected={row.jobId === option.id}
+                          onPress={() =>
+                            setSplitRows((rows) =>
+                              rows.map((r, i) => (i === index ? { ...r, jobId: option.id } : r)),
+                            )
+                          }
+                        />
+                      ))}
+                    </View>
+                  </ScrollView>
+                  <TextInput
+                    style={styles.input}
+                    value={row.amount}
+                    onChangeText={(text) =>
+                      setSplitRows((rows) =>
+                        rows.map((r, i) => (i === index ? { ...r, amount: text } : r)),
+                      )
+                    }
+                    placeholder="0.00"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              ))}
+              {(() => {
+                const allocated = splitRows.reduce(
+                  (sum, r) => sum + (Number(r.amount.replace(/[^0-9.]/g, '')) || 0),
+                  0,
+                );
+                const left = Math.round((entry.amount - allocated) * 100) / 100;
+                return (
+                  <AppText
+                    variant="caption"
+                    align="right"
+                    color={left < 0 ? colors.danger : colors.textSecondary}>
+                    {left < 0
+                      ? `Over by ${formatMoney(Math.abs(left))}`
+                      : `${formatMoney(allocated)} assigned · ${formatMoney(left)} left`}
+                  </AppText>
+                );
+              })()}
+              <View style={styles.editButtons}>
+                <Button
+                  label="+ Add job"
+                  onPress={() => setSplitRows((rows) => [...rows, { jobId: null, amount: '' }])}
+                  variant="ghost"
+                  size="sm"
+                />
+                <Button
+                  label="Cancel"
+                  onPress={() => setSplitId(null)}
+                  variant="ghost"
+                  size="sm"
+                  disabled={savingSplit}
+                />
+                <Button
+                  label="Split"
+                  onPress={() => void saveSplit(entry)}
+                  loading={savingSplit}
+                  size="sm"
                 />
               </View>
-            ))}
-            {(() => {
-              const allocated = splitRows.reduce(
-                (sum, r) => sum + (Number(r.amount.replace(/[^0-9.]/g, '')) || 0),
-                0,
-              );
-              const left = Math.round((entry.amount - allocated) * 100) / 100;
-              return (
-                <Text style={[styles.splitTotals, left < 0 && styles.statusError]}>
-                  {left < 0
-                    ? `Over by ${formatMoney(Math.abs(left))}`
-                    : `${formatMoney(allocated)} assigned · ${formatMoney(left)} left`}
-                </Text>
-              );
-            })()}
-            <View style={styles.editButtons}>
-              <Pressable
-                onPress={() => setSplitRows((rows) => [...rows, { jobId: null, amount: '' }])}
-                hitSlop={8}>
-                <Text style={styles.cancelText}>+ Add job</Text>
-              </Pressable>
-              <Pressable onPress={() => setSplitId(null)} disabled={savingSplit} hitSlop={8}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => void saveSplit(entry)}
-                disabled={savingSplit}
-                style={({ pressed }) => [
-                  styles.sunButton,
-                  styles.saveEditButton,
-                  (pressed || savingSplit) && styles.buttonPressed,
-                ]}>
-                {savingSplit ? (
-                  <ActivityIndicator color={colors.ink} />
-                ) : (
-                  <Text style={styles.sunButtonText}>Split</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
-        {editing ? (
-          <View style={styles.editCard}>
-            <Text style={styles.editLabel}>Amount ($)</Text>
-            <TextInput
-              style={styles.editInput}
-              value={editAmount}
-              onChangeText={setEditAmount}
-              placeholder="0.00"
-              placeholderTextColor={colors.inkSoft}
-              keyboardType="decimal-pad"
-            />
-            <Text style={styles.editLabel}>Date (YYYY-MM-DD)</Text>
-            <TextInput
-              style={styles.editInput}
-              value={editDate}
-              onChangeText={setEditDate}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={colors.inkSoft}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <Text style={styles.editLabel}>Description</Text>
-            <TextInput
-              style={styles.editInput}
-              value={editDescription}
-              onChangeText={setEditDescription}
-              placeholder="Description"
-              placeholderTextColor={colors.inkSoft}
-            />
-            <View style={styles.editButtons}>
-              <Pressable onPress={cancelEdit} disabled={savingEdit} hitSlop={8}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => void saveEdit(entry)}
-                disabled={savingEdit}
-                style={({ pressed }) => [
-                  styles.sunButton,
-                  styles.saveEditButton,
-                  (pressed || savingEdit) && styles.buttonPressed,
-                ]}>
-                {savingEdit ? (
-                  <ActivityIndicator color={colors.ink} />
-                ) : (
-                  <Text style={styles.sunButtonText}>Save</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
-      </View>
+            </Card>
+          ) : null}
+          {editing ? (
+            <Card tone="sunk" style={styles.editCard}>
+              <AppText variant="section" color={colors.textMuted}>
+                Amount ($)
+              </AppText>
+              <TextInput
+                style={styles.input}
+                value={editAmount}
+                onChangeText={setEditAmount}
+                placeholder="0.00"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="decimal-pad"
+              />
+              <AppText variant="section" color={colors.textMuted}>
+                Date (YYYY-MM-DD)
+              </AppText>
+              <TextInput
+                style={styles.input}
+                value={editDate}
+                onChangeText={setEditDate}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <AppText variant="section" color={colors.textMuted}>
+                Description
+              </AppText>
+              <TextInput
+                style={styles.input}
+                value={editDescription}
+                onChangeText={setEditDescription}
+                placeholder="Description"
+                placeholderTextColor={colors.textMuted}
+              />
+              <View style={styles.editButtons}>
+                <Button
+                  label="Cancel"
+                  onPress={cancelEdit}
+                  variant="ghost"
+                  size="sm"
+                  disabled={savingEdit}
+                />
+                <Button
+                  label="Save"
+                  onPress={() => void saveEdit(entry)}
+                  loading={savingEdit}
+                  size="sm"
+                />
+              </View>
+            </Card>
+          ) : null}
+        </View>
+      </FadeInUp>
     );
   };
 
   return (
     <>
-      <Text style={styles.sectionTitle}>Invoices, Estimates, &amp; Payments</Text>
+      <SectionHeader
+        title="Invoices, estimates & payments"
+        icon="receipt"
+        style={styles.section}
+      />
       {state === 'loading' ? (
-        <View style={styles.placeholderCard}>
-          <ActivityIndicator color={colors.ocean} />
-        </View>
+        <SkeletonList count={3} height={72} />
       ) : state === 'unavailable' ? (
-        <View style={styles.placeholderCard}>
-          <Ionicons name="receipt" size={22} color={colors.inkSoft} />
-          <Text style={styles.placeholderText}>Invoices are not available right now.</Text>
-        </View>
+        <EmptyState
+          icon="receipt"
+          title="Invoices aren't available right now"
+          body="The finance tables couldn't be read. Pull down to retry, or check you're signed in as an admin."
+        />
       ) : listRows.length === 0 ? (
-        <View style={styles.placeholderCard}>
-          <Ionicons name="receipt" size={22} color={colors.inkSoft} />
-          <Text style={styles.placeholderText}>No invoices or estimates yet</Text>
-        </View>
+        <EmptyState
+          icon="receipt"
+          title="No invoices or estimates yet"
+          body="Build the first estimate or invoice for this job with the buttons below."
+        />
       ) : (
-        <View style={styles.card}>{listRows.map(renderEntryRow)}</View>
+        <Card padded={false}>{listRows.map(renderEntryRow)}</Card>
       )}
 
       {state === 'ok' && expenses.length > 0 ? (
         <>
-          <Pressable
-            onPress={() => setExpensesOpen((open) => !open)}
-            style={({ pressed }) => [styles.expensesToggle, pressed && styles.buttonPressed]}>
-            <Ionicons
-              name={expensesOpen ? 'chevron-down' : 'chevron-forward'}
-              size={16}
-              color={colors.inkSoft}
-            />
-            <Text style={styles.expensesToggleText}>
-              {expensesOpen
+          <Button
+            label={
+              expensesOpen
                 ? `Hide expenses (${expenses.length})`
-                : `Show expenses (${expenses.length})`}
-            </Text>
-          </Pressable>
-          {expensesOpen ? <View style={styles.card}>{expenses.map(renderEntryRow)}</View> : null}
+                : `Show expenses (${expenses.length})`
+            }
+            onPress={() => setExpensesOpen((open) => !open)}
+            variant="ghost"
+            size="sm"
+            icon={expensesOpen ? 'chevron-down' : 'chevron-forward'}
+            style={styles.inlineButton}
+          />
+          {expensesOpen ? <Card padded={false}>{expenses.map(renderEntryRow)}</Card> : null}
         </>
       ) : null}
 
       <View style={styles.buttonRow}>
-        <Pressable
+        <Button
+          label="New estimate"
           onPress={() => newDocument('estimate')}
-          style={({ pressed }) => [styles.sunButton, pressed && styles.buttonPressed]}>
-          <Ionicons name="calculator" size={16} color={colors.ink} />
-          <Text style={styles.sunButtonText}>New estimate</Text>
-        </Pressable>
-        <Pressable
+          icon="calculator"
+          style={styles.grow}
+        />
+        <Button
+          label="New invoice"
           onPress={() => newDocument('invoice')}
-          style={({ pressed }) => [styles.sunButton, pressed && styles.buttonPressed]}>
-          <Ionicons name="receipt" size={16} color={colors.ink} />
-          <Text style={styles.sunButtonText}>New invoice</Text>
-        </Pressable>
+          icon="receipt"
+          style={styles.grow}
+        />
       </View>
 
-      {paymentInputOpen ? (
-        <View style={styles.paymentCard}>
-          <Text style={styles.paymentLabel}>Payment amount ($)</Text>
-          <View style={styles.paymentRow}>
-            <TextInput
-              style={styles.paymentInput}
-              value={paymentAmount}
-              onChangeText={setPaymentAmount}
-              placeholder="0.00"
-              placeholderTextColor={colors.inkSoft}
-              keyboardType="decimal-pad"
-            />
-            <Pressable
-              onPress={() => savePayment(paymentAmount)}
-              disabled={savingPayment}
-              style={({ pressed }) => [
-                styles.sunButton,
-                (pressed || savingPayment) && styles.buttonPressed,
-              ]}>
-              {savingPayment ? (
-                <ActivityIndicator color={colors.ink} />
-              ) : (
-                <Text style={styles.sunButtonText}>Record</Text>
-              )}
-            </Pressable>
-            <Pressable onPress={() => setPaymentInputOpen(false)} hitSlop={8}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : (
-        <Pressable
-          onPress={promptPayment}
-          disabled={savingPayment}
-          style={({ pressed }) => [
-            styles.outlineButton,
-            (pressed || savingPayment) && styles.buttonPressed,
-          ]}>
-          {savingPayment ? (
-            <ActivityIndicator color={colors.ink} />
-          ) : (
-            <Ionicons name="cash" size={16} color={colors.ink} />
-          )}
-          <Text style={styles.outlineButtonText}>Record payment</Text>
-        </Pressable>
-      )}
+      {/* The confetti mounts inside this block so the burst lands on the
+          control the person just used, the way it lands on the clock card. */}
+      <View style={styles.paymentZone}>
+        {paymentInputOpen ? (
+          <Card style={styles.paymentCard}>
+            <AppText variant="section" color={colors.textMuted}>
+              Payment amount ($)
+            </AppText>
+            <View style={styles.paymentRow}>
+              <TextInput
+                style={[styles.input, styles.grow]}
+                value={paymentAmount}
+                onChangeText={setPaymentAmount}
+                placeholder="0.00"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="decimal-pad"
+              />
+              <Button
+                label="Record"
+                onPress={() => savePayment(paymentAmount)}
+                loading={savingPayment}
+              />
+              <Button
+                label="Cancel"
+                onPress={() => setPaymentInputOpen(false)}
+                variant="ghost"
+                size="sm"
+              />
+            </View>
+          </Card>
+        ) : (
+          <Button
+            label="Record payment"
+            onPress={promptPayment}
+            variant="secondary"
+            icon="cash"
+            loading={savingPayment}
+            fullWidth
+          />
+        )}
+
+        {celebrating ? <Confetti onDone={() => setCelebrating(false)} /> : null}
+      </View>
 
       {status ? (
-        <Text
-          style={[
-            styles.statusText,
-            status.kind === 'error' ? styles.statusError : styles.statusSuccess,
-          ]}>
+        <AppText
+          variant="caption"
+          align="center"
+          color={status.kind === 'error' ? colors.danger : colors.success}>
           {status.message}
-        </Text>
+        </AppText>
       ) : null}
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
+  section: {
     marginTop: spacing.sm,
-  },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    ...shadows.card,
-  },
-  placeholderCard: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  placeholderText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     padding: spacing.md,
+    backgroundColor: colors.surface,
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
-  },
-  rowPressed: {
-    backgroundColor: colors.skySoft,
+    borderTopColor: colors.border,
   },
   iconWrap: {
     width: 32,
     height: 32,
     borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
+    backgroundColor: colors.oliveSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -882,57 +914,43 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
-  rowValue: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
-  },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: spacing.sm,
   },
+  capitalize: {
+    textTransform: 'capitalize',
+  },
   rowRight: {
     alignItems: 'flex-end',
     flexShrink: 0,
     gap: spacing.xs + 2,
+  },
+  amountText: {
+    fontVariant: ['tabular-nums'],
   },
   actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
   },
-  statusChip: {
-    backgroundColor: colors.sunLight,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-  },
-  statusChipText: {
-    color: colors.ink,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'capitalize',
-  },
-  metaText: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  staleChip: {
-    flexDirection: 'row',
+  iconButton: {
+    width: 28,
+    height: 28,
+    borderRadius: radii.sm,
+    backgroundColor: colors.oliveSoft,
     alignItems: 'center',
-    gap: 3,
-    backgroundColor: colors.sunLight,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+    justifyContent: 'center',
   },
-  staleChipText: {
-    color: colors.ink,
-    fontSize: 11,
-    fontWeight: '800',
+  iconButtonDanger: {
+    backgroundColor: colors.danger,
+  },
+  confirmHint: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    backgroundColor: colors.surface,
   },
   historyRow: {
     flexDirection: 'row',
@@ -942,54 +960,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   historyText: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '700',
     flexShrink: 1,
   },
-  historyLink: {
-    color: colors.ocean,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  historyMuted: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  amountText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  iconButton: {
-    width: 28,
-    height: 28,
-    borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconButtonDanger: {
-    backgroundColor: colors.danger,
-  },
-  confirmHint: {
-    color: colors.danger,
-    fontSize: 12,
-    fontWeight: '700',
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-    textAlign: 'right',
-  },
-  splitTitle: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '800',
-  },
   splitHint: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '600',
     marginBottom: spacing.xs,
   },
   splitRow: {
@@ -1000,177 +973,52 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.xs,
   },
-  splitChip: {
-    backgroundColor: colors.white,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.line,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-  },
-  splitChipActive: {
-    backgroundColor: colors.ocean,
-    borderColor: colors.ocean,
-  },
-  splitChipText: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  splitChipTextActive: {
-    color: colors.white,
-  },
-  splitAmount: {
-    backgroundColor: colors.white,
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    borderColor: colors.tan,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm - 2,
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  splitTotals: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '800',
-    textAlign: 'right',
-  },
   editCard: {
-    backgroundColor: colors.cream,
     marginHorizontal: spacing.md,
     marginBottom: spacing.md,
-    borderRadius: radii.sm,
-    padding: spacing.md,
     gap: spacing.xs,
   },
-  editLabel: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  editInput: {
-    backgroundColor: colors.white,
+  input: {
+    backgroundColor: colors.surface,
     borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.borderStrong,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm - 2,
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
+    color: colors.textPrimary,
+    ...typography.body,
   },
   editButtons: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    gap: spacing.md,
+    gap: spacing.sm,
     marginTop: spacing.xs,
   },
-  saveEditButton: {
-    flexGrow: 0,
-    paddingHorizontal: spacing.lg,
-  },
-  expensesToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-  },
-  expensesToggleText: {
-    color: colors.inkSoft,
-    fontSize: 13,
-    fontWeight: '700',
+  inlineButton: {
+    paddingHorizontal: 0,
   },
   buttonRow: {
     flexDirection: 'row',
     gap: spacing.sm,
   },
-  sunButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
+  grow: {
     flexGrow: 1,
-    backgroundColor: colors.sun,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 4,
-    paddingHorizontal: spacing.md,
-    ...shadows.card,
+    flexShrink: 1,
   },
-  sunButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  buttonPressed: {
-    opacity: 0.7,
-  },
-  outlineButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.tan,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.md - 4,
-    paddingHorizontal: spacing.md,
-  },
-  outlineButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '800',
+  paymentZone: {
+    // Wraps the Record payment control so the confetti's `absoluteFill` has a
+    // box to burst FROM — the same trick the clock card uses, which is why the
+    // shards appear at the thing you just tapped rather than at the top of a
+    // very long job screen.
+    gap: spacing.sm,
   },
   paymentCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.sm,
-    ...shadows.card,
-  },
-  paymentLabel: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   paymentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-  },
-  paymentInput: {
-    flex: 1,
-    backgroundColor: colors.cream,
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    borderColor: colors.tan,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  cancelText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  statusError: {
-    color: colors.danger,
-  },
-  statusSuccess: {
-    color: colors.ocean,
   },
 });

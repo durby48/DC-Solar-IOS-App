@@ -1,15 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Linking,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 
 import { CustomerCard } from '@/components/CustomerCard';
 import { JobAssignedCrew } from '@/components/JobAssignedCrew';
@@ -22,13 +14,35 @@ import { JobMyHours } from '@/components/JobMyHours';
 import { JobPhotos } from '@/components/JobPhotos';
 import { JobScheduleDates } from '@/components/JobScheduleDates';
 import { StatusPill } from '@/components/StatusPill';
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import {
+  AppText,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  ListRow,
+  SkeletonList,
+} from '@/components/ui';
+import { colors, radii, spacing } from '@/constants/theme';
 import { fetchJob } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
 import { fetchMyJobHours, type JobWithPM } from '@/lib/jobs';
 import { useRole } from '@/lib/role';
 import { stageOrDefault } from '@/lib/stages';
 
+/**
+ * One job, everything about it, in the order the crew and the office read it:
+ * money first for admins, then who/where/when, then the sections each own
+ * their own card.
+ *
+ * 2026-08-22 restyle: the local card/row/chip styles are gone in favour of
+ * `Card`, `ListRow`, `Chip` and `Button`; the first-load spinner became a
+ * `SkeletonList` and "Job not found." an `EmptyState`. Every role gate and
+ * every child component call is byte-for-byte what it was.
+ *
+ * There is deliberately no stage picker on this screen — the stage is set in
+ * `job-editor.tsx`, which is where the "job → Complete" confetti belongs.
+ */
 export default function JobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [job, setJob] = useState<JobWithPM | null>(null);
@@ -88,15 +102,18 @@ export default function JobDetailScreen() {
     );
   };
 
-
   return (
     <>
       <Stack.Screen options={{ title: job?.job_number ?? 'Job' }} />
       <ScrollView style={styles.safe} contentContainerStyle={styles.container}>
         {loading ? (
-          <ActivityIndicator color={colors.ocean} style={styles.loader} />
+          <SkeletonList count={4} height={96} />
         ) : !job ? (
-          <Text style={styles.notFound}>Job not found.</Text>
+          <EmptyState
+            icon="help-circle"
+            title="Job not found"
+            body="It may have been deleted, or you may not have access to it. Go back and pick another job."
+          />
         ) : (
           <>
             {role?.isAdmin ? (
@@ -110,97 +127,89 @@ export default function JobDetailScreen() {
               />
             ) : null}
 
-            <View style={styles.headerCard}>
+            <Card style={styles.headerCard}>
               <View style={styles.topRow}>
-                {job.job_number ? (
-                  <Text style={styles.jobNumber}>{job.job_number}</Text>
-                ) : null}
+                {job.job_number ? <Chip label={job.job_number} tone="olive" /> : null}
                 <StatusPill stage={stageOrDefault(job.stage, job.status)} />
               </View>
               <View style={styles.nameRow}>
-                <Text style={styles.name}>{job.name}</Text>
+                <AppText variant="title" style={styles.name}>
+                  {job.name}
+                </AppText>
                 {role?.isAdmin ? (
-                  <Pressable
+                  <Button
+                    label="Edit"
                     onPress={() =>
                       router.push({ pathname: '/job-editor', params: { jobId: job.id } })
                     }
-                    hitSlop={8}
-                    style={({ pressed }) => [styles.editButton, pressed && styles.editPressed]}>
-                    <Ionicons name="pencil" size={16} color={colors.ocean} />
-                    <Text style={styles.editButtonText}>Edit</Text>
-                  </Pressable>
+                    variant="secondary"
+                    size="sm"
+                    icon="pencil"
+                  />
                 ) : null}
               </View>
-              <Text style={styles.date}>
+              <AppText variant="body" color={colors.textSecondary}>
                 {formatShortDate(job.scheduled_for)}
                 {job.scheduled_end ? ` — ${formatShortDate(job.scheduled_end)}` : ''}
-              </Text>
+              </AppText>
               {job.description ? (
-                <Text style={styles.description}>{job.description}</Text>
+                <AppText variant="body" color={colors.textMuted} style={styles.description}>
+                  {job.description}
+                </AppText>
               ) : null}
-            </View>
+            </Card>
 
             {job.address ? (
-              <View style={styles.card}>
-                <Pressable
+              <Card padded={false}>
+                <ListRow
+                  icon="navigate"
+                  title={job.address}
+                  subtitle="Directions"
                   onPress={() => openMaps(job.address as string)}
-                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
-                  <View style={styles.iconWrap}>
-                    <Ionicons name="navigate" size={18} color={colors.ocean} />
-                  </View>
-                  <View style={styles.rowBody}>
-                    <Text style={styles.rowLabel}>Directions</Text>
-                    <Text style={styles.rowValue}>{job.address}</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.inkSoft} />
-                </Pressable>
-              </View>
+                />
+              </Card>
             ) : null}
 
             {job.project_manager ? (
-              <View style={styles.card}>
-                {job.project_manager_phone ? (
-                  <Pressable
-                    onPress={() =>
-                      Linking.openURL(
-                        'tel:' + (job.project_manager_phone as string).replace(/[^+\d]/g, ''),
-                      ).catch(() => {})
-                    }
-                    style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
-                    <View style={styles.iconWrap}>
-                      <Ionicons name="person-circle" size={18} color={colors.ocean} />
-                    </View>
-                    <View style={styles.rowBody}>
-                      <Text style={styles.rowLabel}>Project manager</Text>
-                      <Text style={styles.rowValue}>{job.project_manager}</Text>
-                      <Text style={styles.rowPhone}>{job.project_manager_phone}</Text>
-                    </View>
-                    <Ionicons name="call" size={18} color={colors.ocean} />
-                  </Pressable>
-                ) : (
-                  <View style={styles.row}>
-                    <View style={styles.iconWrap}>
-                      <Ionicons name="person-circle" size={18} color={colors.ocean} />
-                    </View>
-                    <View style={styles.rowBody}>
-                      <Text style={styles.rowLabel}>Project manager</Text>
-                      <Text style={styles.rowValue}>{job.project_manager}</Text>
-                    </View>
-                  </View>
-                )}
-              </View>
+              <Card padded={false}>
+                <ListRow
+                  icon="person-circle"
+                  title={job.project_manager}
+                  subtitle={
+                    job.project_manager_phone
+                      ? `Project manager · ${job.project_manager_phone}`
+                      : 'Project manager'
+                  }
+                  onPress={
+                    job.project_manager_phone
+                      ? () =>
+                          Linking.openURL(
+                            'tel:' + (job.project_manager_phone as string).replace(/[^+\d]/g, ''),
+                          ).catch(() => {})
+                      : undefined
+                  }
+                  chevron={false}
+                  right={
+                    job.project_manager_phone ? (
+                      <Ionicons name="call" size={18} color={colors.accentPrimary} />
+                    ) : undefined
+                  }
+                />
+              </Card>
             ) : null}
 
             {isCrewMember && myHours > 0 ? (
-              <View style={styles.hoursCard}>
+              <Card style={styles.hoursCard}>
                 <View style={styles.iconWrap}>
-                  <Ionicons name="time" size={18} color={colors.ocean} />
+                  <Ionicons name="time" size={18} color={colors.accentPrimary} />
                 </View>
                 <View style={styles.rowBody}>
-                  <Text style={styles.rowLabel}>Your hours on this job</Text>
-                  <Text style={styles.hoursValue}>{myHours.toFixed(1)} h</Text>
+                  <AppText variant="section" color={colors.accentPrimary}>
+                    Your hours on this job
+                  </AppText>
+                  <AppText variant="numeric">{myHours.toFixed(1)} h</AppText>
                 </View>
-              </View>
+              </Card>
             ) : null}
 
             {job.customer ? <CustomerCard customer={job.customer} /> : null}
@@ -237,38 +246,20 @@ export default function JobDetailScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceAlt,
   },
   container: {
     padding: spacing.lg,
     paddingBottom: spacing.xl,
     gap: spacing.md,
   },
-  loader: {
-    marginTop: spacing.xl,
-  },
-  notFound: {
-    color: colors.inkSoft,
-    fontSize: 16,
-    textAlign: 'center',
-    marginTop: spacing.xl,
-  },
   headerCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    padding: spacing.md,
     gap: spacing.xs,
-    ...shadows.card,
   },
   topRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  jobNumber: {
-    color: colors.ocean,
-    fontSize: 14,
-    fontWeight: '800',
   },
   nameRow: {
     flexDirection: 'row',
@@ -278,111 +269,25 @@ const styles = StyleSheet.create({
   },
   name: {
     flex: 1,
-    color: colors.ink,
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  editButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.xs + 2,
-    paddingHorizontal: spacing.sm + 4,
-  },
-  editPressed: {
-    opacity: 0.6,
-  },
-  editButtonText: {
-    color: colors.ocean,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  date: {
-    color: colors.inkSoft,
-    fontSize: 15,
-    fontWeight: '600',
   },
   description: {
-    color: colors.inkSoft,
-    fontSize: 14,
     marginTop: spacing.xs,
   },
-  card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    overflow: 'hidden',
-    ...shadows.card,
-  },
-  row: {
+  hoursCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    padding: spacing.md,
-  },
-  rowPressed: {
-    backgroundColor: colors.skySoft,
   },
   iconWrap: {
     width: 32,
     height: 32,
     borderRadius: radii.sm,
-    backgroundColor: colors.skySoft,
+    backgroundColor: colors.oliveSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   rowBody: {
     flex: 1,
     gap: 2,
-  },
-  rowLabel: {
-    color: colors.inkSoft,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  rowValue: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  rowPhone: {
-    color: colors.ocean,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  hoursCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.md,
-    ...shadows.card,
-  },
-  hoursValue: {
-    color: colors.ink,
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
-    marginTop: spacing.sm,
-  },
-  placeholderCard: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  placeholderText: {
-    color: colors.inkSoft,
-    fontSize: 14,
-    fontWeight: '600',
   },
 });
