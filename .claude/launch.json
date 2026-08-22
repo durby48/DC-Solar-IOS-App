@@ -18,6 +18,24 @@
         "cd '/Users/ravendurbin/Desktop/DC Solar LLC/DC-Solar-IOS-App/app' && export PATH=\"$HOME/.nvm/versions/node/v24.12.0/bin:$PATH\" && npx expo start --web --port 8082"
       ],
       "port": 8082
+    },
+    {
+      "name": "expo-win",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": [
+        "/c",
+        "cd /d \"C:/Durbin Enterprises/DC-Solar-IOS-App/app\" && npx expo start --port 8081"
+      ],
+      "port": 8081
+    },
+    {
+      "name": "expo-web-win",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": [
+        "/c",
+        "cd /d \"C:/Durbin Enterprises/DC-Solar-IOS-App/app\" && npx expo start --web --port 8082"
+      ],
+      "port": 8082
     }
   ]
 }
