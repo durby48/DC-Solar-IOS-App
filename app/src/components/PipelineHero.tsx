@@ -1,9 +1,21 @@
-import { Image } from 'expo-image';
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Platform, StyleSheet, Text, View } from 'react-native';
+import { Image, type ImageProps } from 'expo-image';
+import { useIsFocused } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { Platform, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 import { Ticker } from '@/components/Ticker';
+import { CountUp } from '@/components/ui';
 import { accentCycle, colors, radii, shadows, spacing } from '@/constants/theme';
+import { useMotion } from '@/lib/motion';
 import { fetchCompanyMetrics, type CompanyMetrics } from '@/lib/metrics';
 
 /**
@@ -28,6 +40,22 @@ import { fetchCompanyMetrics, type CompanyMetrics } from '@/lib/metrics';
  *
  * No video library: playing real video would need a native dependency and
  * therefore a full App Store build. This ships over the air.
+ *
+ * ── 2026-08-22 rewrite ────────────────────────────────────────────────────
+ * This component was the app's biggest performance sink and all three causes
+ * are gone:
+ *   • the metric numbers counted up by calling `setState` on EVERY animation
+ *     frame (four tiles × two ticker copies = eight components re-rendering
+ *     at 60fps). They now use `components/ui`'s `CountUp`, which writes the
+ *     text from the UI thread natively and quantises to ~40 updates on web.
+ *   • the frame flip ran a permanent 170ms `setInterval` that re-rendered the
+ *     whole hero. It is now ONE Reanimated shared value the three stacked
+ *     images read in their own `useAnimatedStyle` worklets — no React render
+ *     per frame at all.
+ *   • both of those kept running while the Pipeline tab was off screen. The
+ *     flip now pauses when the screen is unfocused.
+ * The 60-second character-changeover check stays a `setInterval`: it fires
+ * once a minute and its whole job is to change React state.
  */
 
 /**
@@ -72,29 +100,45 @@ function currentCharacter(now: number): number {
 const SEQUENCE = [1, 0, 2, 0];
 const FRAME_MS = 170;
 
-function formatNumber(value: number): string {
-  return Math.round(value).toLocaleString('en-US');
-}
+/**
+ * Sentinel for "not playing": the resting pose is frame 0, and a negative
+ * progress value is unambiguous where any real step is 0…3.
+ */
+const PAUSED = -1;
 
-/** Counts a number up once on mount so the band feels alive on arrival. */
-function CountUp({ value, style }: { value: number; style: object }) {
-  const [shown, setShown] = useState(0);
-  const anim = useRef(new Animated.Value(0)).current;
+/**
+ * One stacked frame. It owns nothing but its own opacity, read from the
+ * shared clock in a worklet — so cycling frames never crosses into React.
+ */
+function Frame({
+  source,
+  index,
+  progress,
+}: {
+  source: ImageProps['source'];
+  index: number;
+  progress: SharedValue<number>;
+}) {
+  const animatedStyle = useAnimatedStyle(() => {
+    const step =
+      progress.value < 0
+        ? 0
+        : SEQUENCE[Math.min(Math.floor(progress.value), SEQUENCE.length - 1)];
+    return { opacity: step === index ? 1 : 0 };
+  });
 
-  useEffect(() => {
-    anim.setValue(0);
-    const listener = anim.addListener(({ value: v }) => setShown(v * value));
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 900,
-      easing: Easing.out(Easing.cubic),
-      // Driving a JS listener means this can't run on the native thread.
-      useNativeDriver: false,
-    }).start();
-    return () => anim.removeListener(listener);
-  }, [value, anim]);
-
-  return <Text style={style}>{formatNumber(shown)}</Text>;
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, animatedStyle]} pointerEvents="none">
+      <Image
+        source={source}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+        // No transition: these swap every 170ms and a fade would smear.
+        transition={0}
+      />
+    </Animated.View>
+  );
 }
 
 function MetricTile({
@@ -125,8 +169,10 @@ function MetricTile({
 
 export function PipelineHero() {
   const [metrics, setMetrics] = useState<CompanyMetrics | null>(null);
-  const [frame, setFrame] = useState(0);
   const [character, setCharacter] = useState(() => currentCharacter(Date.now()));
+  const { enabled } = useMotion();
+  const focused = useIsFocused();
+  const progress = useSharedValue(PAUSED);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,13 +184,30 @@ export function PipelineHero() {
     };
   }, []);
 
+  /**
+   * The whole frame animation. Off screen or reduced motion, it parks on the
+   * resting pose rather than freezing mid-swing — a paused hand halfway to a
+   * bracket looks like a rendering bug.
+   */
   useEffect(() => {
-    const timer = setInterval(
-      () => setFrame((n) => (n + 1) % SEQUENCE.length),
-      FRAME_MS,
+    if (!enabled || !focused) {
+      cancelAnimation(progress);
+      progress.value = PAUSED;
+      return;
+    }
+    progress.value = 0;
+    progress.value = withRepeat(
+      withTiming(SEQUENCE.length, {
+        duration: SEQUENCE.length * FRAME_MS,
+        easing: Easing.linear,
+      }),
+      -1,
+      false,
     );
-    return () => clearInterval(timer);
-  }, []);
+    return () => {
+      cancelAnimation(progress);
+    };
+  }, [enabled, focused, progress]);
 
   // Catch the changeover without needing the app relaunched. Checked once a
   // minute; the value itself only moves every two hours.
@@ -152,8 +215,6 @@ export function PipelineHero() {
     const timer = setInterval(() => setCharacter(currentCharacter(Date.now())), 60_000);
     return () => clearInterval(timer);
   }, []);
-
-  const activeFrame = SEQUENCE[frame];
 
   const tiles = metrics
     ? [
@@ -168,15 +229,7 @@ export function PipelineHero() {
     <View style={styles.card}>
       <View style={styles.stage}>
         {CHARACTERS[character].map((source, i) => (
-          <Image
-            key={`${character}-${i}`}
-            source={source}
-            style={[StyleSheet.absoluteFill, { opacity: i === activeFrame ? 1 : 0 }]}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            // No transition: these swap every 170ms and a fade would smear.
-            transition={0}
-          />
+          <Frame key={`${character}-${i}`} source={source} index={i} progress={progress} />
         ))}
         <View style={styles.stageFade} />
       </View>
@@ -250,11 +303,12 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     gap: 3,
   },
+  // No `fontWeight` here: `CountUp` renders with `typography.numeric`, whose
+  // Inter_700Bold face already carries the weight. Adding one on top makes
+  // iOS synthesise a fake bold over a real one.
   tileValue: {
     color: colors.ink,
     fontSize: 20,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
   },
   tileSuffix: {
     color: colors.inkSoft,

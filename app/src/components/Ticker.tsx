@@ -1,15 +1,15 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
-import {
-  AccessibilityInfo,
-  Animated,
+import { type ReactNode, useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import Animated, {
+  cancelAnimation,
   Easing,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  View,
-  type StyleProp,
-  type ViewStyle,
-} from 'react-native';
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
+
+import { useMotion } from '@/lib/motion';
 
 /**
  * Seamless horizontal marquee, stock-ticker style.
@@ -28,6 +28,13 @@ import {
  *
  * Extracted from JobFinanceHeader 2026-08-05 so the pipeline hero and the job
  * finance strip share one implementation.
+ *
+ * 2026-08-22: converted from RN `Animated` to Reanimated. The old version
+ * fell back to a JS-driven transform on web (`useNativeDriver: false`), which
+ * meant a permanent 60fps JS-thread loop on app.dcsolarkc.com; Reanimated
+ * runs it off the JS thread on every platform. The reduce-motion check also
+ * moved from a one-shot `AccessibilityInfo` promise to `useMotion()`, the
+ * app's single gate.
  */
 export function Ticker({
   items,
@@ -41,38 +48,32 @@ export function Ticker({
   style?: StyleProp<ViewStyle>;
 }) {
   const [trackWidth, setTrackWidth] = useState(0);
-  const [reduceMotion, setReduceMotion] = useState(false);
-  const translateX = useRef(new Animated.Value(0)).current;
+  const { enabled } = useMotion();
+  const translateX = useSharedValue(0);
 
   useEffect(() => {
-    let cancelled = false;
-    AccessibilityInfo.isReduceMotionEnabled?.()
-      .then((enabled) => {
-        if (!cancelled) setReduceMotion(Boolean(enabled));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (trackWidth <= 0 || reduceMotion) return;
-    translateX.setValue(0);
-    const animation = Animated.loop(
-      Animated.timing(translateX, {
-        toValue: -trackWidth,
+    if (trackWidth <= 0 || !enabled) return;
+    translateX.value = 0;
+    translateX.value = withRepeat(
+      withTiming(-trackWidth, {
         duration: (trackWidth / speed) * 1000,
         easing: Easing.linear,
-        // RN-Web can't drive transforms off the JS thread.
-        useNativeDriver: Platform.OS !== 'web',
       }),
+      // Forever, and not reversed: each repetition restarts from 0, which is
+      // the frame where copy two lines up with where copy one began.
+      -1,
+      false,
     );
-    animation.start();
-    return () => animation.stop();
-  }, [trackWidth, reduceMotion, speed, translateX]);
+    return () => {
+      cancelAnimation(translateX);
+    };
+  }, [trackWidth, enabled, speed, translateX]);
 
-  if (reduceMotion) {
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
+  if (!enabled) {
     return (
       <ScrollView
         horizontal
@@ -88,7 +89,7 @@ export function Ticker({
 
   return (
     <View style={[styles.viewport, style]} pointerEvents="none">
-      <Animated.View style={[styles.row, { transform: [{ translateX }] }]}>
+      <Animated.View style={[styles.row, animatedStyle]}>
         <View
           style={styles.row}
           onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}>

@@ -44,7 +44,12 @@ export const STAGE_COLORS: Record<Stage, { bg: string; fg: string }> = {
   'Pending Install': { bg: colors.skySoft, fg: colors.ocean },
   'Pending Permit': { bg: colors.amberSoft, fg: colors.amberDeep },
   'Pending Payment': { bg: colors.coralSoft, fg: colors.coralDeep },
-  Complete: { bg: colors.ocean, fg: colors.white },
+  // 2026-08-22: Complete moved ocean → olive. Ocean is Pending Install's hue,
+  // so a solid ocean "Complete" pill sat two columns from a soft ocean
+  // "Pending Install" pill and the board read as if half of it were finished.
+  // Olive is the new brand lead and is 9.4:1 under cream, so it also gives
+  // the one inverted pill the best contrast on the board.
+  Complete: { bg: colors.olive, fg: colors.cream },
 };
 
 /** Accent hue for a stage, used for art tinting and card accents. */
@@ -56,7 +61,29 @@ export const STAGE_ACCENT: Record<Stage, string> = {
   'Pending Install': colors.ocean,
   'Pending Permit': colors.amber,
   'Pending Payment': colors.coral,
-  Complete: colors.mint,
+  Complete: colors.olive,
+};
+
+/**
+ * Two-stop gradient per stage, for accent strips, progress fills and stage
+ * hero surfaces (`components/ui`'s `GradientSurface` takes these directly).
+ *
+ * Every entry runs the same way — the soft chip tint at stop 0 into the
+ * saturated hue at stop 1 — so a row of them reads as one system. That also
+ * means the DEEP end is the dark end: put text at the soft end, or don't put
+ * text on it at all. For a full olive hero surface use `gradients.olive`
+ * from the theme instead; this map is about identifying a stage, not about
+ * being a background for copy.
+ */
+export const STAGE_GRADIENT: Record<Stage, readonly [string, string]> = {
+  'Pending Estimate': [colors.slateSoft, colors.slate],
+  'Pending Contract': [colors.indigoSoft, colors.indigo],
+  'Pending Removal': [colors.violetSoft, colors.violet],
+  'Pending Reinstall': [colors.tealSoft, colors.teal],
+  'Pending Install': [colors.skySoft, colors.ocean],
+  'Pending Permit': [colors.amberSoft, colors.amber],
+  'Pending Payment': [colors.coralSoft, colors.coral],
+  Complete: [colors.oliveSoft, colors.olive],
 };
 
 /** Stage shown when a job predates migration 6 or has no stage set. */

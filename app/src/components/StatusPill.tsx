@@ -1,6 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
-
-import { radii, spacing } from '@/constants/theme';
+import { Pill } from '@/components/ui';
 import {
   LABEL_COLORS,
   stageOrDefault,
@@ -16,6 +14,11 @@ import {
  *
  * `stage` also accepts the Company label for the overhead container job — use
  * `labelForJob()` to resolve it, which prefers Company over the stored stage.
+ *
+ * 2026-08-22: the shape now comes from `components/ui`'s `Pill`; this file
+ * keeps only the thing that is actually about stages — the `LABEL_COLORS`
+ * lookup and the legacy `status` fallback. Its props are unchanged, so all
+ * five call sites are untouched.
  */
 export function StatusPill({
   stage,
@@ -26,22 +29,5 @@ export function StatusPill({
 }) {
   const resolved = stage ?? stageOrDefault(undefined, status);
   const c = LABEL_COLORS[resolved];
-  return (
-    <View style={[styles.pill, { backgroundColor: c.bg }]}>
-      <Text style={[styles.text, { color: c.fg }]}>{resolved}</Text>
-    </View>
-  );
+  return <Pill label={resolved} bg={c.bg} fg={c.fg} />;
 }
-
-const styles = StyleSheet.create({
-  pill: {
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: spacing.xs,
-    alignSelf: 'flex-start',
-  },
-  text: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-});

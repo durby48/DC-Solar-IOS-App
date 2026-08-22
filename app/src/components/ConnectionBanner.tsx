@@ -1,9 +1,16 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { recheckConnection, useConnection } from '@/lib/connection';
+import { DURATION, EASE, useMotion } from '@/lib/motion';
 
 /**
  * Tells the crew when the app can't reach the office.
@@ -18,25 +25,38 @@ import { recheckConnection, useConnection } from '@/lib/connection';
  * stage changes) genuinely does not reach the office until the bars come back.
  * Saying "you're offline" without saying what that costs is how people lose an
  * afternoon of logged hours.
+ *
+ * 2026-08-22: converted to Reanimated. The `mounted` latch is unchanged and
+ * still the point — the row has to stay in the tree through the EXIT
+ * animation or the banner would vanish instantly instead of sliding away.
+ * What's new is that the unmount is triggered from the animation's own
+ * completion callback on the UI thread via `runOnJS`, rather than from an RN
+ * `Animated` start callback.
  */
 export function ConnectionBanner() {
   const state = useConnection();
   const visible = state !== 'online';
-  const slide = useRef(new Animated.Value(0)).current;
+  const { enabled } = useMotion();
+  const slide = useSharedValue(visible ? 1 : 0);
   // Keep the row mounted through the exit animation.
   const [mounted, setMounted] = useState(visible);
 
   useEffect(() => {
     if (visible) setMounted(true);
-    Animated.timing(slide, {
-      toValue: visible ? 1 : 0,
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: Platform.OS !== 'web',
-    }).start(({ finished }) => {
-      if (finished && !visible) setMounted(false);
-    });
-  }, [visible, slide]);
+    slide.value = withTiming(
+      visible ? 1 : 0,
+      { duration: enabled ? DURATION.base - 20 : 0, easing: EASE.out },
+      (finished) => {
+        if (finished && !visible) runOnJS(setMounted)(false);
+      },
+    );
+  }, [visible, enabled, slide]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: slide.value,
+    // -60 → 0: it drops in from above the safe area.
+    transform: [{ translateY: -60 + slide.value * 60 }],
+  }));
 
   if (!mounted) return null;
 
@@ -44,14 +64,7 @@ export function ConnectionBanner() {
 
   return (
     <Animated.View
-      style={[
-        styles.wrap,
-        offline ? styles.offline : styles.slow,
-        {
-          opacity: slide,
-          transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [-60, 0] }) }],
-        },
-      ]}>
+      style={[styles.wrap, offline ? styles.offline : styles.slow, animatedStyle]}>
       <Ionicons
         name={offline ? 'cloud-offline' : 'cellular'}
         size={18}
