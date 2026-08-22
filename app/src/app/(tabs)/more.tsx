@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -14,10 +14,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import BuildInfo from '@/components/BuildInfo';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { deleteOwnAccount } from '@/lib/account';
+import { fetchUnreadCount } from '@/lib/comms';
 import { clearRoleCache } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
 type IconName = keyof typeof Ionicons.glyphMap;
+
+type MenuKey = 'customers' | 'messages';
 
 const ITEMS: {
   href:
@@ -27,12 +30,19 @@ const ITEMS: {
     | '/more/checklist'
     | '/more/receipts'
     | '/crm'
+    | '/crm/inbox'
     | '/more/monitoring'
     | '/more/employees'
     | '/more/employee-of-month'
     | '/security';
   title: string;
   icon: IconName;
+  /**
+   * Which live count, if any, rides on this row. The number itself comes from
+   * the unread query below — an unread text nobody has seen is the one thing
+   * in this menu that is genuinely time-sensitive.
+   */
+  badge?: MenuKey;
 }[] = [
   { href: '/more/time-off', title: 'Time Off', icon: 'airplane' },
   { href: '/more/paystubs', title: 'Paystubs', icon: 'cash' },
@@ -41,7 +51,8 @@ const ITEMS: {
   { href: '/more/receipts', title: 'Receipts', icon: 'receipt' },
   // /more/customers still exists as a redirect to /crm for old bundles and
   // bookmarks; the menu points straight at the new screen.
-  { href: '/crm', title: 'Customers', icon: 'people' },
+  { href: '/crm', title: 'Customers', icon: 'people', badge: 'customers' },
+  { href: '/crm/inbox', title: 'Messages', icon: 'chatbubbles', badge: 'messages' },
   { href: '/more/monitoring', title: 'Monitoring Logins', icon: 'pulse' },
   { href: '/security', title: 'Security & 2FA', icon: 'shield-checkmark' },
   // Visible to everyone; the screen itself is admin-gated.
@@ -55,6 +66,24 @@ export default function MoreScreen() {
   const [deleting, setDeleting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  /**
+   * Unread inbound texts. `messages` is admin-only in RLS, so this comes back
+   * as 0 for the crew and no badge appears — the gate is the database's, not
+   * this screen's.
+   */
+  const [unread, setUnread] = useState(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      void fetchUnreadCount().then((count) => {
+        if (!cancelled) setUnread(count);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
 
   const removeAccount = async () => {
     setBusy(true);
@@ -84,22 +113,30 @@ export default function MoreScreen() {
         <Text style={styles.title}>More</Text>
 
         <View style={styles.card}>
-          {ITEMS.map((item, i) => (
-            <Pressable
-              key={item.href}
-              onPress={() => router.push(item.href)}
-              style={({ pressed }) => [
-                styles.row,
-                i < ITEMS.length - 1 && styles.rowBorder,
-                pressed && styles.pressed,
-              ]}>
-              <View style={styles.iconWrap}>
-                <Ionicons name={item.icon} size={18} color={colors.ocean} />
-              </View>
-              <Text style={styles.rowText}>{item.title}</Text>
-              <Ionicons name="chevron-forward" size={18} color={colors.inkSoft} />
-            </Pressable>
-          ))}
+          {ITEMS.map((item, i) => {
+            const count = item.badge && unread > 0 ? unread : 0;
+            return (
+              <Pressable
+                key={item.href}
+                onPress={() => router.push(item.href)}
+                style={({ pressed }) => [
+                  styles.row,
+                  i < ITEMS.length - 1 && styles.rowBorder,
+                  pressed && styles.pressed,
+                ]}>
+                <View style={styles.iconWrap}>
+                  <Ionicons name={item.icon} size={18} color={colors.ocean} />
+                </View>
+                <Text style={styles.rowText}>{item.title}</Text>
+                {count > 0 ? (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{count > 99 ? '99+' : count}</Text>
+                  </View>
+                ) : null}
+                <Ionicons name="chevron-forward" size={18} color={colors.inkSoft} />
+              </Pressable>
+            );
+          })}
         </View>
 
         <View style={styles.card}>
@@ -200,6 +237,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  badge: {
+    minWidth: 22,
+    height: 22,
+    paddingHorizontal: 6,
+    borderRadius: radii.pill,
+    backgroundColor: colors.ocean,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { color: colors.white, fontSize: 12, fontWeight: '800' },
   deleteLinkWrap: { alignSelf: 'center', paddingVertical: spacing.sm },
   deleteLink: { color: colors.danger, fontSize: 14, fontWeight: '700' },
   dangerCard: {

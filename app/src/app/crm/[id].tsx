@@ -1,11 +1,14 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as DocumentPicker from 'expo-document-picker';
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
+  KeyboardAvoidingView,
   Linking,
   Platform,
   Pressable,
@@ -22,6 +25,26 @@ import { PhoneActionSheet } from '@/components/PhoneActionSheet';
 import { StatusPill } from '@/components/StatusPill';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { fetchEnrolledCustomerIds, inviteCustomer } from '@/lib/account';
+import {
+  NOT_CONFIGURED_SMS,
+  NOT_CONFIGURED_VOICE,
+  buildTemplateVars,
+  fetchCommsSettings,
+  fetchMyStaffProfile,
+  fetchTemplates,
+  fetchThread,
+  formatDuration,
+  formatPhone,
+  markThreadRead,
+  placeBridgeCall,
+  renderTemplate,
+  sendSms,
+  useCommsRealtime,
+  type CommsMessage,
+  type CommsSettings,
+  type MessageTemplate,
+  type StaffProfile,
+} from '@/lib/comms';
 import {
   addCustomerNote,
   archiveCustomer,
@@ -105,6 +128,24 @@ function relativeTime(iso: string): string {
   return formatShortDate(iso.slice(0, 10));
 }
 
+/** "9:04 AM" today, "Tue 9:04 AM" this week, "12 Aug 9:04 AM" before that. */
+function messageTime(iso: string): string {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return '';
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  const clock = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  if (sameDay) return clock;
+  const withinWeek = now.getTime() - date.getTime() < 6 * 24 * 3600 * 1000;
+  if (withinWeek) {
+    return `${date.toLocaleDateString('en-US', { weekday: 'short' })} ${clock}`;
+  }
+  return `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${clock}`;
+}
+
 /** "devonsd311@gmail.com" → "Devonsd311". Good enough to attribute a note. */
 function authorName(email: string): string {
   const local = (email ?? '').split('@')[0] ?? '';
@@ -139,8 +180,12 @@ interface FormState {
   notes: string;
 }
 
+function isSegment(value: unknown): value is Segment {
+  return typeof value === 'string' && ALL_SEGMENTS.some((s) => s.key === value);
+}
+
 export default function CustomerDetailScreen() {
-  const params = useLocalSearchParams<{ id?: string }>();
+  const params = useLocalSearchParams<{ id?: string; segment?: string }>();
   const customerId = typeof params.id === 'string' ? params.id : '';
   const router = useRouter();
   const role = useRole();
@@ -150,7 +195,12 @@ export default function CustomerDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [notFound, setNotFound] = useState(false);
-  const [segment, setSegment] = useState<Segment>('overview');
+  // `?segment=comms` is how the inbox hands a thread over. It is read once, as
+  // the initial value: re-reading it would yank the tab back every time the
+  // screen re-rendered with the param still in the URL.
+  const [segment, setSegment] = useState<Segment>(
+    isSegment(params.segment) ? params.segment : 'overview',
+  );
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [jobs, setJobs] = useState<CustomerJob[]>([]);
@@ -190,6 +240,18 @@ export default function CustomerDetailScreen() {
   const [busyDocId, setBusyDocId] = useState<string | null>(null);
   const [confirmDeleteDocId, setConfirmDeleteDocId] = useState<string | null>(null);
   const [uploadingInsurance, setUploadingInsurance] = useState(false);
+
+  // Comms
+  const [thread, setThread] = useState<CommsMessage[]>([]);
+  const [commsSettings, setCommsSettings] = useState<CommsSettings | null>(null);
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [staffProfile, setStaffProfile] = useState<StaffProfile | null>(null);
+  const [composer, setComposer] = useState('');
+  const [sending, setSending] = useState(false);
+  const [callBusy, setCallBusy] = useState(false);
+  const [callNote, setCallNote] = useState<string | null>(null);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
 
   // Notes
   const [noteDraft, setNoteDraft] = useState('');
@@ -282,11 +344,65 @@ export default function CustomerDetailScreen() {
     }, [authState, load]),
   );
 
+  /**
+   * The conversation and everything the composer needs to send one.
+   *
+   * Separate from `load()` because it runs on a different clock: the thread is
+   * also refetched by the realtime subscription below, and pulling the jobs,
+   * money and paperwork again every time a delivery receipt lands would be
+   * four wasted queries per text.
+   */
+  const loadComms = useCallback(async () => {
+    if (!customerId) return;
+    const [messages, settingsRow, templateRows, profileRow] = await Promise.all([
+      fetchThread(customerId),
+      fetchCommsSettings(),
+      fetchTemplates(),
+      fetchMyStaffProfile(),
+    ]);
+    setThread(messages);
+    setCommsSettings(settingsRow);
+    setTemplates(templateRows);
+    setStaffProfile(profileRow);
+  }, [customerId]);
+
+  // The phone sheet on Overview needs to know whether the DC Solar rows are
+  // live before anybody visits the Comms tab, so these two cheap reads happen
+  // once on sign-in rather than being bundled into `loadComms`.
+  useEffect(() => {
+    if (authState !== 'in') return;
+    let cancelled = false;
+    void Promise.all([fetchCommsSettings(), fetchMyStaffProfile()]).then(([s, p]) => {
+      if (cancelled) return;
+      setCommsSettings(s);
+      setStaffProfile(p);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authState]);
+
+  // Opening the thread is what marks it read — that is the moment a human
+  // actually saw it, and the moment the badge should stop nagging.
+  useEffect(() => {
+    if (segment !== 'comms' || authState !== 'in' || !customerId) return;
+    void loadComms().then(() => markThreadRead(customerId));
+  }, [segment, authState, customerId, loadComms]);
+
+  // Live updates for THIS customer only. The focus refetch above remains the
+  // source of truth; this just means a reply appears while you are reading.
+  useCommsRealtime(
+    useCallback(() => {
+      if (authState === 'in') void loadComms();
+    }, [authState, loadComms]),
+    customerId || null,
+  );
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
+    await Promise.all([load(), segment === 'comms' ? loadComms() : Promise.resolve()]);
     setRefreshing(false);
-  }, [load]);
+  }, [load, loadComms, segment]);
 
   const segments = useMemo(
     () => ALL_SEGMENTS.filter((s) => !s.adminOnly || isAdmin),
@@ -294,9 +410,15 @@ export default function CustomerDetailScreen() {
   );
 
   // A viewer who deep-links to ?segment=money would land on a hidden tab.
+  //
+  // Only bounce them once we KNOW they are not an admin: `useRole()` returns
+  // null for a beat on every mount, and resetting during that beat would throw
+  // an admin arriving from the inbox at ?segment=comms straight back to
+  // Overview before the screen had even settled.
   useEffect(() => {
+    if (role == null || role.isAdmin) return;
     if (!segments.some((s) => s.key === segment)) setSegment('overview');
-  }, [segments, segment]);
+  }, [role, segments, segment]);
 
   // -------------------------------------------------------------------------
   // Actions
@@ -379,6 +501,54 @@ export default function CustomerDetailScreen() {
       );
     } else {
       notify(setStatus, 'error', 'Invite failed', result.message);
+    }
+  };
+
+  /**
+   * Send the composer's text. The row is optimistically cleared only AFTER the
+   * server says yes — `twilio-send-sms` writes the `messages` row before it
+   * calls Twilio, so a successful return means the message is genuinely
+   * logged, and a failure means nothing was sent and the draft is still worth
+   * keeping in the box.
+   */
+  const sendText = async () => {
+    if (!customer) return;
+    const body = composer.trim();
+    if (!body) return;
+    setStatus(null);
+    setSending(true);
+    const result = await sendSms({
+      customerId: customer.id,
+      body,
+      jobId: jobs[0]?.id,
+    });
+    setSending(false);
+    if (result.ok) {
+      setComposer('');
+      await loadComms();
+    } else {
+      notify(setStatus, 'error', 'Not sent', result.message);
+    }
+  };
+
+  /**
+   * Bridge call. It rings YOUR cell first and only then dials the customer, so
+   * the "Ringing your cell…" note is load-bearing: without it the first person
+   * to press this thinks the button is broken.
+   */
+  const startCall = async () => {
+    if (!customer) return;
+    setStatus(null);
+    setCallBusy(true);
+    setCallNote('Ringing your cell…');
+    const result = await placeBridgeCall({ customerId: customer.id, jobId: jobs[0]?.id });
+    setCallBusy(false);
+    if (result.ok) {
+      setCallNote('Pick up your phone — we are dialling them next.');
+      await loadComms();
+    } else {
+      setCallNote(null);
+      notify(setStatus, 'error', 'Call failed', result.message);
     }
   };
 
@@ -834,8 +1004,17 @@ export default function CustomerDetailScreen() {
                 phone={customer.phone}
                 phoneE164={customer.phone_e164 ?? null}
                 name={customer.name}
+                customerId={customer.id}
+                jobId={jobs[0]?.id ?? null}
                 isAdmin={isAdmin}
                 optedOut={customer.sms_opt_out_at != null}
+                smsReady={commsSettings?.smsEnabled === true}
+                voiceReady={commsSettings?.voiceEnabled === true}
+                hasStaffNumber={Boolean(staffProfile?.cellPhoneE164)}
+                onText={() => {
+                  setShowPhoneSheet(false);
+                  setSegment('comms');
+                }}
                 onClose={() => setShowPhoneSheet(false)}
               />
             </View>
@@ -1246,38 +1425,244 @@ export default function CustomerDetailScreen() {
     </>
   );
 
-  const commsSegment = (
-    <>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Texting and calling</Text>
-        <Text style={styles.bodyText}>
-          Texting and calling from the DC Solar number aren&apos;t set up yet — see
-          docs/TWILIO_SETUP.md. Until the business number and the A2P campaign are approved, use
-          your own phone.
-        </Text>
-        {customer.sms_opt_out_at ? (
-          <Text style={styles.warnText}>
-            This customer replied STOP on {formatShortDate(customer.sms_opt_out_at.slice(0, 10))} —
-            we may not text them.
+  // -------------------------------------------------------------------------
+  // Comms
+  // -------------------------------------------------------------------------
+
+  const optedOut = customer.sms_opt_out_at != null;
+  const smsReady = commsSettings?.smsEnabled === true;
+  const voiceReady = commsSettings?.voiceEnabled === true && Boolean(staffProfile?.cellPhoneE164);
+  const templateVars = buildTemplateVars({
+    customer,
+    job: jobs[0] ?? null,
+    settings: commsSettings,
+    tech: role?.displayName ?? (role?.email ? authorName(role.email) : null),
+    documentNumber: finance.find((row) => row.document_number)?.document_number ?? null,
+  });
+
+  /**
+   * One message. Three shapes share this timeline on purpose: an outbound
+   * text, an inbound text, and a call. Seeing "called them at 9:04, texted at
+   * 9:12, they replied at 9:20" in one column is the entire point of putting
+   * calls in the `messages` table rather than a log of their own.
+   */
+  const renderMessage = ({ item }: { item: CommsMessage }) => {
+    if (item.channel === 'call') {
+      const failed =
+        item.status === 'failed' ||
+        item.status === 'busy' ||
+        item.status === 'no-answer' ||
+        item.status === 'canceled';
+      const who = item.sent_by ? authorName(item.sent_by) : null;
+      return (
+        <View style={styles.callPillWrap}>
+          <Text style={styles.callPill}>
+            {failed
+              ? `Call failed · ${item.error ?? item.status}`
+              : [
+                  'Called',
+                  item.duration_seconds ? formatDuration(item.duration_seconds) : item.status,
+                  who,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
           </Text>
-        ) : null}
+        </View>
+      );
+    }
+
+    const outbound = item.direction === 'out';
+    const expanded = expandedMessageId === item.id;
+    const failed = item.status === 'failed' || item.status === 'undelivered';
+    const deliveryLabel = outbound
+      ? failed
+        ? `${item.status === 'undelivered' ? 'Undelivered' : 'Failed'}${item.error ? ' — tap' : ''}`
+        : item.status === 'delivered'
+          ? 'Delivered'
+          : item.status === 'sent'
+            ? 'Sent'
+            : 'Queued'
+      : null;
+
+    return (
+      <Pressable
+        onPress={() => setExpandedMessageId(expanded ? null : item.id)}
+        style={[styles.bubbleRow, outbound ? styles.bubbleRowOut : styles.bubbleRowIn]}>
+        <View style={[styles.bubble, outbound ? styles.bubbleOut : styles.bubbleIn]}>
+          {item.media_urls.map((url) => (
+            <Image
+              key={url}
+              source={{ uri: url }}
+              style={styles.bubbleImage}
+              contentFit="cover"
+              transition={120}
+            />
+          ))}
+          {item.body ? <Text style={styles.bubbleText}>{item.body}</Text> : null}
+          <Text style={styles.bubbleMeta}>
+            {messageTime(item.created_at)}
+            {deliveryLabel ? ` · ${deliveryLabel}` : ''}
+          </Text>
+          {expanded && failed && item.error ? (
+            <Text style={styles.bubbleError}>
+              {item.error}
+              {item.error_code ? ` (${item.error_code})` : ''}
+            </Text>
+          ) : null}
+        </View>
+      </Pressable>
+    );
+  };
+
+  const templateSheet = showTemplates ? (
+    <View style={styles.templateSheet}>
+      <View style={styles.templateSheetHead}>
+        <Text style={styles.templateSheetTitle}>Saved texts</Text>
+        <Pressable
+          onPress={() => setShowTemplates(false)}
+          hitSlop={8}
+          style={({ pressed }) => pressed && styles.pressed}>
+          <Ionicons name="close" size={18} color={colors.inkSoft} />
+        </Pressable>
+      </View>
+      <ScrollView style={styles.templateSheetList} keyboardShouldPersistTaps="handled">
+        {templates.length === 0 ? (
+          <Text style={styles.emptyText}>
+            No saved texts yet — add some in Messaging settings.
+          </Text>
+        ) : (
+          templates.map((template) => {
+            const merged = renderTemplate(template.body, templateVars);
+            return (
+              <Pressable
+                key={template.id}
+                // Fills the box; NEVER sends. Somebody has to read what is
+                // about to go out under the company's name.
+                onPress={() => {
+                  setComposer(merged);
+                  setShowTemplates(false);
+                }}
+                style={({ pressed }) => [styles.templateOption, pressed && styles.rowPressed]}>
+                <Text style={styles.templateOptionTitle}>{template.title}</Text>
+                <Text style={styles.templateOptionBody}>{merged}</Text>
+              </Pressable>
+            );
+          })
+        )}
+      </ScrollView>
+      <Text style={styles.hint}>Tapping one fills the box — nothing sends until you press Send.</Text>
+    </View>
+  ) : null;
+
+  const commsComposer = optedOut ? (
+    <View style={styles.optOutBanner}>
+      <Ionicons name="hand-left" size={16} color={colors.coralDeep} />
+      <Text style={styles.optOutText}>
+        They replied STOP{customer.sms_opt_out_at
+          ? ` on ${formatShortDate(customer.sms_opt_out_at.slice(0, 10))}`
+          : ''}
+        . You can still call.
+      </Text>
+    </View>
+  ) : !smsReady ? (
+    <View style={styles.fallbackArea}>
+      <View style={styles.noticeCard}>
+        <Ionicons name="construct" size={16} color={colors.slateDeep} />
+        <Text style={styles.noticeText}>{NOT_CONFIGURED_SMS}</Text>
       </View>
       {customer.phone ? (
-        <View>
-          <PhoneActionSheet
-            phone={customer.phone}
-            phoneE164={customer.phone_e164 ?? null}
-            name={customer.name}
-            isAdmin={isAdmin}
-            optedOut={customer.sms_opt_out_at != null}
-          />
-        </View>
+        <PhoneActionSheet
+          phone={customer.phone}
+          phoneE164={customer.phone_e164 ?? null}
+          name={customer.name}
+          customerId={customer.id}
+          jobId={jobs[0]?.id ?? null}
+          isAdmin={isAdmin}
+          optedOut={optedOut}
+          smsReady={smsReady}
+          voiceReady={commsSettings?.voiceEnabled === true}
+          hasStaffNumber={Boolean(staffProfile?.cellPhoneE164)}
+          onText={() => setSegment('comms')}
+        />
       ) : (
-        <View style={styles.card}>
-          <Text style={styles.emptyText}>No phone number on file.</Text>
-        </View>
+        <Text style={styles.hint}>No phone number on file — add one on Overview.</Text>
       )}
-    </>
+    </View>
+  ) : (
+    <View style={styles.composer}>
+      <Pressable
+        onPress={() => setShowTemplates((v) => !v)}
+        style={({ pressed }) => [styles.templateChip, pressed && styles.pressed]}>
+        <Ionicons name="albums" size={14} color={colors.ocean} />
+        <Text style={styles.templateChipText}>Templates</Text>
+      </Pressable>
+      <TextInput
+        value={composer}
+        onChangeText={setComposer}
+        placeholder={`Text ${customer.name.split(' ')[0] ?? customer.name}`}
+        placeholderTextColor={colors.inkSoft}
+        multiline
+        style={styles.composerInput}
+      />
+      <Pressable
+        onPress={() => void sendText()}
+        disabled={sending || composer.trim().length === 0}
+        style={({ pressed }) => [
+          styles.sendButton,
+          (pressed || sending || composer.trim().length === 0) && styles.pressed,
+        ]}>
+        {sending ? (
+          <ActivityIndicator color={colors.ink} size="small" />
+        ) : (
+          <Ionicons name="send" size={16} color={colors.ink} />
+        )}
+      </Pressable>
+    </View>
+  );
+
+  const commsHeader = (
+    <View style={styles.commsHeader}>
+      <View style={styles.commsHeaderBody}>
+        <Text style={styles.commsHeaderText} numberOfLines={1}>
+          {smsReady && commsSettings?.fromNumber
+            ? `Texts come from ${formatPhone(commsSettings.fromNumber)}`
+            : customer.phone
+              ? customer.phone
+              : 'No phone number on file'}
+        </Text>
+        {callNote ? <Text style={styles.commsHeaderNote}>{callNote}</Text> : null}
+      </View>
+      <Pressable
+        onPress={() =>
+          voiceReady
+            ? void startCall()
+            : notify(
+                setStatus,
+                'error',
+                'Not available',
+                commsSettings?.voiceEnabled !== true
+                  ? NOT_CONFIGURED_VOICE
+                  : 'Add your cell number in Messages settings — that is the phone we ring first.',
+              )
+        }
+        disabled={callBusy}
+        style={({ pressed }) => [
+          styles.callButton,
+          !voiceReady && styles.callButtonMuted,
+          (pressed || callBusy) && styles.pressed,
+        ]}>
+        {callBusy ? (
+          <ActivityIndicator color={colors.ink} size="small" />
+        ) : (
+          <>
+            <Ionicons name="call" size={14} color={voiceReady ? colors.ink : colors.inkSoft} />
+            <Text style={[styles.callButtonText, !voiceReady && styles.callButtonTextMuted]}>
+              Call via DC Solar
+            </Text>
+          </>
+        )}
+      </Pressable>
+    </View>
   );
 
   const notesSegment = (
@@ -1414,6 +1799,95 @@ export default function CustomerDetailScreen() {
     </>
   );
 
+  const segmentBar = (
+    <View style={styles.segmentRow}>
+      {segments.map((option) => {
+        const active = option.key === segment;
+        return (
+          <Pressable
+            key={option.key}
+            onPress={() => setSegment(option.key)}
+            style={({ pressed }) => [
+              styles.segment,
+              active && styles.segmentActive,
+              pressed && styles.pressed,
+            ]}>
+            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+
+  const statusLine = status ? (
+    <Text
+      style={[
+        styles.statusText,
+        status.kind === 'error' ? styles.statusError : styles.statusSuccess,
+      ]}>
+      {status.message}
+    </Text>
+  ) : null;
+
+  /**
+   * Comms gets its own root instead of living inside the page's ScrollView.
+   *
+   * A chat needs an INVERTED list — newest pinned to the bottom, older loading
+   * upward — and a composer anchored above the keyboard. Nesting a
+   * VirtualizedList inside a ScrollView of the same orientation breaks both
+   * (React Native warns about it, and the inverted list loses its scroll
+   * anchoring). The data is reversed for the same reason: `fetchThread`
+   * returns oldest-first, which is the order a conversation reads in, and
+   * `inverted` flips the rendering, not the array.
+   */
+  if (segment === 'comms') {
+    return (
+      <>
+        <Stack.Screen options={{ title: customer.name }} />
+        <KeyboardAvoidingView
+          style={styles.screen}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 92 : 0}>
+          <View style={styles.commsTop}>
+            {segmentBar}
+            {commsHeader}
+          </View>
+          <FlatList
+            style={styles.commsList}
+            contentContainerStyle={styles.commsListContent}
+            data={[...thread].reverse()}
+            keyExtractor={(item) => item.id}
+            renderItem={renderMessage}
+            inverted
+            keyboardShouldPersistTaps="handled"
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={colors.ocean}
+              />
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyThread}>
+                <Ionicons name="chatbubbles-outline" size={22} color={colors.inkSoft} />
+                <Text style={styles.emptyText}>
+                  {smsReady
+                    ? 'Nothing yet. Say hello.'
+                    : 'No conversation yet — texting from the DC Solar number is still being set up.'}
+                </Text>
+              </View>
+            }
+          />
+          {statusLine}
+          {templateSheet}
+          {commsComposer}
+        </KeyboardAvoidingView>
+      </>
+    );
+  }
+
   return (
     <>
       <Stack.Screen options={{ title: customer.name }} />
@@ -1424,42 +1898,15 @@ export default function CustomerDetailScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.ocean} />
         }>
-        <View style={styles.segmentRow}>
-          {segments.map((option) => {
-            const active = option.key === segment;
-            return (
-              <Pressable
-                key={option.key}
-                onPress={() => setSegment(option.key)}
-                style={({ pressed }) => [
-                  styles.segment,
-                  active && styles.segmentActive,
-                  pressed && styles.pressed,
-                ]}>
-                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        {segmentBar}
 
         {segment === 'overview' ? overview : null}
         {segment === 'jobs' ? jobsSegment : null}
         {segment === 'documents' ? documentsSegment : null}
         {segment === 'money' ? moneySegment : null}
-        {segment === 'comms' ? commsSegment : null}
         {segment === 'notes' ? notesSegment : null}
 
-        {status ? (
-          <Text
-            style={[
-              styles.statusText,
-              status.kind === 'error' ? styles.statusError : styles.statusSuccess,
-            ]}>
-            {status.message}
-          </Text>
-        ) : null}
+        {statusLine}
       </ScrollView>
     </>
   );
@@ -1710,4 +2157,146 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 13, fontWeight: '600', textAlign: 'center' },
   statusError: { color: colors.danger },
   statusSuccess: { color: colors.ocean },
+
+  // ---- Comms -------------------------------------------------------------
+  commsTop: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  commsHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  commsHeaderBody: { flex: 1, gap: 1 },
+  commsHeaderText: { color: colors.inkSoft, fontSize: 12, fontWeight: '700' },
+  commsHeaderNote: { color: colors.ocean, fontSize: 12, fontWeight: '700' },
+  callButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.sun,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  callButtonMuted: { backgroundColor: colors.slateSoft },
+  callButtonText: { color: colors.ink, fontSize: 12, fontWeight: '800' },
+  callButtonTextMuted: { color: colors.inkSoft },
+
+  commsList: { flex: 1 },
+  commsListContent: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    gap: spacing.sm,
+    flexGrow: 1,
+  },
+  // No transform here on purpose: VirtualizedList composes its own inversion
+  // style onto ListEmptyComponent, and adding a second scaleY(-1) is one
+  // refactor away from an upside-down empty state.
+  emptyThread: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xl },
+  bubbleRow: { flexDirection: 'row' },
+  bubbleRowIn: { justifyContent: 'flex-start' },
+  bubbleRowOut: { justifyContent: 'flex-end' },
+  bubble: { maxWidth: '82%', borderRadius: radii.md, padding: spacing.sm + 2, gap: 4 },
+  bubbleIn: { backgroundColor: colors.white, ...shadows.card },
+  bubbleOut: { backgroundColor: colors.skySoft },
+  bubbleText: { color: colors.ink, fontSize: 15, fontWeight: '500', lineHeight: 21 },
+  bubbleMeta: { color: colors.inkSoft, fontSize: 11, fontWeight: '600' },
+  bubbleError: { color: colors.danger, fontSize: 12, fontWeight: '700' },
+  bubbleImage: {
+    width: 200,
+    height: 150,
+    borderRadius: radii.sm,
+    backgroundColor: colors.slateSoft,
+  },
+  callPillWrap: { alignItems: 'center' },
+  callPill: {
+    backgroundColor: colors.slateSoft,
+    color: colors.slateDeep,
+    fontSize: 12,
+    fontWeight: '700',
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 1,
+    overflow: 'hidden',
+  },
+
+  composer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: spacing.sm,
+    padding: spacing.md,
+    backgroundColor: colors.white,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.tan,
+  },
+  composerInput: {
+    flex: 1,
+    maxHeight: 120,
+    backgroundColor: colors.canvas,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  templateChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.skySoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.sm,
+  },
+  templateChipText: { color: colors.ocean, fontSize: 12, fontWeight: '800' },
+  sendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
+    backgroundColor: colors.sun,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  templateSheet: {
+    maxHeight: 300,
+    backgroundColor: colors.canvas,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  templateSheetHead: { flexDirection: 'row', alignItems: 'center' },
+  templateSheetTitle: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '800' },
+  templateSheetList: { maxHeight: 210 },
+  templateOption: {
+    backgroundColor: colors.white,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+    gap: 2,
+    marginBottom: spacing.xs,
+  },
+  templateOptionTitle: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  templateOptionBody: { color: colors.inkSoft, fontSize: 12, fontWeight: '500', lineHeight: 17 },
+
+  optOutBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.coralSoft,
+    padding: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.tan,
+  },
+  optOutText: { flex: 1, color: colors.coralDeep, fontSize: 13, fontWeight: '700' },
+  fallbackArea: {
+    padding: spacing.md,
+    gap: spacing.sm,
+    backgroundColor: colors.white,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.tan,
+  },
 });

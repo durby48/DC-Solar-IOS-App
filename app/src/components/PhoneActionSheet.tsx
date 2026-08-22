@@ -1,18 +1,37 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useState } from 'react';
-import { Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Linking,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { colors, radii, spacing } from '@/constants/theme';
+import { NOT_CONFIGURED_SMS, NOT_CONFIGURED_VOICE, placeBridgeCall } from '@/lib/comms';
 
 /**
  * What you can do with a customer's phone number.
  *
- * PHASE 1 REALITY. Two of these four rows are deliberately dead. Calling and
- * texting from the DC Solar business number is Workstream G: it needs a Twilio
- * number, an A2P 10DLC campaign (1–5 business days for approval) and the
- * `twilio-*` edge functions. Showing the rows greyed out with "coming soon" is
- * the honest version — Devon can see where they will be, and nobody taps a
- * button that silently does nothing.
+ * FOUR ROWS, TWO WORLDS. "Call via DC Solar" and "Text via DC Solar" go
+ * through the business number — the customer sees the company, not somebody's
+ * personal cell, and the reply lands in the shared inbox where the whole
+ * office can see it. "Call from my phone" and "Copy number" are the fallbacks,
+ * and they stay available forever: a bridge call needs Twilio to be up and a
+ * roof in Raytown needs the call to happen either way.
+ *
+ * THE DC SOLAR ROWS DISABLE THEMSELVES rather than failing on tap. Twilio is
+ * not connected yet (every send returns 503 `not_configured`), so the caller
+ * passes `smsReady`/`voiceReady` from `comms_settings` and the rows say what
+ * is missing. Once Devon finishes docs/TWILIO_SETUP.md and flips the switches,
+ * the same rows come alive with no code change.
+ *
+ * A BRIDGE CALL RINGS YOUR OWN PHONE FIRST. That is why the row shows
+ * "Ringing your cell…" while it is in flight — without it the first person to
+ * press it assumes nothing happened and presses it again.
  *
  * COPY. `expo-clipboard` is NOT installed and React Native's own `Clipboard`
  * is deprecated; adding either would force a full App Store build for one
@@ -24,25 +43,73 @@ export function PhoneActionSheet({
   phone,
   phoneE164,
   name,
+  customerId,
+  jobId,
   isAdmin = false,
   optedOut = false,
+  smsReady = false,
+  voiceReady = false,
+  hasStaffNumber = true,
+  onText,
   onClose,
 }: {
   phone: string;
   /** The normalised +1XXXXXXXXXX, when the number could be parsed. */
   phoneE164?: string | null;
   name?: string | null;
+  /** Lets the bridge call attach itself to the right customer's thread. */
+  customerId?: string | null;
+  jobId?: string | null;
   isAdmin?: boolean;
   /** The customer replied STOP — texting them is not an option at all. */
   optedOut?: boolean;
+  /** `comms_settings.sms_enabled` — false until Twilio is connected. */
+  smsReady?: boolean;
+  /** `comms_settings.voice_enabled`. */
+  voiceReady?: boolean;
+  /** Whether I have saved a cell number for the bridge to ring. */
+  hasStaffNumber?: boolean;
+  /** Opens the Comms thread. Without it the Text row has nowhere to go. */
+  onText?: () => void;
   onClose?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [calling, setCalling] = useState(false);
+  const [callNote, setCallNote] = useState<string | null>(null);
 
   const dialable = phone.replace(/[^+\d]/g, '');
 
   const call = () => {
     Linking.openURL('tel:' + dialable).catch(() => {});
+  };
+
+  const canBridge = voiceReady && hasStaffNumber;
+  const canText = smsReady && !optedOut && Boolean(onText);
+
+  const bridgeNote = !voiceReady
+    ? NOT_CONFIGURED_VOICE
+    : !hasStaffNumber
+      ? 'Add your cell number in Messages settings'
+      : 'Rings your cell, then dials them from the DC Solar number';
+
+  const textNote = optedOut
+    ? 'This customer replied STOP — we may not text them'
+    : !smsReady
+      ? NOT_CONFIGURED_SMS
+      : 'Opens the shared thread — replies land in Messages';
+
+  const startBridge = async () => {
+    setCalling(true);
+    setCallNote('Ringing your cell…');
+    const result = await placeBridgeCall({
+      customerId: customerId ?? undefined,
+      to: customerId ? undefined : (phoneE164 ?? phone),
+      jobId: jobId ?? undefined,
+    });
+    setCalling(false);
+    setCallNote(
+      result.ok ? 'Pick up your phone — we are dialling them next.' : result.message,
+    );
   };
 
   const copy = async () => {
@@ -77,28 +144,55 @@ export function PhoneActionSheet({
 
       {isAdmin ? (
         <>
-          <View style={styles.disabledRow}>
-            <View style={styles.iconWrapMuted}>
-              <Ionicons name="call" size={16} color={colors.inkSoft} />
+          <Pressable
+            onPress={() => (canBridge ? void startBridge() : undefined)}
+            disabled={!canBridge || calling}
+            style={({ pressed }) => [
+              canBridge ? styles.actionRow : styles.disabledRow,
+              pressed && canBridge && styles.rowPressed,
+            ]}>
+            <View style={canBridge ? styles.iconWrap : styles.iconWrapMuted}>
+              {calling ? (
+                <ActivityIndicator color={colors.ocean} size="small" />
+              ) : (
+                <Ionicons name="call" size={16} color={canBridge ? colors.ocean : colors.inkSoft} />
+              )}
             </View>
             <View style={styles.rowBody}>
-              <Text style={styles.disabledTitle}>Call via DC Solar</Text>
-              <Text style={styles.disabledNote}>Coming soon — needs the Twilio number</Text>
-            </View>
-          </View>
-          <View style={styles.disabledRow}>
-            <View style={styles.iconWrapMuted}>
-              <Ionicons name="chatbubble" size={16} color={colors.inkSoft} />
-            </View>
-            <View style={styles.rowBody}>
-              <Text style={styles.disabledTitle}>Text via DC Solar</Text>
-              <Text style={styles.disabledNote}>
-                {optedOut
-                  ? 'This customer replied STOP — we may not text them'
-                  : 'Coming soon — waiting on A2P campaign approval'}
+              <Text style={canBridge ? styles.actionTitle : styles.disabledTitle}>
+                Call via DC Solar
+              </Text>
+              <Text style={canBridge ? styles.actionNote : styles.disabledNote}>
+                {callNote ?? bridgeNote}
               </Text>
             </View>
-          </View>
+            {canBridge && !calling ? (
+              <Ionicons name="chevron-forward" size={16} color={colors.inkSoft} />
+            ) : null}
+          </Pressable>
+
+          <Pressable
+            onPress={() => (canText ? onText?.() : undefined)}
+            disabled={!canText}
+            style={({ pressed }) => [
+              canText ? styles.actionRow : styles.disabledRow,
+              pressed && canText && styles.rowPressed,
+            ]}>
+            <View style={canText ? styles.iconWrap : styles.iconWrapMuted}>
+              <Ionicons
+                name="chatbubble"
+                size={16}
+                color={canText ? colors.ocean : colors.inkSoft}
+              />
+            </View>
+            <View style={styles.rowBody}>
+              <Text style={canText ? styles.actionTitle : styles.disabledTitle}>
+                Text via DC Solar
+              </Text>
+              <Text style={canText ? styles.actionNote : styles.disabledNote}>{textNote}</Text>
+            </View>
+            {canText ? <Ionicons name="chevron-forward" size={16} color={colors.inkSoft} /> : null}
+          </Pressable>
         </>
       ) : null}
 
