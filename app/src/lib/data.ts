@@ -1,20 +1,20 @@
-import {
-  Job,
-  MOCK_JOBS,
-  MOCK_SCHEDULE_DATES,
-  type ScheduleDate,
-} from '@/lib/mockData';
+import { CUSTOMER_COLUMNS } from '@/lib/crm';
+import { MOCK_JOBS, MOCK_SCHEDULE_DATES } from '@/lib/mockData';
 import { supabase } from '@/lib/supabase';
+import { type Job, type ScheduleDate } from '@/lib/types';
 
 export type { ScheduleDate };
 
 const COMPANY = 'dc-solar';
 
-// NOTE: customer columns are listed explicitly in THREE places (here,
-// lib/customers.ts and lib/data.ts::CUSTOMER_FIELDS). Adding a customer
-// column means adding it to all three — omitting photo_path here is
-// exactly why avatars rendered on the pipeline but not the Customers tab.
-const CUSTOMER_FIELDS = 'id, name, phone, email, address, company, photo_path';
+/**
+ * The customer column list used to be written out by hand here, in
+ * `lib/customers.ts` and in `lib/jobs.ts` — three copies, and leaving
+ * `photo_path` out of one of them is exactly why avatars rendered on the
+ * pipeline but not on the Customers tab. There is now one list, in
+ * `lib/crm.ts`, and it works inside a PostgREST embed too.
+ */
+const CUSTOMER_FIELDS = CUSTOMER_COLUMNS;
 
 function normalize(row: Record<string, unknown>): Job {
   const customers = row.customers as Job['customer'] | Job['customer'][] | undefined;

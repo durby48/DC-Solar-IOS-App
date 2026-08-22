@@ -4,46 +4,17 @@
  */
 
 import { type JobStatus } from '@/constants/theme';
+import { type Customer, type Job, type ScheduleDate } from '@/lib/types';
 
 export type { JobStatus };
 
-export interface Customer {
-  id: string;
-  name: string;
-  phone: string | null;
-  email?: string | null;
-  address: string | null;
-  notes?: string | null;
-  company: string;
-  /** Contact photo in the job-photos bucket (migration 20). */
-  photo_path?: string | null;
-}
-
-/** A scheduled work day for a job (mirrors the job_schedule_dates table). */
-export interface ScheduleDate {
-  id: string;
-  job_id: string;
-  company: string;
-  work_date: string; // ISO date (YYYY-MM-DD)
-  start_time: string | null; // HH:MM:SS, null = time TBD
-  note: string | null;
-}
-
-export interface Job {
-  id: string;
-  job_number: string | null;
-  name: string;
-  address: string | null;
-  status: JobStatus;
-  /** Pipeline stage (added in migration 6; may be absent pre-migration). */
-  stage?: string | null;
-  description: string | null;
-  scheduled_for: string | null; // ISO date (YYYY-MM-DD)
-  scheduled_end: string | null;
-  customer_id: string | null;
-  company: string;
-  customer?: Customer | null;
-}
+/**
+ * The domain types moved to `lib/types.ts` on 2026-08-22 so a screen can
+ * import a type without pulling the demo data in with it. Re-exported here
+ * because ~17 files still say `from '@/lib/mockData'`; new code should import
+ * from `@/lib/types`.
+ */
+export type { Customer, Job, ScheduleDate } from '@/lib/types';
 
 export const MOCK_CUSTOMERS: Customer[] = [
   {

@@ -26,7 +26,7 @@ const ITEMS: {
     | '/more/inventory'
     | '/more/checklist'
     | '/more/receipts'
-    | '/more/customers'
+    | '/crm'
     | '/more/monitoring'
     | '/more/employees'
     | '/more/employee-of-month'
@@ -39,7 +39,9 @@ const ITEMS: {
   { href: '/more/inventory', title: 'Inventory', icon: 'cube' },
   { href: '/more/checklist', title: 'Vehicle Checklist', icon: 'clipboard' },
   { href: '/more/receipts', title: 'Receipts', icon: 'receipt' },
-  { href: '/more/customers', title: 'Customers', icon: 'people' },
+  // /more/customers still exists as a redirect to /crm for old bundles and
+  // bookmarks; the menu points straight at the new screen.
+  { href: '/crm', title: 'Customers', icon: 'people' },
   { href: '/more/monitoring', title: 'Monitoring Logins', icon: 'pulse' },
   { href: '/security', title: 'Security & 2FA', icon: 'shield-checkmark' },
   // Visible to everyone; the screen itself is admin-gated.

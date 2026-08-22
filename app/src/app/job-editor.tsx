@@ -27,7 +27,7 @@ import {
   type JobWithPM,
 } from '@/lib/jobs';
 import { todayISO } from '@/lib/dates';
-import { type Customer } from '@/lib/mockData';
+import { type Customer } from '@/lib/types';
 import { getRole, type RoleInfo } from '@/lib/role';
 import { STAGES, stageOrDefault, statusForStage, type Stage } from '@/lib/stages';
 import { isValidISODate } from '@/lib/time';
@@ -37,10 +37,19 @@ import { isValidISODate } from '@/lib/time';
  * one it creates a new job with the next auto-assigned DC-# moniker
  * (recomputed from the live jobs table right before insert, so numbering
  * stays in sync with the dcsolarkc.com ops console).
+ *
+ * A `customerId` param pre-selects that customer in the picker. It is honoured
+ * in NEW-JOB MODE ONLY — the CRM's "New job for this customer" button is the
+ * one caller — because on an existing job the row's own `customer_id` is the
+ * truth and a stray param must never silently reassign it.
  */
 export default function JobEditorScreen() {
-  const params = useLocalSearchParams<{ jobId?: string }>();
+  const params = useLocalSearchParams<{ jobId?: string; customerId?: string }>();
   const jobId = typeof params.jobId === 'string' && params.jobId.length > 0 ? params.jobId : null;
+  const presetCustomerId =
+    typeof params.customerId === 'string' && params.customerId.length > 0
+      ? params.customerId
+      : null;
   const isEdit = jobId != null;
 
   const [role, setRole] = useState<RoleInfo | null | 'loading'>('loading');
@@ -53,7 +62,7 @@ export default function JobEditorScreen() {
   const [stage, setStage] = useState<Stage>('Pending Estimate');
   const [completedOn, setCompletedOn] = useState('');
   const [address, setAddress] = useState('');
-  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState<string | null>(isEdit ? null : presetCustomerId);
   const [projectManager, setProjectManager] = useState('');
   const [pmPhone, setPmPhone] = useState('');
 

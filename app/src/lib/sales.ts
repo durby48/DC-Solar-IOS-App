@@ -244,6 +244,34 @@ export async function fetchSalesData(): Promise<SalesData | null> {
   }
 }
 
+/**
+ * Leads that have not become a job yet, newest first — the CRM list's Leads
+ * section. Empty array on any error: RLS narrows this to a rep's own leads,
+ * and "no leads" is a perfectly good answer for a screen.
+ *
+ * Deliberately not filtered by `status`: a lead marked `lost` that nobody
+ * converted still belongs in front of Devon, and its status chip says so.
+ */
+export async function fetchOpenLeads(): Promise<Lead[]> {
+  try {
+    const { data, error } = await supabase
+      .from('leads')
+      .select(
+        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason',
+      )
+      .eq('company', COMPANY)
+      .is('converted_job_id', null)
+      .order('created_at', { ascending: false });
+    if (error || !data) return [];
+    return (data as unknown as Lead[]).map((l) => ({
+      ...l,
+      estimated_value: l.estimated_value != null ? Number(l.estimated_value) : null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 /** Assign or reassign a lead's rep. Admin-only; RLS rejects anyone else. */
 export async function assignLead(
   leadId: string,

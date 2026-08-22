@@ -4,6 +4,12 @@
  * mutation errors surface as friendly messages). RLS enforced.
  */
 
+import {
+  CUSTOMER_COLUMNS,
+  addCustomer as crmAddCustomer,
+  updateCustomer as crmUpdateCustomer,
+  type CustomerInput,
+} from '@/lib/crm';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
@@ -16,34 +22,32 @@ export interface CustomerRecord {
   address: string | null;
   notes: string | null;
   photo_path?: string | null;
+  archived_at?: string | null;
 }
 
-export interface CustomerInput {
-  name: string;
-  email: string | null;
-  phone: string | null;
-  address: string | null;
-  notes: string | null;
-}
+export type { CustomerInput };
 
 export type CustomersResult =
   | { status: 'ok'; customers: CustomerRecord[] }
   | { status: 'unavailable' };
 
-/** Fetch all customers, alphabetical by name. */
+/**
+ * Fetch all customers, alphabetical by name — INCLUDING archived ones, since
+ * this is the legacy shape and its one remaining caller is the job editor's
+ * picker sibling.
+ *
+ * @deprecated Prefer `fetchCrmCustomers()` in `lib/crm.ts`, which knows about
+ * the archive filter and returns the full `Customer` shape.
+ */
 export async function fetchCustomers(): Promise<CustomersResult> {
   try {
-    // NOTE: customer columns are listed explicitly in THREE places (here,
-    // lib/customers.ts and lib/data.ts::CUSTOMER_FIELDS). Adding a customer
-    // column means adding it to all three — omitting photo_path here is
-    // exactly why avatars rendered on the pipeline but not the Customers tab.
     const { data, error } = await supabase
       .from('customers')
-      .select('id, name, email, phone, address, notes, photo_path')
+      .select(CUSTOMER_COLUMNS)
       .eq('company', COMPANY)
       .order('name', { ascending: true });
     if (error) return { status: 'unavailable' };
-    return { status: 'ok', customers: (data ?? []) as CustomerRecord[] };
+    return { status: 'ok', customers: (data ?? []) as unknown as CustomerRecord[] };
   } catch {
     return { status: 'unavailable' };
   }
@@ -162,50 +166,27 @@ function friendlyMessage(raw: string | undefined, fallback: string): string {
   return raw;
 }
 
-/** Admin: add a customer. */
+/**
+ * Admin: add a customer.
+ *
+ * @deprecated Moved to `lib/crm.ts`, which also names the archived customer
+ * behind a 23505 unique-name collision. This is a pass-through so nothing
+ * breaks; import from `@/lib/crm` in new code.
+ */
 export async function addCustomer(input: CustomerInput): Promise<CustomerMutationResult> {
-  try {
-    const { error } = await supabase.from('customers').insert({
-      company: COMPANY,
-      name: input.name,
-      email: input.email,
-      phone: input.phone,
-      address: input.address,
-      notes: input.notes,
-    });
-    if (error) {
-      return { ok: false, message: friendlyMessage(error.message, 'Could not add the customer.') };
-    }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : 'Could not add the customer.' };
-  }
+  return crmAddCustomer(input);
 }
 
-/** Admin: update an existing customer. */
+/**
+ * Admin: update an existing customer.
+ *
+ * @deprecated Moved to `lib/crm.ts`. Pass-through; import from `@/lib/crm`.
+ */
 export async function updateCustomer(
   id: string,
   input: CustomerInput,
 ): Promise<CustomerMutationResult> {
-  try {
-    const { error } = await supabase
-      .from('customers')
-      .update({
-        name: input.name,
-        email: input.email,
-        phone: input.phone,
-        address: input.address,
-        notes: input.notes,
-      })
-      .eq('id', id)
-      .eq('company', COMPANY);
-    if (error) {
-      return { ok: false, message: friendlyMessage(error.message, 'Could not save the change.') };
-    }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : 'Could not save the change.' };
-  }
+  return crmUpdateCustomer(id, input);
 }
 
 // ---------------------------------------------------------------------------
