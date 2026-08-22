@@ -13,8 +13,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import AuthProviderButtons from '@/components/AuthProviderButtons';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
-import { signUpCustomer } from '@/lib/account';
+import { landingRoute, signUpCustomer } from '@/lib/account';
+import type { OAuthResult } from '@/lib/oauth';
 
 /**
  * Customer self-signup.
@@ -22,6 +24,16 @@ import { signUpCustomer } from '@/lib/account';
  * Every account created here is a CUSTOMER. Staff access is only ever granted
  * by Devon or Isaiah adding a row to `employees` — which no client key can do,
  * because that table has RLS on and no write policies at all.
+ *
+ * That holds for the Google and Apple buttons too (2026-08-22): a social
+ * account created here is a customer account like any other, and staff are
+ * refused twice over. Server-side, `2026-08-22_oauth_staff_block.sql` puts a
+ * BEFORE INSERT trigger on `auth.identities` — the table GoTrue writes when it
+ * auto-links a Google login to an existing verified account without ever
+ * touching `auth.users` — plus a matching check in `handle_new_auth_user()`
+ * for brand-new accounts. Client-side, `lib/oauth.ts` re-checks the account
+ * kind after every social sign-in and signs an employee straight back out.
+ * The staff login screen (`app/index.tsx`) shows no social buttons at all.
  *
  * The password rules shown are the ones Supabase actually enforces; the server
  * is the authority, this text is just so people aren't guessing.
@@ -34,6 +46,21 @@ export default function SignUpScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+
+  /**
+   * Outcome of a Google / Apple tap. `cancelled` covers both the user backing
+   * out of the sheet and — on web — the page already navigating to the
+   * provider, so it must do nothing at all.
+   */
+  const handleSocialResult = async (result: OAuthResult) => {
+    if (result.ok === 'cancelled') return;
+    if (result.ok) {
+      setError(null);
+      router.replace(await landingRoute());
+      return;
+    }
+    setError(result.message);
+  };
 
   const submit = async () => {
     if (!fullName.trim() || !email.trim() || !password) {
@@ -82,6 +109,14 @@ export default function SignUpScreen() {
             For DC Solar customers. Crew accounts are set up by the office — if you work here,
             ask Devon or Isaiah instead of signing up.
           </Text>
+
+          {/* Renders nothing until the Google client ids are configured. */}
+          <AuthProviderButtons
+            onResult={(result) => {
+              void handleSocialResult(result);
+            }}
+            disabled={loading}
+          />
 
           <View style={styles.form}>
             <TextInput

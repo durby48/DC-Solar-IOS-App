@@ -1,5 +1,10 @@
 # TODO before the build: add the Google Sign-In config plugin
 
+> **Full walkthrough: [`docs/SOCIAL_LOGIN_SETUP.md`](../docs/SOCIAL_LOGIN_SETUP.md)** —
+> Google Cloud, Apple, the Supabase provider config, the `.env` and EAS
+> variables, the staff block, and the test plan. This file is only the one
+> build-blocking item that lives in `app/`.
+
 `@react-native-google-signin/google-signin@16.1.4` is installed and locked as part
 of the build-29 native manifest, **but its config plugin is deliberately NOT in
 `app.json` yet.** The plugin needs a value that does not exist yet.
@@ -19,19 +24,19 @@ to `app.json`; that entry was **removed on purpose**. Do not let a later
 
 ## What Devon has to do first
 
-1. Google Cloud Console → **APIs & Services → OAuth consent screen** (External;
-   scopes `email`, `profile`, `openid`).
-2. Create a **Web** OAuth client — authorized redirect URI
-   `https://kjamxfezsathrsbztiln.supabase.co/auth/v1/callback`.
-3. Create an **iOS** OAuth client for bundle id `com.dcsolarkc.fieldapp`.
-4. Copy the iOS client's **reversed client ID**. Google shows it on the client
-   detail page as "iOS URL scheme"; it is the client ID with its two
-   dot-separated halves swapped, e.g.
+Sections 1 and 2 of [`docs/SOCIAL_LOGIN_SETUP.md`](../docs/SOCIAL_LOGIN_SETUP.md):
+the OAuth consent screen (External; `email`, `profile`, `openid`), a **Web**
+client with redirect `https://kjamxfezsathrsbztiln.supabase.co/auth/v1/callback`,
+and an **iOS** client for bundle id `com.dcsolarkc.fieldapp`. About 15 minutes.
 
-   ```
-   iOS client ID   1234567890-abcdefghijklmnop.apps.googleusercontent.com
-   reversed        com.googleusercontent.apps.1234567890-abcdefghijklmnop
-   ```
+Then copy the iOS client's **reversed client ID**. Google shows it on the client
+detail page as "iOS URL scheme"; it is the client ID with its two
+dot-separated halves swapped, e.g.
+
+```
+iOS client ID   1234567890-abcdefghijklmnop.apps.googleusercontent.com
+reversed        com.googleusercontent.apps.1234567890-abcdefghijklmnop
+```
 
 ## The exact entry to add
 
@@ -47,12 +52,26 @@ entry), substituting the reversed iOS client ID:
 ]
 ```
 
-Then also set, in `app/.env`:
+Then also set, in `app/.env` (template: `app/.env.example`):
 
 ```
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=<web client id>.apps.googleusercontent.com
 EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=<ios client id>.apps.googleusercontent.com
 ```
+
+⚠️ Set the same two variables on **EAS** and on **Vercel**. `EXPO_PUBLIC_*` is
+substituted at bundle time and EAS never sees `app/.env`, so a build made
+without them ships with the sign-in buttons hidden and no error to explain why.
+
+## What is already written and waiting on this
+
+The client half of Workstream D3 is done and merged: `src/lib/oauth.ts`
+(`signInWithGoogle`, `signInWithApple`, `appleAvailable`,
+`socialLoginConfigured`) and `src/components/AuthProviderButtons.tsx`, mounted
+on `src/app/sign-up.tsx` only. `socialLoginConfigured()` is false while
+`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` is empty, so the component renders **nothing**
+— today's blank space above the sign-up form is the designed state. Filling in
+the two variables is what switches the feature on.
 
 ## Blocking status
 
