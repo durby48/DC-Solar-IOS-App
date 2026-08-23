@@ -32,7 +32,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if (-not $Sql -and -not $File) { throw 'Pass -Sql or -File.' }
-if ($File) { $Sql = Get-Content -Raw -Path $File }
+if ($File) { $Sql = Get-Content -Raw -Encoding UTF8 -Path $File }
 
 if ($StripTransaction) {
   # Remove standalone begin;/commit; lines so the whole file can be wrapped.
@@ -40,7 +40,7 @@ if ($StripTransaction) {
 }
 if ($Rollback) { $Sql = "begin;`n$Sql`nrollback;" }
 
-$line = Get-Content $TokenFile | Where-Object { $_ -match '^\s*(SUPABASE_ACCESS_TOKEN\s*=\s*)?sbp_' } | Select-Object -First 1
+$line = Get-Content $TokenFile -Encoding UTF8 | Where-Object { $_ -match '^\s*(SUPABASE_ACCESS_TOKEN\s*=\s*)?sbp_' } | Select-Object -First 1
 if (-not $line) { throw "No sbp_ token found in $TokenFile" }
 $token = ($line -replace '^\s*SUPABASE_ACCESS_TOKEN\s*=\s*', '').Trim()
 
