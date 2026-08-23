@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
@@ -24,6 +24,11 @@ import {
   type CustomerDocument,
   type CustomerProject,
 } from '@/lib/account';
+import {
+  clearBounceToLogin,
+  hasBouncedToLogin,
+  markBouncedToLogin,
+} from '@/lib/authGate';
 import { getDocumentUrl } from '@/lib/data';
 import { viewDocument } from '@/lib/pdf';
 import { clearRoleCache } from '@/lib/role';
@@ -39,6 +44,7 @@ import { supabase } from '@/lib/supabase';
  */
 export default function CustomerScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const [email, setEmail] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
   const [projects, setProjects] = useState<CustomerProject[]>([]);
@@ -53,38 +59,101 @@ export default function CustomerScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Who is looking at this screen, and should they be?
+   *
+   * ──────────────────────────────────────────────────────────────────────
+   * THE PING-PONG THIS FIXES (2026-08-23)
+   * ──────────────────────────────────────────────────────────────────────
+   * This effect used to ask `getAccountInfo()` first and treat `kind: 'none'`
+   * as "signed-out visitor → `router.replace('/')`". But `'none'` is NOT
+   * "no session": it is also what a signed-in account with neither an
+   * `employees` row nor a `customer_accounts` row gets — and `landingRoute()`
+   * sends exactly that account HERE, on purpose (the portal is the documented
+   * safe landing spot for anything it cannot classify). So `app/index.tsx`
+   * saw a session and routed to `/customer`, this screen saw `'none'` and
+   * bounced to `/`, the login routed again… for ever. Two REST calls per hop
+   * made it slower than the old tabs loop, but on web it still ends in
+   * Chrome's `Throttling navigation to prevent the browser from hanging`
+   * (crbug.com/1038223).
+   *
+   * The fix is the same shape as `(tabs)/_layout.tsx::useStaffGate`, and for
+   * the same reason — the two screens must test OPPOSITE facts so they can
+   * never both fire:
+   *
+   *   - The SESSION is checked first. No session is a fact, not a failed
+   *     lookup, and it is the ONLY thing that bounces to the login. It
+   *     short-circuits without a single REST call. `app/index.tsx` routes
+   *     away only when `getSession()` returns one, so a visitor bounced there
+   *     gets the form, full stop.
+   *   - With a session, `getAccountInfo()` decides only whether to hand staff
+   *     to the crew tabs. `'customer'`, `'none'` and `'unknown'` all STAY —
+   *     identical to `landingRoute()`, so what the login chose is what this
+   *     screen accepts. An unlinked account just sees an empty portal, which
+   *     is what `my_projects` / `my_documents` / `my_balance` return for it.
+   *
+   * The bounce itself is `navigation.reset()` on the root stack rather than
+   * `router.replace('/')`, because `/` is claimed by both `app/index.tsx` and
+   * `app/(tabs)/index.tsx`; naming the `index` ROUTE cannot mis-resolve, and
+   * the reset is idempotent. The `authGate` flag and the holstered fallback
+   * are the tabs gate's, reused verbatim — see the comment block there.
+   */
   useEffect(() => {
     let cancelled = false;
-    getAccountInfo().then((info) => {
+
+    const leave = () => {
+      // Was a previous bounce never acknowledged by the login screen? Then we
+      // are looping, and the fallback below must not fire.
+      const unacknowledged = hasBouncedToLogin();
+      markBouncedToLogin();
+      try {
+        navigation.reset({ index: 0, routes: [{ name: 'index' as never }] });
+      } catch {
+        // Only if the root navigator has no `index` route to reset to — which
+        // should never happen. Once, and never while a bounce is already
+        // unaccounted for.
+        if (!unacknowledged) router.replace('/');
+      }
+    };
+
+    void (async () => {
+      // Session FIRST. A missing session is not a failed lookup.
+      const { data } = await supabase.auth.getSession();
+      if (cancelled) return;
+      if (!data.session) {
+        leave();
+        return;
+      }
+      // Somebody is signed in, so the next sign-out gets a clean slate even if
+      // the login screen never mounted to clear it.
+      clearBounceToLogin();
+
+      const info = await getAccountInfo();
       if (cancelled) return;
       // Staff who land here (or type the URL) belong in the app, not on a
-      // dead-end screen; signed-out visitors go back to the login.
+      // dead-end screen. Everyone else with a session stays — including
+      // 'none' (no customer link yet) and 'unknown' (offline) — and just sees
+      // an empty portal.
       if (info.kind === 'employee') {
         router.replace('/(tabs)');
         return;
       }
-      if (info.kind === 'none') {
-        router.replace('/');
-        return;
-      }
-      // 'unknown' (offline) stays put and just shows an empty portal.
       setEmail(info.email);
       setName(info.fullName);
-      fetchCustomerPortal().then((portal) => {
-        if (cancelled || !portal) {
-          setLoaded(true);
-          return;
-        }
+      const portal = await fetchCustomerPortal();
+      if (cancelled) return;
+      if (portal) {
         setProjects(portal.projects);
         setDocuments(portal.documents as CustomerDocument[]);
         setBalance(portal.balance);
-        setLoaded(true);
-      });
-    });
+      }
+      setLoaded(true);
+    })();
+
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [router, navigation]);
 
   /**
    * Open one of the customer's own PDFs.

@@ -89,14 +89,18 @@ export default function LoginScreen() {
    * already signed in. Before this existed the first case dumped a customer
    * with a perfectly good new session back onto the staff login form.
    *
-   * WHY THIS CANNOT PING-PONG WITH THE TABS GATE
+   * WHY THIS CANNOT PING-PONG WITH THE TABS GATE OR THE PORTAL
    *
-   * The two guards test opposite facts and are therefore mutually exclusive at
-   * any instant: `(tabs)/_layout.tsx` bounces here only when `getSession()`
-   * returns NO session; this routes away only when it returns ONE. A signed-out
-   * visitor bounced to `/` finds nothing here and gets the form. A signed-in
-   * employee routed to `/(tabs)` satisfies the gate. A customer goes to
-   * `/customer`, which the gate never runs on at all.
+   * The guards test opposite facts and are therefore mutually exclusive at any
+   * instant: `(tabs)/_layout.tsx` and `app/customer.tsx` bounce here only when
+   * `getSession()` returns NO session; this routes away only when it returns
+   * ONE. A signed-out visitor bounced to `/` finds nothing here and gets the
+   * form. A signed-in employee routed to `/(tabs)` satisfies the tabs gate.
+   * Everyone else with a session goes to `/customer`, which keeps every
+   * session — `landingRoute()` and the portal agree that `'customer'`,
+   * `'none'` and `'unknown'` all belong there. (Until 2026-08-23 the portal
+   * bounced `'none'`, and a session with neither an `employees` nor a
+   * `customer_accounts` row looped between the two screens for ever.)
    */
   const routeSession = useCallback(
     async (session: Session) => {

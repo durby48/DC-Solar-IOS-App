@@ -1,15 +1,21 @@
 /**
- * One bit of cross-screen state: "the tabs layout has already thrown a
+ * One bit of cross-screen state: "a signed-in-only screen has already thrown a
  * signed-out visitor at the login screen".
+ *
+ * Two screens fire it — `(tabs)/_layout.tsx` (the crew shell, 2026-08-22) and
+ * `app/customer.tsx` (the portal, 2026-08-23). Both run the same gate: check
+ * `getSession()` FIRST, bounce only when there is genuinely no session, and
+ * bounce with `navigation.reset()` on the root stack rather than
+ * `router.replace('/')`.
  *
  * WHY IT IS NOT A `useRef`
  *
- * The bounce UNMOUNTS the component that fires it — `(tabs)/_layout.tsx`
- * resets the root stack to `index`, which tears the whole tab shell down. Any
- * guard living inside that component dies with it, so it can never observe its
- * own previous bounce. It has to outlive the component, and the only thing
- * that does is module scope. (On web a full page load resets it, which is
- * correct: a fresh load is a fresh app session.)
+ * The bounce UNMOUNTS the component that fires it — the gate resets the root
+ * stack to `index`, which tears the whole screen down. Any guard living inside
+ * that component dies with it, so it can never observe its own previous
+ * bounce. It has to outlive the component, and the only thing that does is
+ * module scope. (On web a full page load resets it, which is correct: a fresh
+ * load is a fresh app session.)
  *
  * WHY IT IS IN ITS OWN FILE (2026-08-22)
  *
@@ -27,7 +33,7 @@
 
 let bounced = false;
 
-/** The tabs gate has just sent a signed-out visitor to the login screen. */
+/** A gate has just sent a signed-out visitor to the login screen. */
 export function markBouncedToLogin(): void {
   bounced = true;
 }
