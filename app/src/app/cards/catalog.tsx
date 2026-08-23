@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 
+import { DraftCardSheet, SyncJobsSheet } from '@/components/cards/CardForgeSheets';
 import { TradingCard } from '@/components/cards/TradingCard';
 import {
   AnimatedPressable,
@@ -44,6 +45,9 @@ import {
 import { useRoleGate } from '@/lib/role';
 
 type LoadState = 'loading' | 'ok' | 'unavailable';
+
+/** Which forge tool is open, if any. Only ever one at a time. */
+type ForgeSheet = 'sync' | 'draft';
 
 /**
  * THE CATALOG — every printed card, and ADMINS ONLY.
@@ -80,6 +84,8 @@ export default function CardCatalogScreen() {
   const [rarityFilter, setRarityFilter] = useState<CardRarity | null>(null);
   const [variant, setVariant] = useState<CardVariant>('base');
   const [showArchived, setShowArchived] = useState(false);
+
+  const [sheet, setSheet] = useState<ForgeSheet | null>(null);
 
   const load = useCallback(async () => {
     const [setRow, result] = await Promise.all([
@@ -298,6 +304,27 @@ export default function CardCatalogScreen() {
               onPress={() => router.push('/cards/editor')}
             />
           </View>
+
+          {/* The forge. Both of these WRITE cards, so they sit apart from the
+              filters above them rather than in among the chips. */}
+          <View style={styles.forgeRow}>
+            <Button
+              label="Sync jobs → cards"
+              icon="git-merge-outline"
+              variant="secondary"
+              size="sm"
+              onPress={() => setSheet('sync')}
+              style={styles.forgeButton}
+            />
+            <Button
+              label="New card from a prompt"
+              icon="sparkles-outline"
+              variant="secondary"
+              size="sm"
+              onPress={() => setSheet('draft')}
+              style={styles.forgeButton}
+            />
+          </View>
         </View>
 
         {state === 'loading' ? (
@@ -372,6 +399,17 @@ export default function CardCatalogScreen() {
             />
           </View>
         )}
+
+        <SyncJobsSheet
+          visible={sheet === 'sync'}
+          onClose={() => setSheet(null)}
+          onCreated={() => void load()}
+        />
+        <DraftCardSheet
+          visible={sheet === 'draft'}
+          onClose={() => setSheet(null)}
+          onSaved={() => void load()}
+        />
       </Screen>
     </>
   );
@@ -438,6 +476,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xs + 2,
     flexWrap: 'wrap',
+  },
+  forgeRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
+  forgeButton: {
+    flex: 1,
   },
   listWrap: {
     flex: 1,

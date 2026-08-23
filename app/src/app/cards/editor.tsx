@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -24,6 +24,7 @@ import {
 } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
 import {
+  CARD_DRAFT_PARAM,
   CARD_RARITIES,
   CARD_TYPES,
   archiveCard,
@@ -35,8 +36,10 @@ import {
   regenerateCardArt,
   saveCard,
   slugifyCardId,
+  takeCardDraft,
   unarchiveCard,
   uploadCardArt,
+  type CardDraft,
   type CardJobOption,
   type CardRarity,
   type CardRecord,
@@ -101,6 +104,44 @@ function toNumber(text: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+/** null → '', because every number in this form lives as text until save. */
+function toText(value: number | null): string {
+  return value != null ? String(value) : '';
+}
+
+/**
+ * A forged draft as form state.
+ *
+ * The draft's `id` is thrown away deliberately: it is the model's suggestion,
+ * and leaving it off means the save takes the ordinary insert path, where
+ * `saveCard` mints the slug from the title the admin actually settled on.
+ */
+function formFromDraft(draft: CardDraft): FormState {
+  return {
+    card_type: draft.card_type,
+    title: draft.title,
+    rarity: draft.rarity,
+    ability: draft.ability ?? '',
+    flavor: draft.flavor ?? '',
+    art_prompt: draft.art_prompt ?? '',
+    job_number: draft.job_number ?? '',
+    job_id: null,
+    location: draft.location ?? '',
+    service_type: draft.service_type ?? '',
+    panels: toText(draft.panels),
+    kw_dc: toText(draft.kw_dc),
+    annual_kwh: toText(draft.annual_kwh),
+    difficulty: toText(draft.difficulty),
+    reward_kw: toText(draft.reward_kw),
+    employee_id: null,
+    role: draft.role ?? '',
+    power: toText(draft.power),
+    bonus: toText(draft.bonus),
+    full_art: draft.full_art,
+    holo_only: draft.holo_only,
+  };
+}
+
 /**
  * Add or edit one card.
  *
@@ -116,7 +157,15 @@ function toNumber(text: string): number | null {
  * cheap path (pick a photo, compressed on device) sits right next to it.
  */
 export default function CardEditorScreen() {
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const params = useLocalSearchParams<{ id?: string; draft?: string }>();
+  const id = params.id;
+  /**
+   * `?draft=1` — the flag the forge sets on its way here. The card itself is
+   * NOT in the URL: it is waiting in `lib/cards`, because a dozen nullable
+   * fields and two paragraphs of prose do not belong in a query string. See
+   * `stashCardDraft`.
+   */
+  const wantsDraft = params[CARD_DRAFT_PARAM] === '1';
   const router = useRouter();
   const role = useRole();
   const isAdmin = role?.isAdmin ?? false;
@@ -183,6 +232,31 @@ export default function CardEditorScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * Seed the form from the forge, ONCE.
+   *
+   * The ref rather than state is the whole trick: React re-runs effects on a
+   * StrictMode remount, and `takeCardDraft` empties the slot, so a second run
+   * would find nothing and — with a state flag, which the remount would read
+   * as still-false — could blank a form the admin has already started typing
+   * in. A ref survives the remount and makes the second run a no-op.
+   *
+   * Nothing is saved here. This is a filled-in form, not a card; the admin
+   * still presses Create.
+   */
+  const draftSeeded = useRef(false);
+  useEffect(() => {
+    if (editing || !wantsDraft || draftSeeded.current) return;
+    draftSeeded.current = true;
+    const draft = takeCardDraft();
+    if (!draft) return;
+    setForm(formFromDraft(draft));
+    setStatus({
+      kind: 'success',
+      message: `Drafted "${draft.title}". Change anything you like, then create the card.`,
+    });
+  }, [editing, wantsDraft]);
 
   useEffect(() => {
     if (!isAdmin) return;

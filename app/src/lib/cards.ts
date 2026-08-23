@@ -1166,6 +1166,553 @@ function functionStatus(error: unknown): number | null {
 }
 
 // ---------------------------------------------------------------------------
+// The forge — `card-forge`, the edge function that WRITES cards
+// ---------------------------------------------------------------------------
+//
+// Two jobs, one function, both `verify_jwt` and both admin-gated server-side:
+//
+//   sync_jobs  every project that has no card yet gets one, its stats pulled
+//              off the job row. PROGRESSIVE AND CAPPED — run it again next
+//              month and the jobs booked since then get their cards. `more`
+//              is the server saying it stopped early, not that it failed.
+//   draft      one card written from a sentence. Nothing is inserted; the
+//              draft comes back for a person to read, edit and save through
+//              the ordinary `saveCard` above.
+//
+// THE SAME THREE RULES AS THE REST OF THIS FILE. Nothing throws — every entry
+// point returns a discriminated union. Nulls stay null: a job with no panel
+// count comes back `panels: null`, never 0. And art is never drawn as a side
+// effect of looking — `generateArt` is a switch a person has to flip, because
+// twenty-five cards at four cents each is a dollar of Devon's Gemini key.
+
+/** How the art turned out for one freshly forged card. */
+export type ForgeArtStatus = 'ready' | 'skipped' | 'failed';
+
+export function isForgeArtStatus(value: unknown): value is ForgeArtStatus {
+  return value === 'ready' || value === 'skipped' || value === 'failed';
+}
+
+/**
+ * One card the forge made — or, on a dry run, one it WOULD make.
+ *
+ * `art` is null on a dry run, and null is not `'skipped'`: "we didn't try" and
+ * "we tried and declined" are different sentences, and the results list prints
+ * both.
+ */
+export interface ForgedCard {
+  id: string;
+  title: string;
+  rarity: CardRarity;
+  card_type: CardType;
+  job_number: string | null;
+  panels: number | null;
+  kw_dc: number | null;
+  annual_kwh: number | null;
+  difficulty: number | null;
+  reward_kw: number | null;
+  location: string | null;
+  service_type: string | null;
+  ability: string | null;
+  flavor: string | null;
+  /** null when the response said nothing about art — every dry run. */
+  art: ForgeArtStatus | null;
+}
+
+/** A job the forge passed over, and why. Always shown: a skip is a finding. */
+export interface ForgeSkip {
+  jobNumber: string;
+  reason: string;
+}
+
+/**
+ * Why the forge said no, in the four flavours a screen reacts to differently:
+ *   not_configured  503, no GEMINI_API_KEY. Nothing to retry.
+ *   forbidden       403/401. The wrong account, not the wrong moment.
+ *   upstream        502, Gemini itself refused. Its words are worth showing.
+ *   unavailable     everything else — network, timeout, a bad request.
+ */
+export type ForgeErrorCode = 'not_configured' | 'forbidden' | 'upstream' | 'unavailable';
+
+export type SyncJobsResult =
+  | {
+      ok: true;
+      dryRun: boolean;
+      /** The cards created — or, when `dryRun`, the ones that would be. */
+      created: ForgedCard[];
+      skipped: ForgeSkip[];
+      /** The server stopped at its own cap. Run it again for the rest. */
+      more: boolean;
+    }
+  | { ok: false; code: ForgeErrorCode; message: string };
+
+/**
+ * A card the model wrote that NOTHING HAS SAVED YET.
+ *
+ * Deliberately not a `CardRecord`: there is no row behind it, so it has no
+ * company, no sort order and no version. `draftToCardRecord` inflates one for
+ * the preview, and `draftToCardInput` maps it onto the same `CardInput` the
+ * editor saves — so a draft takes the ordinary write path and gets the
+ * ordinary slug, card number and RLS check.
+ */
+export interface CardDraft {
+  id: string;
+  set_code: string;
+  card_type: CardType;
+  title: string;
+  rarity: CardRarity;
+  ability: string | null;
+  flavor: string | null;
+  art_prompt: string | null;
+  job_number: string | null;
+  location: string | null;
+  service_type: string | null;
+  panels: number | null;
+  kw_dc: number | null;
+  annual_kwh: number | null;
+  difficulty: number | null;
+  reward_kw: number | null;
+  role: string | null;
+  power: number | null;
+  bonus: number | null;
+  full_art: boolean;
+  holo_only: boolean;
+}
+
+export type DraftCardResult =
+  | { ok: true; draft: CardDraft }
+  | { ok: false; code: ForgeErrorCode; message: string };
+
+/** One card from the set, shown to say what a good ability sounds like. */
+export interface ForgeExample {
+  title: string;
+  card_type: CardType;
+  rarity: CardRarity;
+  ability: string | null;
+  flavor: string | null;
+}
+
+export type ForgeExamplesResult =
+  | { ok: true; keywords: string[]; examples: ForgeExample[] }
+  | { ok: false; code: ForgeErrorCode; message: string };
+
+export const FORGE_NOT_CONFIGURED =
+  "Card forging isn't configured (GEMINI_API_KEY). Add the key on the server, then try again.";
+
+const FORGE_FORBIDDEN = 'Admins only — writing cards is owner and operator work.';
+
+// --- error plumbing --------------------------------------------------------
+
+/**
+ * Peek at a failed invoke()'s JSON body WITHOUT consuming it.
+ *
+ * The same trick `lib/documents.ts` uses: supabase-js flattens every non-2xx
+ * into "Edge Function returned a non-2xx status code" and parks the real
+ * Response on `error.context`. `clone()` is what makes reading it twice safe.
+ */
+async function readForgePayload(error: unknown): Promise<Record<string, unknown> | null> {
+  const context = (error as { context?: unknown })?.context;
+  if (!context || typeof context !== 'object') return null;
+  const response = context as Response;
+  try {
+    if (typeof response.clone === 'function') {
+      return (await response.clone().json()) as Record<string, unknown>;
+    }
+  } catch {
+    // Not JSON — the caller falls back to readFunctionError.
+  }
+  return null;
+}
+
+/**
+ * A failed invoke, turned into something a person can act on.
+ *
+ * STATUS FIRST, BODY SECOND. The status is the fact — 503 is a missing key
+ * whatever the body says — and the body is the detail. `readFunctionError` is
+ * only reached when the JSON body carried no `error` string of its own,
+ * because its `text()` fallback CONSUMES the response and must not run
+ * speculatively.
+ */
+async function forgeFailure(error: unknown): Promise<{
+  ok: false;
+  code: ForgeErrorCode;
+  message: string;
+}> {
+  const status = functionStatus(error);
+  const payload = await readForgePayload(error);
+  const payloadCode = typeof payload?.code === 'string' ? payload.code : null;
+  const payloadError =
+    typeof payload?.error === 'string' && payload.error.trim().length > 0
+      ? payload.error.trim()
+      : null;
+  const detail = payloadError ?? (await readFunctionError(error));
+
+  if (status === 503 || payloadCode === 'not_configured') {
+    return { ok: false, code: 'not_configured', message: FORGE_NOT_CONFIGURED };
+  }
+  if (status === 403) {
+    return { ok: false, code: 'forbidden', message: detail ?? FORGE_FORBIDDEN };
+  }
+  if (status === 401) {
+    return {
+      ok: false,
+      code: 'forbidden',
+      message: detail ?? 'Sign in again and try that once more.',
+    };
+  }
+  if (status === 502) {
+    // Gemini's own words. It usually says something specific and useful.
+    return { ok: false, code: 'upstream', message: detail ?? 'Gemini could not write that card.' };
+  }
+  return {
+    ok: false,
+    code: 'unavailable',
+    message: detail ?? (error as { message?: string })?.message ?? 'The card forge is unavailable.',
+  };
+}
+
+/** A 200 that still says `ok: false`. Rare, but the contract allows it. */
+function forgePayloadFailure(
+  result: Record<string, unknown> | null,
+): { ok: false; code: ForgeErrorCode; message: string } | null {
+  if (result && result.ok === true) return null;
+  const code = typeof result?.code === 'string' ? result.code : null;
+  const message = typeof result?.error === 'string' ? result.error.trim() : '';
+  if (code === 'not_configured') {
+    return { ok: false, code: 'not_configured', message: FORGE_NOT_CONFIGURED };
+  }
+  return { ok: false, code: 'unavailable', message: message || 'The card forge returned nothing.' };
+}
+
+function thrownMessage(e: unknown, fallback: string): string {
+  return e instanceof Error && e.message ? e.message : fallback;
+}
+
+// --- normalising -----------------------------------------------------------
+
+function normalizeForgedCard(row: Record<string, unknown>): ForgedCard {
+  return {
+    id: String(row.id ?? ''),
+    title: (row.title as string) ?? '',
+    rarity: isCardRarity(row.rarity) ? row.rarity : 'common',
+    card_type: isCardType(row.card_type) ? row.card_type : 'job',
+    job_number: str(row.job_number),
+    panels: num(row.panels),
+    kw_dc: num(row.kw_dc),
+    annual_kwh: num(row.annual_kwh),
+    difficulty: num(row.difficulty),
+    reward_kw: num(row.reward_kw),
+    location: str(row.location),
+    service_type: str(row.service_type),
+    ability: str(row.ability),
+    flavor: str(row.flavor),
+    art: isForgeArtStatus(row.art) ? row.art : null,
+  };
+}
+
+function normalizeForgeSkip(row: Record<string, unknown>): ForgeSkip {
+  return {
+    jobNumber: str(row.job_number) ?? str(row.jobNumber) ?? 'Unnumbered job',
+    reason: str(row.reason) ?? 'No reason given.',
+  };
+}
+
+function normalizeDraft(row: Record<string, unknown>): CardDraft {
+  const cardType = isCardType(row.card_type) ? row.card_type : 'special';
+  const title = (row.title as string) ?? '';
+  return {
+    id: str(row.id) ?? slugifyCardId(title || 'new card', cardType),
+    set_code: str(row.set_code) ?? SET_CODE,
+    card_type: cardType,
+    title,
+    rarity: isCardRarity(row.rarity) ? row.rarity : 'common',
+    ability: str(row.ability),
+    flavor: str(row.flavor),
+    art_prompt: str(row.art_prompt),
+    job_number: str(row.job_number),
+    location: str(row.location),
+    service_type: str(row.service_type),
+    panels: num(row.panels),
+    kw_dc: num(row.kw_dc),
+    annual_kwh: num(row.annual_kwh),
+    difficulty: num(row.difficulty),
+    reward_kw: num(row.reward_kw),
+    role: str(row.role),
+    power: num(row.power),
+    bonus: num(row.bonus),
+    full_art: Boolean(row.full_art),
+    holo_only: Boolean(row.holo_only),
+  };
+}
+
+// --- the calls -------------------------------------------------------------
+
+/**
+ * Give every card-less project a card.
+ *
+ * ALWAYS PREVIEW FIRST. `dryRun: true` inserts nothing and returns the exact
+ * list it would have written, skips included — which is the only honest way to
+ * put "Create 12 cards" on a button. `generateArt` is separate and costs about
+ * four cents a card, so it stays off unless somebody turns it on, and a dry
+ * run forces it off no matter what the switch says.
+ *
+ * Never throws. `more: true` means the server hit its own cap: the run
+ * succeeded, there is simply more work waiting for the next press.
+ */
+export async function syncJobsToCards(
+  options: { dryRun?: boolean; generateArt?: boolean } = {},
+): Promise<SyncJobsResult> {
+  const dryRun = options.dryRun ?? false;
+  try {
+    const { data, error } = await supabase.functions.invoke('card-forge', {
+      body: {
+        action: 'sync_jobs',
+        dryRun,
+        generateArt: dryRun ? false : (options.generateArt ?? false),
+      },
+    });
+    if (error) return await forgeFailure(error);
+
+    const result = data as Record<string, unknown> | null;
+    const failure = forgePayloadFailure(result);
+    if (failure) return failure;
+
+    const created = Array.isArray(result?.created)
+      ? (result.created as Record<string, unknown>[])
+      : [];
+    const skipped = Array.isArray(result?.skipped)
+      ? (result.skipped as Record<string, unknown>[])
+      : [];
+
+    return {
+      ok: true,
+      dryRun: typeof result?.dryRun === 'boolean' ? result.dryRun : dryRun,
+      created: created.map(normalizeForgedCard),
+      skipped: skipped.map(normalizeForgeSkip),
+      more: Boolean(result?.more),
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      code: 'unavailable',
+      message: thrownMessage(e, 'The job sync could not run.'),
+    };
+  }
+}
+
+/**
+ * Write one card from a sentence. NOTHING IS SAVED.
+ *
+ * The draft comes back for a person to read, edit and save themselves — the
+ * model proposes, an admin publishes. `cardType` and `rarity` are hints the
+ * server is free to ignore, so the response is normalised rather than trusted.
+ */
+export async function draftCard(input: {
+  prompt: string;
+  cardType?: CardType | null;
+  rarity?: CardRarity | null;
+}): Promise<DraftCardResult> {
+  const prompt = str(input.prompt);
+  if (!prompt) {
+    return { ok: false, code: 'unavailable', message: 'Describe the card first.' };
+  }
+  try {
+    const { data, error } = await supabase.functions.invoke('card-forge', {
+      body: {
+        action: 'draft',
+        prompt,
+        ...(input.cardType ? { cardType: input.cardType } : {}),
+        ...(input.rarity ? { rarity: input.rarity } : {}),
+      },
+    });
+    if (error) return await forgeFailure(error);
+
+    const result = data as Record<string, unknown> | null;
+    const failure = forgePayloadFailure(result);
+    if (failure) return failure;
+
+    const raw = result?.draft;
+    if (!raw || typeof raw !== 'object') {
+      return { ok: false, code: 'unavailable', message: 'The forge came back with no card.' };
+    }
+    const draft = normalizeDraft(raw as Record<string, unknown>);
+    if (!draft.title.trim()) {
+      return { ok: false, code: 'unavailable', message: 'The forge came back with no card.' };
+    }
+    return { ok: true, draft };
+  } catch (e) {
+    return {
+      ok: false,
+      code: 'unavailable',
+      message: thrownMessage(e, 'The card could not be drafted.'),
+    };
+  }
+}
+
+/**
+ * The game's keywords and a few cards to write like — CACHED FOR THE SESSION.
+ *
+ * It is a constant list dressed as a request: the same helper line under the
+ * same prompt field, on every open of the sheet. Fetch it once. A failure is
+ * NOT cached, so a bad signal on the first open doesn't poison the whole day.
+ */
+let forgeExamplesCache: { keywords: string[]; examples: ForgeExample[] } | null = null;
+
+export async function fetchForgeExamples(): Promise<ForgeExamplesResult> {
+  if (forgeExamplesCache) {
+    return {
+      ok: true,
+      keywords: forgeExamplesCache.keywords,
+      examples: forgeExamplesCache.examples,
+    };
+  }
+  try {
+    const { data, error } = await supabase.functions.invoke('card-forge', {
+      body: { action: 'examples' },
+    });
+    if (error) return await forgeFailure(error);
+
+    const result = data as Record<string, unknown> | null;
+    const failure = forgePayloadFailure(result);
+    if (failure) return failure;
+
+    const keywords = Array.isArray(result?.keywords)
+      ? (result.keywords as unknown[])
+          .map((word) => str(word))
+          .filter((word): word is string => word !== null)
+      : [];
+    const examples = Array.isArray(result?.examples)
+      ? (result.examples as Record<string, unknown>[]).map((row) => ({
+          title: (row.title as string) ?? '',
+          card_type: isCardType(row.card_type) ? row.card_type : 'special',
+          rarity: isCardRarity(row.rarity) ? row.rarity : 'common',
+          ability: str(row.ability),
+          flavor: str(row.flavor),
+        }))
+      : [];
+
+    forgeExamplesCache = { keywords, examples };
+    return { ok: true, keywords, examples };
+  } catch (e) {
+    return {
+      ok: false,
+      code: 'unavailable',
+      message: thrownMessage(e, 'The keyword list could not be loaded.'),
+    };
+  }
+}
+
+// --- draft to the rest of the app ------------------------------------------
+
+/**
+ * A draft as the editor's save payload.
+ *
+ * `id` is deliberately absent: the draft's id is the model's suggestion, and
+ * letting `saveCard` mint the slug is what makes a collision with an existing
+ * card impossible (`availableId` walks the suffixes). Every type-specific
+ * column is passed straight through — `saveCard` nulls the ones that don't
+ * belong to the chosen type, so a drafted crew card can't smuggle in a panel
+ * count.
+ */
+export function draftToCardInput(draft: CardDraft): CardInput {
+  return {
+    card_type: draft.card_type,
+    title: draft.title,
+    rarity: draft.rarity,
+    ability: draft.ability,
+    flavor: draft.flavor,
+    art_prompt: draft.art_prompt,
+    job_number: draft.job_number,
+    job_id: null,
+    location: draft.location,
+    service_type: draft.service_type,
+    panels: draft.panels,
+    kw_dc: draft.kw_dc,
+    annual_kwh: draft.annual_kwh,
+    difficulty: draft.difficulty,
+    reward_kw: draft.reward_kw,
+    employee_id: null,
+    role: draft.role,
+    power: draft.power,
+    bonus: draft.bonus,
+    full_art: draft.full_art,
+    holo_only: draft.holo_only,
+  };
+}
+
+/** A draft inflated to a `CardRecord`, purely so `TradingCard` can draw it. */
+export function draftToCardRecord(draft: CardDraft): CardRecord {
+  return {
+    id: draft.id,
+    company: COMPANY,
+    set_code: draft.set_code,
+    card_number: null,
+    sort_order: 0,
+    card_type: draft.card_type,
+    title: draft.title,
+    rarity: draft.rarity,
+    ability: draft.ability,
+    flavor: draft.flavor,
+    art_prompt: draft.art_prompt,
+    job_number: draft.job_number,
+    job_id: null,
+    location: draft.location,
+    service_type: draft.service_type,
+    panels: draft.panels,
+    kw_dc: draft.kw_dc,
+    annual_kwh: draft.annual_kwh,
+    difficulty: draft.difficulty,
+    reward_kw: draft.reward_kw,
+    employee_id: null,
+    role: draft.role,
+    power: draft.power,
+    bonus: draft.bonus,
+    full_art: draft.full_art,
+    holo_only: draft.holo_only,
+    art_path: null,
+    version: 1,
+    archived_at: null,
+    created_by: null,
+    created_at: null,
+    updated_at: null,
+  };
+}
+
+/**
+ * THE HANDOFF FROM THE FORGE TO THE EDITOR.
+ *
+ * A draft is a dozen nullable fields including two paragraphs of prose, and
+ * expo-router params are a URL. Serialising it there would mean a query string
+ * long enough to trip a deep link, JSON that has to be re-parsed and
+ * re-validated on the far side, and a browser history entry containing the
+ * whole card. So the draft is left HERE, in the module both screens already
+ * import, and the route carries one flag: `?draft=1`.
+ *
+ * `takeCardDraft` EMPTIES the slot, so a draft seeds the editor exactly once
+ * and a later plain "New card" opens blank. A stash nobody takes (the admin
+ * backed out of the editor) is one object held until the next draft replaces
+ * it.
+ */
+let pendingCardDraft: CardDraft | null = null;
+
+/** The route param the editor looks for. Kept beside the store, not retyped. */
+export const CARD_DRAFT_PARAM = 'draft';
+
+export function stashCardDraft(draft: CardDraft): void {
+  pendingCardDraft = draft;
+}
+
+/** The stashed draft, once. Null when there isn't one. */
+export function takeCardDraft(): CardDraft | null {
+  const draft = pendingCardDraft;
+  pendingCardDraft = null;
+  return draft;
+}
+
+export function clearCardDraft(): void {
+  pendingCardDraft = null;
+}
+
+// ---------------------------------------------------------------------------
 // Presentation helpers (shared by the renderer and the detail screen)
 // ---------------------------------------------------------------------------
 

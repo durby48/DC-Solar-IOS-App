@@ -50,8 +50,10 @@ import {
   archiveCustomer,
   deleteCustomerNote,
   fetchCrmCustomers,
+  fetchCustomerAvatarUrls,
   fetchCustomerById,
   fetchCustomerFinance,
+  fetchCustomerHouseArtUrls,
   fetchCustomerJobs,
   fetchCustomerNotes,
   fetchCustomerSummaries,
@@ -203,6 +205,17 @@ export default function CustomerDetailScreen() {
   );
 
   const [customer, setCustomer] = useState<Customer | null>(null);
+  /**
+   * The header avatar's two signed URLs, resolved exactly the way the CRM
+   * list resolves them: the contact photo first, and behind it the Gemini
+   * cartoon of this customer's property. Initials stay the last resort.
+   *
+   * Batched rather than left to `CustomerAvatar`'s own signing, because the
+   * house art is not a single `createSignedUrl` — it is jobs → job_artwork →
+   * sign, which the component has no business knowing about.
+   */
+  const [avatarUrl, setAvatarUrl] = useState<string | null | undefined>(null);
+  const [houseArtUrl, setHouseArtUrl] = useState<string | null>(null);
   const [jobs, setJobs] = useState<CustomerJob[]>([]);
   const [finance, setFinance] = useState<CustomerFinanceRow[]>([]);
   const [summary, setSummary] = useState<CustomerSummary | null>(null);
@@ -315,6 +328,27 @@ export default function CustomerDetailScreen() {
       address: record.address ?? '',
       notes: record.notes ?? '',
     });
+
+    // The avatar, off the critical path. Neither call throws and neither
+    // gates the screen — a header that draws initials for half a second is
+    // fine; a header that waits three round trips for a picture is not.
+    // Runs inside load(), so a fresh photo upload re-signs both.
+    void Promise.all([
+      fetchCustomerAvatarUrls([record]),
+      fetchCustomerHouseArtUrls([record]),
+    ])
+      .then(([photoUrls, houseUrls]) => {
+        // `null` means "batched, and there is nothing to sign" — the avatar
+        // then stops looking. `undefined` means "we tried and couldn't", and
+        // hands the one remaining photo back to the component's own signing
+        // rather than showing initials for a customer who has a picture.
+        const signed = photoUrls.get(record.id);
+        setAvatarUrl(signed ?? (record.photo_path ? undefined : null));
+        setHouseArtUrl(houseUrls.get(record.id) ?? null);
+      })
+      .catch(() => {
+        // Initials. Same answer as an RLS denial or a dead network.
+      });
 
     // Second wave: both need the job ids the first wave returned.
     const [financeResult, summaryMap] = await Promise.all([
@@ -868,7 +902,12 @@ export default function CustomerDetailScreen() {
                 <ActivityIndicator color={colors.ocean} />
               </View>
             ) : (
-              <CustomerAvatar customer={customer} size={72} />
+              <CustomerAvatar
+                customer={customer}
+                size={72}
+                url={avatarUrl}
+                fallbackUrl={houseArtUrl}
+              />
             )}
           </Pressable>
           <View style={styles.identityBody}>
