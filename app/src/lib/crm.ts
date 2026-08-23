@@ -886,6 +886,7 @@ export async function convertLeadToCustomer(
         project_manager_phone: null,
         completed_on: null,
         module_count: null,
+        module_watts: null,
         job_type: null,
         critter_guard_panels: null,
         has_critter_guard: false,

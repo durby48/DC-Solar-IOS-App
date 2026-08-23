@@ -87,6 +87,8 @@ export default function JobEditorScreen() {
 
   const [saving, setSaving] = useState(false);
   const [moduleCount, setModuleCount] = useState('');
+  // Blank = 400 W (the company standard); only filled in for odd modules.
+  const [moduleWatts, setModuleWatts] = useState('');
   const [jobType, setJobType] = useState<JobType>('R&R');
   const [critterPanels, setCritterPanels] = useState('');
   const [hasCritterGuard, setHasCritterGuard] = useState(false);
@@ -132,10 +134,12 @@ export default function JobEditorScreen() {
         setPmPhone(job.project_manager_phone ?? '');
         const metrics = job as unknown as {
           module_count?: number | null;
+          module_watts?: number | null;
           job_type?: JobType | null;
           critter_guard_panels?: number | null;
           has_critter_guard?: boolean | null;
         };
+        setModuleWatts(metrics.module_watts != null ? String(metrics.module_watts) : '');
         setModuleCount(
           metrics.module_count != null
             ? String(metrics.module_count)
@@ -226,6 +230,15 @@ export default function JobEditorScreen() {
       return;
     }
 
+    // Mirrors the jobs_module_watts_check constraint so the DB never has to
+    // say it — the usual slip is a panel COUNT typed into the wattage box.
+    const wattsText = moduleWatts.replace(/[^0-9]/g, '');
+    const watts = wattsText !== '' ? Number(wattsText) : null;
+    if (watts !== null && (watts < 100 || watts > 1000)) {
+      setError('Module wattage should be between 100 and 1000 W — or leave it blank for 400 W.');
+      return;
+    }
+
     const fields: JobEditableFields = {
       name: name.trim(),
       description: description.trim() || null,
@@ -245,6 +258,8 @@ export default function JobEditorScreen() {
         moduleCount.trim() !== ''
           ? Number(moduleCount.replace(/[^0-9]/g, '')) || null
           : parseModuleCount(name, description),
+      // Null means "assume 400 W" — see the column comment in the migration.
+      module_watts: watts,
       job_type: jobType,
       has_critter_guard: hasCritterGuard,
       // Blank means "the whole array" — metrics fall back to module_count.
@@ -428,6 +443,19 @@ export default function JobEditorScreen() {
           <AppText variant="caption" color={colors.textMuted} style={styles.hint}>
             Drives the panel totals on the pipeline header and the estimated hours on each project
             card.
+          </AppText>
+
+          <Field
+            label="Module wattage (W)"
+            value={moduleWatts}
+            onChangeText={setModuleWatts}
+            placeholder="Leave blank for 400 W"
+            keyboardType="number-pad"
+            style={styles.tightField}
+          />
+          <AppText variant="caption" color={colors.textMuted} style={styles.hint}>
+            Only set this when the job runs something other than 400 W modules. Panels × watts is
+            the array size in kW on the job&apos;s trading card.
           </AppText>
 
           {/* Critter guard is a FLAG, not a job type — most of it is installed

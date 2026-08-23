@@ -113,7 +113,7 @@ Fitted against the 26 printed job cards. `panels` comes from
 
 | Quantity | Rule |
 |---|---|
-| `kw_dc` | `panels × 0.4` (400 W modules), one decimal. Null on Critter Guard jobs. |
+| `kw_dc` | `panels × module_watts ÷ 1000`, one decimal, where a null `jobs.module_watts` means **400 W** (the company standard). Null on Critter Guard jobs. |
 | `annual_kwh` | `kw_dc × 1400` (KC region), rounded to the nearest **100**, or nearest 10 under 1,000. That is what keeps The One-Panel Wonder at 560 instead of a self-important 600. |
 | `difficulty` | By panels: **≤4 → 1, 5–19 → 2, 20–28 → 3, 29–36 → 4, 37–44 → 5, 45–48 → 6, ≥49 → 7.** Long Haul adds 1, capped at 7. |
 | `reward_kw` | `max(1, round(kw_dc))`. |
@@ -149,23 +149,44 @@ they should.
 
 ### How well it fits
 
-Run over the jobs behind all 26 printed job cards, the rules reproduce **20
-exactly**. The six residuals, every one of them explained:
+Run over the live job records behind the 26 printed job cards
+(`scripts/tcg/calibrate.mjs`, 2026-08-22), the rules reproduce **20 of the 24
+that still have a job record exactly**. DC-26024 and DC-26025 were deleted from
+`jobs` after the printing (a card outlives its job, so the cards are fine — there
+is just nothing to diff them against). The four residuals, every one of them
+explained:
 
 | Card | Difference | Why |
 |---|---|---|
 | DC-26004 *Over The Top Restoration* | everything | The Classified card. No address, no panel count, hand-redacted on purpose. Nothing automatic can or should reproduce it. |
 | DC-26020 *The Parkville IQ8* | panels 28 vs 38 | The **job record** says 28 modules; the card was printed from 38. Data drift, not a rule miss. |
-| DC-26019 *The Oberlin Beast* | 15.6 kW vs 23.4 | **600 W modules.** `jobs` has no module-wattage column, so `panels × 0.4` cannot know. See below. |
 | DC-26011 *The Wichita Road Trip* | reward 4 vs 5 | Hand-tuned +1 for the drive. |
 | DC-26023 *Salina, Part II* | difficulty 3 vs 2, uncommon vs common | The only genuine disagreement: it is a Long Haul that was printed as routine. Its own card text (*"Sequel: … difficulty −1"*) is the joke about that. |
-| DC-26024 *The Trimble Ground Mount* | common vs uncommon | Hand-bumped for *Feet on the Ground*. |
 
-**Non-400 W modules.** If a job runs 600 W class modules like the Oberlin Beast,
-the sync will under-rate it, because the panel wattage is not in the database.
-The fix is one edit on the card afterwards (`kw_dc`, and the rest follows) — the
-same manual step the original set took. Adding a `module_watts` column to `jobs`
-would remove the residual entirely, and that is the right long-term answer.
+Two earlier residuals are gone: DC-26019 *The Oberlin Beast* (15.6 kW vs 23.4)
+fits since `jobs.module_watts` exists and carries 600 for it — see below — and
+DC-26024 *The Trimble Ground Mount* (hand-bumped to uncommon for *Feet on the
+Ground*) no longer has a job record to compare against.
+
+**Non-400 W modules.** `jobs.module_watts` (migration
+`2026-08-22_module_watts.sql`) is the wattage per module, and **null means
+400 W** — the column is deliberately not defaulted, so a job nobody checked
+stays distinguishable from one somebody did. It is set in the job editor under
+"Modules / panels", and only needs setting when a job runs something other than
+the standard module. DC-26019 carries 600, which is what makes the Beast
+reproduce; a future 600 W job needs the same one field filled in before the
+sync runs, or its card comes out rated as 400 W panels and needs the `kw_dc`
+hand-edit the original set took.
+
+### Re-running the fit
+
+`node scripts/tcg/calibrate.mjs` runs the function's own `statsForJob()` —
+loaded from `index.ts` itself, not a copy of the rules — over the live job
+record behind every printed job card and prints a row per card with the
+residuals marked. Run it after touching the rules, `cityOf()`, or the job data
+they read; the residual list it prints should match the table above. It needs
+the service-role key file outside the repo (same as `import.mjs`) and writes
+nothing.
 
 ---
 

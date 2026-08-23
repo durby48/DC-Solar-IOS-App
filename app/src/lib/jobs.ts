@@ -200,6 +200,12 @@ export interface JobEditableFields {
   completed_on: string | null;
   /** Panels on this job — seeds the company metrics + hours forecast (migration 20). */
   module_count: number | null;
+  /**
+   * Nameplate watts per module. Null means "assume 400 W", the company
+   * standard — set only for jobs that run something else (DC-26019 is 600 W).
+   * Sizes the array in kW wherever capacity is reported (card-forge).
+   */
+  module_watts: number | null;
   /** R&R | Reinstall | Install | Critter Guard | Other (migration 20). */
   job_type: JobType | null;
   /**

@@ -83,3 +83,21 @@ Once the in-app editor ships, this script is a bootstrap, not a sync.
   `refPerson` are not imported, and the script prints why. Any field the script
   does not recognise is printed as a warning rather than silently ignored, so a
   future edit to `cards.json` cannot quietly lose data.
+
+## Calibration (`calibrate.mjs`)
+
+`node scripts/tcg/calibrate.mjs` checks that card-forge's deterministic stat
+rules still reproduce the printed job cards. It loads `statsForJob()` from
+`supabase/functions/card-forge/index.ts` itself (Node's built-in TypeScript
+type-stripping, no install), reads the live `jobs` and `cards` rows with the
+service-role key from the same secrets folder as `import.mjs`, and prints one
+row per printed job card with any difference marked `MISS`. The residuals it
+reports are explained in `docs/CARD_FORGE.md`, "How well it fits".
+
+```bash
+node scripts/tcg/calibrate.mjs                 # every printed job card
+node scripts/tcg/calibrate.mjs --job DC-26019  # one job
+node scripts/tcg/calibrate.mjs --misses        # residuals only
+```
+
+Read-only. Addresses are read (the city sanitiser needs them) but never printed.

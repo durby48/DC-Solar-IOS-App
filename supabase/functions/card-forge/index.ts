@@ -60,6 +60,12 @@ const SET_CODE = 'DCS26';
 const TEXT_MODEL = 'gemini-2.5-flash';
 /** Never sync more than this in one call — see the `more` flag in the reply. */
 const SYNC_LIMIT = 25;
+/**
+ * Nameplate watts assumed when `jobs.module_watts` is null — the company's
+ * standard module. NULL IS SEMANTIC there ("nobody said otherwise"), which is
+ * why the default lives here and not in the column.
+ */
+const DEFAULT_MODULE_WATTS = 400;
 /** Gemini calls in flight at once. 25 sequential calls outruns the wall clock. */
 const CONCURRENCY = 4;
 /**
@@ -370,6 +376,8 @@ interface JobRow {
   stage: string | null;
   job_type: string | null;
   module_count: number | null;
+  /** Watts per module; null means DEFAULT_MODULE_WATTS (migration 2026-08-22_module_watts). */
+  module_watts: number | null;
   has_critter_guard: boolean | null;
   critter_guard_panels: number | null;
   completed_on: string | null;
@@ -458,7 +466,9 @@ function statsForJob(job: JobRow): JobStats {
   }
 
   // --- The ordinary case ----------------------------------------------------
-  const kwDc = round1(panels * 0.4);
+  // panels × nameplate watts. The Oberlin Beast is 39 panels of 600 W, which
+  // is 23.4 kWdc as contracted — not the 15.6 a flat 0.4 would give it.
+  const kwDc = round1((panels * (job.module_watts ?? DEFAULT_MODULE_WATTS)) / 1000);
   const difficulty = Math.min(7, difficultyForPanels(panels) + (longHaul ? 1 : 0));
 
   let rarity = rarityForPanels(panels);
@@ -728,6 +738,7 @@ function buildJobPrompt(job: JobRow, stats: JobStats, examples: ExampleCard[]): 
     serviceType: stats.service_type,
     location: stats.location,
     panels: stats.panels,
+    moduleWatts: stats.panels === null ? null : (job.module_watts ?? DEFAULT_MODULE_WATTS),
     kWdc: stats.kw_dc,
     annualKWh: stats.annual_kwh,
     difficulty: stats.difficulty,
@@ -977,7 +988,7 @@ Deno.serve(async (req) => {
       // never read can ever leak onto a card.
       const { data: jobRows, error: jobErr } = await admin
         .from('jobs')
-        .select('id, job_number, address, stage, job_type, module_count, has_critter_guard, critter_guard_panels, completed_on, is_internal')
+        .select('id, job_number, address, stage, job_type, module_count, module_watts, has_critter_guard, critter_guard_panels, completed_on, is_internal')
         .eq('company', COMPANY)
         .order('job_number', { ascending: true });
       if (jobErr) return fail(500, 'server_error', `Could not read the job board: ${jobErr.message}`);
