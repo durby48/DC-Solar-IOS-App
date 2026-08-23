@@ -32,6 +32,7 @@ import {
 import { getDocumentUrl } from '@/lib/data';
 import { viewDocument } from '@/lib/pdf';
 import { clearRoleCache } from '@/lib/role';
+import { resetToLogin, signOutAndLeave } from '@/lib/signOut';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -180,11 +181,7 @@ export default function CustomerScreen() {
     }
   };
 
-  const signOut = async () => {
-    await supabase.auth.signOut();
-    clearRoleCache();
-    router.replace('/');
-  };
+  const signOut = () => signOutAndLeave(navigation);
 
   const remove = async () => {
     setBusy(true);
@@ -193,7 +190,7 @@ export default function CustomerScreen() {
     setBusy(false);
     if (result.ok) {
       clearRoleCache();
-      router.replace('/');
+      resetToLogin(navigation);
     } else {
       setError(result.message);
     }

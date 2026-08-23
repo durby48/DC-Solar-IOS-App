@@ -1,4 +1,4 @@
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import { setStatusBarStyle } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, useWindowDimensions, View } from 'react-native';
@@ -28,6 +28,7 @@ import { visibleGroups, visibleItems } from '@/lib/hub';
 import { type Job } from '@/lib/types';
 import { registerPushToken, scheduleJobReminders } from '@/lib/notifications';
 import { clearRoleCache, useRoleGate } from '@/lib/role';
+import { resetToLogin, signOutAndLeave } from '@/lib/signOut';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -56,6 +57,7 @@ const WIDE_BREAKPOINT = 900;
 
 export default function HomeScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { width } = useWindowDimensions();
   const gate = useRoleGate();
   /**
@@ -153,16 +155,10 @@ export default function HomeScreen() {
     void registerPushToken(sessionEmail);
   }, [sessionEmail, jobs]);
 
-  const signOut = async () => {
-    try {
-      await supabase.auth.signOut();
-    } catch {
-      // Signed out already, or no session to end — the destination is the
-      // same either way.
-    }
-    clearRoleCache();
-    router.replace('/');
-  };
+  // Shared helper: ends the session (with a timeout) and resets the ROOT
+  // stack to the login route. `router.replace('/')` from inside the tabs
+  // resolves to the Home tab, which is why the old button looked dead.
+  const signOut = () => signOutAndLeave(navigation);
 
   const removeAccount = async () => {
     setBusy(true);
@@ -171,7 +167,7 @@ export default function HomeScreen() {
     setBusy(false);
     if (result.ok) {
       clearRoleCache();
-      router.replace('/');
+      resetToLogin(navigation);
     } else {
       setDeleteError(result.message);
     }
