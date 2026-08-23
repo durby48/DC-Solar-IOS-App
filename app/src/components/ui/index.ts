@@ -28,6 +28,7 @@ export { Button, type ButtonSize, type ButtonVariant } from './Button';
 export { Chip, type ChipTone } from './Chip';
 export { Pill } from './Pill';
 export { ListRow } from './ListRow';
+export { WheelPicker, WheelPickerSheet, type WheelOption } from './WheelPicker';
 
 // Data display
 export { Tile, type TileTone } from './Tile';

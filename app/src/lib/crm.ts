@@ -37,7 +37,15 @@ import { type Customer } from '@/lib/types';
 
 const COMPANY = 'dc-solar';
 const PHOTO_BUCKET = 'job-photos';
+/** Where the Gemini edge function parks each job's cartoon of the house. */
+const ART_BUCKET = 'property-art';
 const SIGNED_URL_TTL = 3600;
+/**
+ * Anything interpolated into a PostgREST `or=` / `in.()` filter is checked
+ * against this first — a comma or a dot inside an id changes what the filter
+ * MEANS, not just what it matches.
+ */
+const UUID_RE = /^[0-9a-fA-F-]{36}$/;
 
 /**
  * THE customer column list. Before 2026-08-22 this was written out by hand in
@@ -392,6 +400,97 @@ export async function fetchCustomerAvatarUrls(
   return urls;
 }
 
+/**
+ * The house, when there is no face: signed `property-art` URLs keyed by
+ * CUSTOMER id, for customers with no `photo_path` of their own.
+ *
+ * Most customers will never have a contact photo — nobody stops to take one
+ * — but almost every one of them has a job, and every job gets a cartoon of
+ * its actual property drawn by the `property-art` edge function. That picture
+ * is a far better row-glance than two grey initials, so it becomes the
+ * avatar's fallback.
+ *
+ * THREE ROUND TRIPS FOR THE WHOLE LIST, NEVER ONE PER ROW: `jobs` (id →
+ * customer), `job_artwork` (the ready rows for those jobs), then ONE
+ * `createSignedUrls`. Same shape as `fetchArtworkUrls` in `lib/artwork.ts`,
+ * which does the job→art half of this for the pipeline.
+ *
+ * A customer with several jobs gets their NEWEST ready artwork — that is the
+ * property they are currently having worked on.
+ *
+ * Never throws. An empty Map means "draw initials", which is also what a
+ * missing table, an RLS denial and a dead network mean.
+ */
+export async function fetchCustomerHouseArtUrls(
+  customers: { id: string; photo_path?: string | null }[],
+): Promise<Map<string, string>> {
+  const urls = new Map<string, string>();
+  try {
+    const needy = customers
+      .filter((c) => !(typeof c.photo_path === 'string' && c.photo_path.length > 0))
+      .map((c) => c.id)
+      .filter((id) => UUID_RE.test(id));
+    if (needy.length === 0) return urls;
+
+    const { data: jobRows, error: jobsError } = await supabase
+      .from('jobs')
+      .select('id, customer_id')
+      .eq('company', COMPANY)
+      .in('customer_id', needy);
+    if (jobsError || !jobRows || jobRows.length === 0) return urls;
+
+    /** job id → customer id. */
+    const ownerOf = new Map<string, string>();
+    for (const row of jobRows as { id: string; customer_id: string | null }[]) {
+      if (row.customer_id) ownerOf.set(row.id, row.customer_id);
+    }
+    if (ownerOf.size === 0) return urls;
+
+    const { data: artRows, error: artError } = await supabase
+      .from('job_artwork')
+      .select('job_id, art_path, updated_at, created_at')
+      .eq('company', COMPANY)
+      .eq('status', 'ready')
+      .in('job_id', [...ownerOf.keys()]);
+    if (artError || !artRows) return urls;
+
+    const newest = new Map<string, { path: string; at: string }>();
+    for (const row of artRows as {
+      job_id: string;
+      art_path: string | null;
+      updated_at: string | null;
+      created_at: string | null;
+    }[]) {
+      const customerId = ownerOf.get(row.job_id);
+      const path = row.art_path;
+      if (!customerId || !path) continue;
+      // ISO timestamps compare correctly as strings.
+      const at = row.updated_at ?? row.created_at ?? '';
+      const held = newest.get(customerId);
+      if (!held || at > held.at) newest.set(customerId, { path, at });
+    }
+    if (newest.size === 0) return urls;
+
+    const picks = [...newest.entries()];
+    const { data, error } = await supabase.storage
+      .from(ART_BUCKET)
+      .createSignedUrls(
+        picks.map(([, art]) => art.path),
+        SIGNED_URL_TTL,
+      );
+    if (error || !data) return urls;
+
+    data.forEach((entry, index) => {
+      const signed = (entry as { signedUrl?: string | null }).signedUrl;
+      const pick = picks[index];
+      if (signed && pick) urls.set(pick[0], signed);
+    });
+  } catch {
+    // Fall through with whatever we managed to sign — initials are fine.
+  }
+  return urls;
+}
+
 // ---------------------------------------------------------------------------
 // Money summaries
 // ---------------------------------------------------------------------------
@@ -513,8 +612,6 @@ export interface CustomerFinanceRow {
 export type CustomerFinanceResult =
   | { status: 'ok'; entries: CustomerFinanceRow[] }
   | { status: 'unavailable' };
-
-const UUID_RE = /^[0-9a-fA-F-]{36}$/;
 
 /**
  * Every estimate / contract / invoice / payment that belongs to this customer,

@@ -22,16 +22,29 @@ import { type Customer } from '@/lib/types';
  * miserable for a CRM list. Callers rendering many at once should batch with
  * `fetchCustomerAvatarUrls()` (`lib/crm.ts`) and hand the signed URL in — this
  * component then skips its own signing entirely.
+ *
+ * THE HOUSE BEFORE THE INITIALS. Hardly anybody has a contact photo, but
+ * nearly every customer has a job, and every job gets a cartoon of its actual
+ * property from the `property-art` edge function. Pass that signed URL as
+ * `fallbackUrl` (batch it with `fetchCustomerHouseArtUrls()`) and a row shows
+ * the person's house instead of two grey letters. Order is always:
+ * photo → house → initials.
  */
 export function CustomerAvatar({
   customer,
   size = 40,
   url: signedUrl,
+  fallbackUrl,
 }: {
   customer: Pick<Customer, 'id' | 'name'> & { photo_path?: string | null };
   size?: number;
   /** Pre-signed URL from a batched `createSignedUrls` call. */
   url?: string | null;
+  /**
+   * Shown when there is no contact photo — the Gemini cartoon of this
+   * customer's property. Initials remain the last resort.
+   */
+  fallbackUrl?: string | null;
 }) {
   const [ownUrl, setOwnUrl] = useState<string | null>(null);
   const path = customer.photo_path ?? null;
@@ -53,7 +66,9 @@ export function CustomerAvatar({
     };
   }, [path, batched]);
 
-  const url = batched ? (signedUrl ?? null) : ownUrl;
+  const photoUrl = batched ? (signedUrl ?? null) : ownUrl;
+  const url = photoUrl ?? fallbackUrl ?? null;
+  const isHouse = !photoUrl && !!fallbackUrl;
 
   const initials = (customer.name ?? '?')
     .split(/\s+/)
@@ -83,6 +98,9 @@ export function CustomerAvatar({
         contentFit="cover"
         cachePolicy="memory-disk"
         transition={150}
+        accessibilityLabel={
+          isHouse ? `${customer.name}'s property` : `${customer.name}'s photo`
+        }
       />
     );
   }

@@ -15,13 +15,15 @@ import {
 } from 'react-native';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { Chip, WheelPickerSheet, type WheelOption } from '@/components/ui';
+import { colors, radii, shadows, spacing, typography } from '@/constants/theme';
 import { fetchEnrolledCustomerIds } from '@/lib/account';
 import {
   addCustomer,
   convertLeadToCustomer,
   fetchCrmCustomers,
   fetchCustomerAvatarUrls,
+  fetchCustomerHouseArtUrls,
   fetchCustomerSummaries,
   fetchUnreadByCustomer,
   type CustomerSummary,
@@ -48,23 +50,49 @@ import { type Customer } from '@/lib/types';
  * leads have not been turned into anybody yet.
  */
 
-type SortKey = 'name' | 'recent' | 'balance' | 'jobs';
-type FilterKey = 'openJobs' | 'balance' | 'inPortal' | 'notInPortal' | 'leads' | 'archived';
+type SortKey = 'name' | 'nameDesc' | 'recent' | 'balance' | 'jobs';
+type FilterKey =
+  | 'all'
+  | 'openJobs'
+  | 'balance'
+  | 'inPortal'
+  | 'notInPortal'
+  | 'leads'
+  | 'archived';
 
-const SORTS: { key: SortKey; label: string; needsMetrics: boolean }[] = [
-  { key: 'name', label: 'Name', needsMetrics: false },
-  { key: 'recent', label: 'Recent', needsMetrics: true },
-  { key: 'balance', label: 'Balance', needsMetrics: true },
-  { key: 'jobs', label: 'Open jobs', needsMetrics: true },
+/**
+ * TWO WHEELS, NOT TWO ROWS OF CHIPS (2026-08-22).
+ *
+ * Sort and Show used to be eleven chips wrapping over three lines above the
+ * list — on a phone that was most of the first screenful before a single
+ * customer appeared. They are now one `Sort ▾` chip and one `Show ▾` chip,
+ * each opening a scroll wheel in a bottom sheet, and each carrying its
+ * current choice in its own label so nothing is hidden behind the tap.
+ *
+ * `Show` became SINGLE-select in the move. The old multi-select could
+ * express combinations nobody used ("in portal AND balance due") while
+ * "in portal AND not in portal" had to be special-cased to stop it returning
+ * an empty list. One choice, `all` by default.
+ *
+ * `needsMetrics` options are dropped from the wheel for viewers, because
+ * `crm_customer_summary` returns them zero rows — see `hasMetrics` below.
+ */
+const SORTS: { value: SortKey; label: string; needsMetrics: boolean }[] = [
+  { value: 'name', label: 'Name A–Z', needsMetrics: false },
+  { value: 'nameDesc', label: 'Name Z–A', needsMetrics: false },
+  { value: 'recent', label: 'Recent activity', needsMetrics: true },
+  { value: 'balance', label: 'Balance owed', needsMetrics: true },
+  { value: 'jobs', label: 'Open jobs', needsMetrics: true },
 ];
 
-const FILTERS: { key: FilterKey; label: string; needsMetrics: boolean }[] = [
-  { key: 'openJobs', label: 'Open jobs', needsMetrics: true },
-  { key: 'balance', label: 'Balance due', needsMetrics: true },
-  { key: 'inPortal', label: 'In portal', needsMetrics: false },
-  { key: 'notInPortal', label: 'Not in portal', needsMetrics: false },
-  { key: 'leads', label: 'Leads', needsMetrics: false },
-  { key: 'archived', label: 'Archived', needsMetrics: false },
+const FILTERS: { value: FilterKey; label: string; needsMetrics: boolean }[] = [
+  { value: 'all', label: 'All customers', needsMetrics: false },
+  { value: 'openJobs', label: 'Has open jobs', needsMetrics: true },
+  { value: 'balance', label: 'Balance due', needsMetrics: true },
+  { value: 'inPortal', label: 'In portal', needsMetrics: false },
+  { value: 'notInPortal', label: 'Not in portal', needsMetrics: false },
+  { value: 'leads', label: 'Leads', needsMetrics: false },
+  { value: 'archived', label: 'Archived', needsMetrics: false },
 ];
 
 function money(amount: number): string {
@@ -117,7 +145,16 @@ interface FormState {
 
 const EMPTY_FORM: FormState = { name: '', phone: '', email: '', address: '', notes: '' };
 
-export function CustomerList() {
+export function CustomerList({
+  onSummaryChange,
+}: {
+  /**
+   * Reports the one-line count ("18 customers") so the tab shell can render
+   * it centred under the screen title. Must be a stable identity — pass a
+   * `useState` setter or a `useCallback`.
+   */
+  onSummaryChange?: (summary: string | null) => void;
+} = {}) {
   const router = useRouter();
   const auth = useAuthState();
   const role = useRole();
@@ -127,6 +164,7 @@ export function CustomerList() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [summaries, setSummaries] = useState<Map<string, CustomerSummary>>(new Map());
   const [avatarUrls, setAvatarUrls] = useState<Map<string, string>>(new Map());
+  const [houseArt, setHouseArt] = useState<Map<string, string>>(new Map());
   const [enrolled, setEnrolled] = useState<Set<string>>(new Set());
   const [unread, setUnread] = useState<Map<string, number>>(new Map());
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -134,7 +172,9 @@ export function CustomerList() {
 
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortKey>('name');
-  const [filters, setFilters] = useState<Set<FilterKey>>(new Set());
+  const [filter, setFilter] = useState<FilterKey>('all');
+  const [sortOpen, setSortOpen] = useState(false);
+  const [showOpen, setShowOpen] = useState(false);
 
   const [openLeadId, setOpenLeadId] = useState<string | null>(null);
   const [convertingId, setConvertingId] = useState<string | null>(null);
@@ -154,9 +194,9 @@ export function CustomerList() {
    * whole page and the avatars from ONE batched `createSignedUrls`, never one
    * request per row.
    *
-   * Archived customers are fetched too and hidden client-side, so flipping the
-   * Archived chip (which is how you find the row behind a duplicate-name
-   * error) never costs a round trip.
+   * Archived customers are fetched too and hidden client-side, so picking
+   * Archived on the Show wheel (which is how you find the row behind a
+   * duplicate-name error) never costs a round trip.
    */
   const load = useCallback(async () => {
     const [customersRes, enrolledIds, unreadCounts, leadRows] = await Promise.all([
@@ -174,6 +214,7 @@ export function CustomerList() {
       setCustomers([]);
       setSummaries(new Map());
       setAvatarUrls(new Map());
+      setHouseArt(new Map());
       setListState('unavailable');
       return;
     }
@@ -182,12 +223,14 @@ export function CustomerList() {
     setCustomers(rows);
     setListState('ok');
 
-    const [summaryMap, urlMap] = await Promise.all([
+    const [summaryMap, urlMap, artMap] = await Promise.all([
       fetchCustomerSummaries(rows.map((c) => c.id)),
       fetchCustomerAvatarUrls(rows),
+      fetchCustomerHouseArtUrls(rows),
     ]);
     setSummaries(summaryMap);
     setAvatarUrls(urlMap);
+    setHouseArt(artMap);
   }, []);
 
   // One loader, not two: `useFocusEffect` re-runs whenever its callback
@@ -209,37 +252,52 @@ export function CustomerList() {
   /**
    * Money metrics only exist for admins: `crm_customer_summary` returns zero
    * rows to everyone else by design, so an empty map means "no money strip",
-   * not "loading failed". Sort and filter chips that depend on it hide.
+   * not "loading failed". Wheel rows that depend on it are dropped.
    */
   const hasMetrics = summaries.size > 0;
-  const leadsOnly = filters.has('leads');
+  const leadsOnly = filter === 'leads';
 
-  const toggleFilter = (key: FilterKey) => {
-    setFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      // "In portal" and "Not in portal" cancel each other out; picking one
-      // clears the other rather than showing an empty list.
-      if (key === 'inPortal') next.delete('notInPortal');
-      if (key === 'notInPortal') next.delete('inPortal');
-      return next;
-    });
-  };
+  const sortOptions = useMemo<WheelOption<SortKey>[]>(
+    () =>
+      SORTS.filter((o) => !o.needsMetrics || hasMetrics).map(({ value, label }) => ({
+        value,
+        label,
+      })),
+    [hasMetrics],
+  );
+  const filterOptions = useMemo<WheelOption<FilterKey>[]>(
+    () =>
+      FILTERS.filter((o) => !o.needsMetrics || hasMetrics).map(({ value, label }) => ({
+        value,
+        label,
+      })),
+    [hasMetrics],
+  );
+
+  const sortLabel = SORTS.find((o) => o.value === sort)?.label ?? 'Name A–Z';
+  const filterLabel = FILTERS.find((o) => o.value === filter)?.label ?? 'All customers';
+
+  // A viewer never gets money rows back, so a money-shaped choice would sit in
+  // the chip label while its row was missing from the wheel. Fall back.
+  useEffect(() => {
+    if (hasMetrics) return;
+    if (SORTS.find((o) => o.value === sort)?.needsMetrics) setSort('name');
+    if (FILTERS.find((o) => o.value === filter)?.needsMetrics) setFilter('all');
+  }, [hasMetrics, sort, filter]);
 
   const visible = useMemo(() => {
     if (leadsOnly) return [];
-    const wantArchived = filters.has('archived');
+    const wantArchived = filter === 'archived';
     let rows = customers.filter((c) => (wantArchived ? c.archived_at != null : c.archived_at == null));
 
-    if (filters.has('openJobs')) {
+    if (filter === 'openJobs') {
       rows = rows.filter((c) => (summaries.get(c.id)?.openJobs ?? 0) > 0);
     }
-    if (filters.has('balance')) {
+    if (filter === 'balance') {
       rows = rows.filter((c) => (summaries.get(c.id)?.balance ?? 0) > 0.005);
     }
-    if (filters.has('inPortal')) rows = rows.filter((c) => enrolled.has(c.id));
-    if (filters.has('notInPortal')) rows = rows.filter((c) => !enrolled.has(c.id));
+    if (filter === 'inPortal') rows = rows.filter((c) => enrolled.has(c.id));
+    if (filter === 'notInPortal') rows = rows.filter((c) => !enrolled.has(c.id));
 
     const q = search.trim().toLowerCase();
     if (q) {
@@ -264,6 +322,8 @@ export function CustomerList() {
     const sorted = [...rows];
     if (sort === 'name') {
       sorted.sort(byName);
+    } else if (sort === 'nameDesc') {
+      sorted.sort((a, b) => byName(b, a));
     } else if (sort === 'recent') {
       sorted.sort((a, b) => {
         const ta = summaries.get(a.id)?.lastActivityAt ?? '';
@@ -285,7 +345,25 @@ export function CustomerList() {
       });
     }
     return sorted;
-  }, [customers, summaries, enrolled, filters, search, sort, leadsOnly]);
+  }, [customers, summaries, enrolled, filter, search, sort, leadsOnly]);
+
+  /**
+   * The count line the tab shell renders under the centred title. Kept here
+   * rather than in the route file because this is the only place that knows
+   * what survived the filter.
+   */
+  const summaryLine = useMemo(() => {
+    if (auth !== 'in' || listState !== 'ok') return null;
+    if (leadsOnly) return leads.length === 1 ? '1 lead' : `${leads.length} leads`;
+    if (filter === 'archived') {
+      return visible.length === 1 ? '1 archived customer' : `${visible.length} archived`;
+    }
+    return visible.length === 1 ? '1 customer' : `${visible.length} customers`;
+  }, [auth, listState, leadsOnly, filter, leads.length, visible.length]);
+
+  useEffect(() => {
+    onSummaryChange?.(summaryLine);
+  }, [onSummaryChange, summaryLine]);
 
   const submitAdd = async () => {
     setStatus(null);
@@ -425,8 +503,9 @@ export function CustomerList() {
         style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
         <CustomerAvatar
           customer={customer}
-          size={38}
+          size={44}
           url={avatarUrls.get(customer.id) ?? null}
+          fallbackUrl={houseArt.get(customer.id) ?? null}
         />
         <View style={styles.rowBody}>
           <View style={styles.rowTitleLine}>
@@ -458,59 +537,46 @@ export function CustomerList() {
   const header = (
     <View style={styles.headerArea}>
       <View style={styles.searchWrap}>
-        <Ionicons name="search" size={16} color={colors.inkSoft} />
+        <Ionicons name="search" size={18} color={colors.textMuted} />
         <TextInput
           value={search}
           onChangeText={setSearch}
-          placeholder="Search name, phone, email or address"
-          placeholderTextColor={colors.inkSoft}
+          placeholder="Search name, phone or address"
+          placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
+          returnKeyType="search"
+          numberOfLines={1}
+          accessibilityLabel="Search customers"
           style={styles.searchInput}
         />
         {search ? (
-          <Pressable onPress={() => setSearch('')} hitSlop={8}>
-            <Ionicons name="close-circle" size={16} color={colors.inkSoft} />
+          <Pressable
+            onPress={() => setSearch('')}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Clear search"
+            style={({ pressed }) => (pressed ? styles.pressed : null)}>
+            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
           </Pressable>
         ) : null}
       </View>
 
-      <View style={styles.chipRow}>
-        <Text style={styles.chipRowLabel}>Sort</Text>
-        {SORTS.filter((s) => !s.needsMetrics || hasMetrics).map((option) => {
-          const active = sort === option.key;
-          return (
-            <Pressable
-              key={option.key}
-              onPress={() => setSort(option.key)}
-              style={({ pressed }) => [
-                styles.chip,
-                active && styles.chipActive,
-                pressed && styles.pressed,
-              ]}>
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>{option.label}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
-      <View style={styles.chipRow}>
-        <Text style={styles.chipRowLabel}>Show</Text>
-        {FILTERS.filter((f) => !f.needsMetrics || hasMetrics).map((option) => {
-          const active = filters.has(option.key);
-          return (
-            <Pressable
-              key={option.key}
-              onPress={() => toggleFilter(option.key)}
-              style={({ pressed }) => [
-                styles.chip,
-                active && styles.chipActive,
-                pressed && styles.pressed,
-              ]}>
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>{option.label}</Text>
-            </Pressable>
-          );
-        })}
+      <View style={styles.controlRow}>
+        <Chip
+          label={`Sort: ${sortLabel} ▾`}
+          icon="swap-vertical"
+          onPress={() => setSortOpen(true)}
+          style={styles.controlChip}
+        />
+        <Chip
+          label={`Show: ${filterLabel} ▾`}
+          icon="funnel"
+          tone="ocean"
+          selected={filter !== 'all'}
+          onPress={() => setShowOpen(true)}
+          style={styles.controlChip}
+        />
       </View>
 
       {leads.length > 0 ? (
@@ -524,7 +590,7 @@ export function CustomerList() {
 
       {!leadsOnly && listState === 'ok' ? (
         <Text style={styles.sectionTitle}>
-          {filters.has('archived') ? 'Archived' : 'Customers'} · {visible.length}
+          {filter === 'archived' ? 'Archived' : 'Customers'}
         </Text>
       ) : null}
     </View>
@@ -660,44 +726,68 @@ export function CustomerList() {
   }
 
   return (
-    <FlatList
-      style={styles.screen}
-      data={visible}
-      keyExtractor={(item) => item.id}
-      renderItem={({ item }) => renderRow(item)}
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
-      ListHeaderComponent={header}
-      ListFooterComponent={footer}
-      ItemSeparatorComponent={() => <View style={styles.separator} />}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.ocean} />
-      }
-      ListEmptyComponent={
-        listState === 'loading' ? (
-          <View style={styles.centerCard}>
-            <ActivityIndicator color={colors.ocean} />
-          </View>
-        ) : listState === 'unavailable' ? (
-          <View style={styles.centerCard}>
-            <Text style={styles.promptText}>Customers are unavailable right now.</Text>
-          </View>
-        ) : leadsOnly ? null : (
-          <View style={styles.centerCard}>
-            <Ionicons name="people" size={22} color={colors.inkSoft} />
-            <Text style={styles.promptText}>
-              {search.trim()
-                ? 'No customers match that search'
-                : filters.size > 0
-                  ? 'No customers match those filters'
-                  : isAdmin
-                    ? 'No customers yet — add the first one'
-                    : 'No customers yet'}
-            </Text>
-          </View>
-        )
-      }
-    />
+    <>
+      <FlatList
+        style={styles.screen}
+        data={visible}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => renderRow(item)}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={header}
+        ListFooterComponent={footer}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.ocean} />
+        }
+        ListEmptyComponent={
+          listState === 'loading' ? (
+            <View style={styles.centerCard}>
+              <ActivityIndicator color={colors.ocean} />
+            </View>
+          ) : listState === 'unavailable' ? (
+            <View style={styles.centerCard}>
+              <Text style={styles.promptText}>Customers are unavailable right now.</Text>
+            </View>
+          ) : leadsOnly ? null : (
+            <View style={styles.centerCard}>
+              <Ionicons name="people" size={22} color={colors.inkSoft} />
+              <Text style={styles.promptText}>
+                {search.trim()
+                  ? 'No customers match that search'
+                  : filter !== 'all'
+                    ? 'No customers match that filter'
+                    : isAdmin
+                      ? 'No customers yet — add the first one'
+                      : 'No customers yet'}
+              </Text>
+            </View>
+          )
+        }
+      />
+
+      {/*
+        The sheets are siblings of the list, not children of its header:
+        `ListHeaderComponent` re-renders on every data change, and a Modal
+        that re-mounts mid-scroll loses the wheel's position.
+      */}
+      <WheelPickerSheet
+        visible={sortOpen}
+        title="Sort by"
+        options={sortOptions}
+        value={sort}
+        onChange={setSort}
+        onClose={() => setSortOpen(false)}
+      />
+      <WheelPickerSheet
+        visible={showOpen}
+        title="Show"
+        options={filterOptions}
+        value={filter}
+        onChange={setFilter}
+        onClose={() => setShowOpen(false)}
+      />
+    </>
   );
 }
 
@@ -711,7 +801,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
   },
   headerArea: {
-    gap: spacing.sm,
+    gap: spacing.md,
     marginBottom: spacing.sm,
   },
   footerArea: {
@@ -745,52 +835,50 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
+  /**
+   * The search field, rebuilt 2026-08-22. It was 34pt tall with a 15pt bold
+   * label and a placeholder longer than the box, so on a phone the hint read
+   * "Search name, phone, ema…" and the typed value clipped its descenders.
+   * Full width, 48 tall, one weight lighter, shorter hint.
+   */
   searchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'stretch',
     gap: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.pill,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    minHeight: 48,
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.borderStrong,
   },
   searchInput: {
     flex: 1,
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
-    padding: 0,
+    // A flex child defaults to `min-width: auto` on the web, which is what
+    // let a long value push the clear button off the pill instead of
+    // scrolling inside it.
+    minWidth: 0,
+    minHeight: 44,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: 0,
+    color: colors.textPrimary,
+    fontFamily: typography.body.fontFamily,
+    // typography.body is 15; 16 is the floor below which mobile Safari zooms
+    // the whole page when the field takes focus. No `lineHeight` — on a web
+    // <input> it clips descenders rather than centring the text.
+    fontSize: 16,
   },
-  chipRow: {
+  controlRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.sm,
   },
-  chipRowLabel: {
-    color: colors.inkSoft,
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginRight: 2,
+  controlChip: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
   },
-  chip: {
-    backgroundColor: colors.white,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 5,
-    borderWidth: 1,
-    borderColor: colors.tan,
-  },
-  chipActive: {
-    backgroundColor: colors.ocean,
-    borderColor: colors.ocean,
-  },
-  chipText: { color: colors.inkSoft, fontSize: 12, fontWeight: '800' },
-  chipTextActive: { color: colors.white },
   sectionTitle: {
     marginTop: spacing.sm,
     color: colors.inkSoft,
