@@ -5,6 +5,7 @@
     { "source": "/job/:id", "destination": "/job/[id]" },
     { "source": "/ledger/:view", "destination": "/ledger/[view]" },
     { "source": "/crm/:id", "destination": "/crm/[id]" },
-    { "source": "/cards/:id", "destination": "/cards/[id]" }
+    { "source": "/cards/:id", "destination": "/cards/[id]" },
+    { "source": "/inbox/:threadId", "destination": "/inbox/[threadId]" }
   ]
 }
