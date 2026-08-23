@@ -173,6 +173,91 @@ export interface CardInput {
 }
 
 // ---------------------------------------------------------------------------
+// My deck — types
+// ---------------------------------------------------------------------------
+
+/**
+ * How many packs this person has earned, spent, and has waiting.
+ *
+ * ONE PACK PER TEN HOURS WORKED, backdated over every hour on the books, so a
+ * crew member who has been here two years opens their first pack owing
+ * nothing. The arithmetic is the server's — `packs_earned` is floor(hours/10)
+ * and `packs_available` is earned minus opened — because a client that could
+ * compute its own entitlement is a client that could grant itself one.
+ */
+export interface PackStatus {
+  /** Every hour on the clock, ever. */
+  totalHours: number;
+  packsEarned: number;
+  packsOpened: number;
+  packsAvailable: number;
+  /** Hours still to work before the next pack. 0 when one is already waiting. */
+  hoursToNext: number;
+}
+
+export type PackStatusResult = { status: 'ok'; value: PackStatus } | { status: 'unavailable' };
+
+/**
+ * ONE OWNED COPY — not one card.
+ *
+ * Pulling The Mothership twice is two `OwnedCard`s with the same `card.id`
+ * and different `userCardId`s, and that is the point: duplicates are what
+ * makes a deck a deck. `groupOwnedCards` collapses them for the grid.
+ */
+export interface OwnedCard {
+  userCardId: string;
+  obtainedAt: string | null;
+  /** The finish THIS copy was pulled in. Rolled server-side, not a view mode. */
+  variant: CardVariant;
+  packId: string | null;
+  card: CardRecord;
+}
+
+export type OwnedCardsResult = { status: 'ok'; cards: OwnedCard[] } | { status: 'unavailable' };
+
+/** Every copy of one card, collapsed into a single cell of the collection. */
+export interface OwnedGroup {
+  card: CardRecord;
+  copies: number;
+  /** The finishes owned, in `base, foil, holo` order. */
+  variants: CardVariant[];
+  countsByVariant: Record<CardVariant, number>;
+  firstObtainedAt: string | null;
+  /** The most recent pull, which is what "New" is measured against. */
+  newest: string | null;
+}
+
+/** The signed-in person's copies of one card. */
+export interface CardOwnership {
+  copies: number;
+  countsByVariant: Record<CardVariant, number>;
+  newest: string | null;
+}
+
+/**
+ * One card off a pack, as the server dealt it.
+ *
+ * `open_card_pack` returns the ownership row only — id, finish, whether it is
+ * new to this deck, and the slot it fell in — so `card` is hydrated from
+ * `my_cards()` immediately afterwards. It is nullable because the reveal has
+ * to survive that second read failing; the copy is already banked either way.
+ */
+export interface PackResult {
+  userCardId: string;
+  cardId: string;
+  variant: CardVariant;
+  /** First copy of this card in this deck. Earns the NEW ribbon. */
+  isNew: boolean;
+  /** 1..7. Slot 7 is the hit. */
+  slot: number;
+  card: CardRecord | null;
+}
+
+export type OpenPackResult =
+  | { ok: true; cards: PackResult[] }
+  | { ok: false; code: 'no_packs' | 'unavailable'; message: string };
+
+// ---------------------------------------------------------------------------
 // Normalising
 // ---------------------------------------------------------------------------
 
@@ -265,9 +350,20 @@ export async function fetchCardSet(): Promise<CardSet | null> {
 }
 
 /**
- * The whole deck in printed order. Archived cards are hidden by default — a
- * card that was pulled from the set still exists (soft delete), it just isn't
- * in the binder any more.
+ * THE FULL CATALOG — ADMIN ONLY.
+ *
+ * `cards` SELECT is restricted to owner/operator. Everyone else browses their
+ * own deck (`fetchMyCards`) and only ever sees a card they have pulled.
+ *
+ * RLS does not raise for a viewer, it FILTERS: the query succeeds and comes
+ * back with zero rows. So an empty read is treated as a denial rather than as
+ * "the set is empty" — the printed set is 61 cards and is never legitimately
+ * empty, and a screen that says "nothing has been printed yet" to a crew
+ * member who simply isn't an admin is a lie. Callers get `unavailable` and
+ * show "Admins only".
+ *
+ * Archived cards are hidden by default — a card that was pulled from the set
+ * still exists (soft delete), it just isn't in the binder any more.
  */
 export async function fetchCards(
   options: { includeArchived?: boolean } = {},
@@ -282,16 +378,21 @@ export async function fetchCards(
 
     const { data, error } = await query;
     if (error) return { status: 'unavailable' };
-    return {
-      status: 'ok',
-      cards: ((data ?? []) as Record<string, unknown>[]).map(normalizeCard),
-    };
+    const rows = (data ?? []) as Record<string, unknown>[];
+    // Zero rows and no error === RLS filtered us out. See the note above.
+    if (rows.length === 0) return { status: 'unavailable' };
+    return { status: 'ok', cards: rows.map(normalizeCard) };
   } catch {
     return { status: 'unavailable' };
   }
 }
 
-/** One card by slug, or null when it's missing / unreadable. */
+/**
+ * One card by slug from the CATALOG, or null when it's missing / unreadable.
+ *
+ * Null for a viewer on every card, owned or not — the catalog is admin-only.
+ * `fetchOwnedCard` is the read that works for everybody.
+ */
 export async function fetchCard(id: string): Promise<CardRecord | null> {
   try {
     const { data, error } = await supabase
@@ -309,10 +410,16 @@ export async function fetchCard(id: string): Promise<CardRecord | null> {
 /**
  * Signed art URLs keyed by card id, in ONE request for the whole deck.
  *
- * Storage's `createSignedUrls` returns results positionally, and a failure for
- * one object is a null `signedUrl` in that slot rather than an error for the
- * batch — so the paths are zipped back to their cards by index and anything
- * that failed simply has no art, which every card renderer already handles.
+ * PER-ITEM FAILURE IS NORMAL NOW, NOT AN EDGE CASE. The bucket lets an admin
+ * sign any card and a viewer sign only the cards they own, so asking for a
+ * mixed batch comes back part-signed: each entry carries its own `error` and
+ * an empty `signedUrl`, while the request as a whole still succeeds. A card
+ * that couldn't be signed simply has no art, which every renderer already
+ * handles — nothing here throws and nothing retries per card.
+ *
+ * Entries are matched back by `path` when Storage returns one and by index
+ * otherwise, because a positional zip is only correct while the response is
+ * the same length as the request.
  */
 export async function fetchCardArtUrls(cards: CardRecord[]): Promise<Map<string, string>> {
   const urls = new Map<string, string>();
@@ -323,18 +430,26 @@ export async function fetchCardArtUrls(cards: CardRecord[]): Promise<Map<string,
     );
     if (withArt.length === 0) return urls;
 
+    // One card can be owned in several copies; sign each object once.
+    const byPath = new Map<string, string>();
+    for (const card of withArt) if (!byPath.has(card.art_path)) byPath.set(card.art_path, card.id);
+    const paths = [...byPath.keys()];
+
     const { data, error } = await supabase.storage
       .from(ART_BUCKET)
-      .createSignedUrls(
-        withArt.map((card) => card.art_path),
-        SIGNED_URL_TTL,
-      );
+      .createSignedUrls(paths, SIGNED_URL_TTL);
     if (error || !data) return urls;
 
     data.forEach((entry, index) => {
-      const signed = (entry as { signedUrl?: string | null }).signedUrl;
-      const card = withArt[index];
-      if (signed && card) urls.set(card.id, signed);
+      const row = entry as { signedUrl?: string | null; path?: string | null; error?: unknown };
+      if (row.error) return;
+      const signed = row.signedUrl;
+      if (!signed) return;
+      const path = typeof row.path === 'string' && row.path.length > 0 ? row.path : paths[index];
+      const cardId = path ? byPath.get(path) : undefined;
+      if (!cardId) return;
+      // Every card that shares this object gets the same URL.
+      for (const card of withArt) if (card.art_path === path) urls.set(card.id, signed);
     });
   } catch {
     // fall through to whatever we managed to sign
@@ -400,6 +515,298 @@ export async function fetchCardEmployeeName(employeeId: string): Promise<string 
 export async function fetchRules(): Promise<string | null> {
   const set = await fetchCardSet();
   return set?.rules_md ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// My deck — packs, owned copies, and opening
+// ---------------------------------------------------------------------------
+//
+// Everything below goes through SECURITY DEFINER functions rather than table
+// reads, for the same reason the customer portal does: the deck is per-person
+// and the entitlement is money-adjacent. `my_pack_status` counts the hours,
+// `my_cards` returns the copies, and `open_card_pack` is the ONLY thing that
+// can mint one — it decides the seven cards, their rarity slots and their
+// finishes. Nothing in this file rolls a die.
+//
+// A viewer has no read on `cards` at all, so `my_cards` is also how a crew
+// member's own card renders on the detail screen. See `fetchOwnedCard`.
+
+export function isCardVariant(value: unknown): value is CardVariant {
+  return typeof value === 'string' && (CARD_VARIANTS as readonly string[]).includes(value);
+}
+
+/** Rarest first. Used to order the collection and to spot a hit. */
+const RARITY_RANK: Record<CardRarity, number> = {
+  secret: 5,
+  legendary: 4,
+  rare: 3,
+  uncommon: 2,
+  common: 1,
+};
+
+/** Legendary and secret are the pulls worth a noise. */
+export function isHitRarity(rarity: CardRarity): boolean {
+  return rarity === 'legendary' || rarity === 'secret';
+}
+
+function emptyVariantCounts(): Record<CardVariant, number> {
+  return { base: 0, foil: 0, holo: 0 };
+}
+
+/**
+ * How many packs are waiting, and how far off the next one is.
+ *
+ * `unavailable` covers signed-out, not-staff (42501) and offline alike — the
+ * deck header just doesn't draw its numbers. There is no partial state here:
+ * a wrong pack count is worse than none.
+ */
+export async function fetchPackStatus(): Promise<PackStatusResult> {
+  try {
+    const { data, error } = await supabase.rpc('my_pack_status');
+    if (error) return { status: 'unavailable' };
+    const row = ((data ?? []) as Record<string, unknown>[])[0];
+    if (!row) return { status: 'unavailable' };
+    return {
+      status: 'ok',
+      value: {
+        totalHours: num(row.total_hours) ?? 0,
+        packsEarned: num(row.packs_earned) ?? 0,
+        packsOpened: num(row.packs_opened) ?? 0,
+        packsAvailable: num(row.packs_available) ?? 0,
+        hoursToNext: num(row.hours_to_next) ?? 0,
+      },
+    };
+  } catch {
+    return { status: 'unavailable' };
+  }
+}
+
+/**
+ * Every copy this person owns, newest pull first.
+ *
+ * `my_cards()` returns the ownership row spread across every column of the
+ * card, so one read is the whole deck — no join, no second query, and no
+ * catalog access needed. The card half is run through the same
+ * `normalizeCard` as an admin's catalog read so the renderer can't tell the
+ * two sources apart.
+ */
+export async function fetchMyCards(): Promise<OwnedCardsResult> {
+  try {
+    const { data, error } = await supabase.rpc('my_cards');
+    if (error) return { status: 'unavailable' };
+    const rows = (data ?? []) as Record<string, unknown>[];
+    const cards = rows.map((row) => ({
+      userCardId: String(row.user_card_id ?? ''),
+      obtainedAt: (row.obtained_at as string | null) ?? null,
+      variant: isCardVariant(row.variant) ? row.variant : 'base',
+      packId: (row.pack_id as string | null) ?? null,
+      // `card_id` is the card's slug; the rest of the row IS the card.
+      card: normalizeCard({ ...row, id: row.card_id ?? row.id }),
+    }));
+    cards.sort((a, b) => (b.obtainedAt ?? '').localeCompare(a.obtainedAt ?? ''));
+    return { status: 'ok', cards };
+  } catch {
+    return { status: 'unavailable' };
+  }
+}
+
+/**
+ * Owned copies collapsed to one entry per card, rarest first then A–Z.
+ *
+ * Rarity descending is the order a binder is actually kept in — the secret
+ * rare goes at the front, not wherever the alphabet puts it. Title is the
+ * tiebreak so the grid is stable between refreshes.
+ */
+export function groupOwnedCards(owned: OwnedCard[]): OwnedGroup[] {
+  const groups = new Map<string, OwnedGroup>();
+
+  for (const copy of owned) {
+    const id = copy.card.id;
+    let group = groups.get(id);
+    if (!group) {
+      group = {
+        card: copy.card,
+        copies: 0,
+        variants: [],
+        countsByVariant: emptyVariantCounts(),
+        firstObtainedAt: null,
+        newest: null,
+      };
+      groups.set(id, group);
+    }
+    group.copies += 1;
+    group.countsByVariant[copy.variant] += 1;
+    const at = copy.obtainedAt;
+    if (at) {
+      if (!group.firstObtainedAt || at < group.firstObtainedAt) group.firstObtainedAt = at;
+      if (!group.newest || at > group.newest) group.newest = at;
+    }
+  }
+
+  for (const group of groups.values()) {
+    group.variants = CARD_VARIANTS.filter((variant) => group.countsByVariant[variant] > 0);
+  }
+
+  return [...groups.values()].sort((a, b) => {
+    const rarity = RARITY_RANK[b.card.rarity] - RARITY_RANK[a.card.rarity];
+    if (rarity !== 0) return rarity;
+    return a.card.title.localeCompare(b.card.title);
+  });
+}
+
+/** This person's copies of one card, out of a list they already have. */
+export function ownershipOf(owned: OwnedCard[], cardId: string): CardOwnership {
+  const ownership: CardOwnership = {
+    copies: 0,
+    countsByVariant: emptyVariantCounts(),
+    newest: null,
+  };
+  for (const copy of owned) {
+    if (copy.card.id !== cardId) continue;
+    ownership.copies += 1;
+    ownership.countsByVariant[copy.variant] += 1;
+    if (copy.obtainedAt && (!ownership.newest || copy.obtainedAt > ownership.newest)) {
+      ownership.newest = copy.obtainedAt;
+    }
+  }
+  return ownership;
+}
+
+/**
+ * One card AND this person's copies of it, read from their own deck.
+ *
+ * This is the fallback that makes `/cards/[id]` work for a crew member: the
+ * catalog read returns nothing for them, but `my_cards()` carries the full
+ * card row for anything they've pulled. Null when they don't own it — which,
+ * for a viewer, is the same answer as "no such card", and deliberately so.
+ */
+export async function fetchOwnedCard(
+  cardId: string,
+): Promise<{ card: CardRecord; ownership: CardOwnership } | null> {
+  const result = await fetchMyCards();
+  if (result.status !== 'ok') return null;
+  const copies = result.cards.filter((copy) => copy.card.id === cardId);
+  const first = copies[0];
+  if (!first) return null;
+  return { card: first.card, ownership: ownershipOf(copies, cardId) };
+}
+
+/**
+ * Open a pack. THE SERVER DEALS IT.
+ *
+ * Seven cards in fixed rarity slots (four common, two uncommon, one hit) with
+ * the foil/holo rolls made server-side, debited against the packs this person
+ * has earned. The client's only jobs are to ask, to show what came out, and
+ * to be honest when the answer is no.
+ *
+ * Error mapping, and why it is by SQLSTATE rather than by message text:
+ *   P0001  the function's own raise — "no packs yet". The server's wording is
+ *          passed straight through so the rule is stated once, in the
+ *          database, not paraphrased in three screens.
+ *   42501  not signed in as staff. Reported as `unavailable`, not as a
+ *          failure the person could fix by tapping again.
+ *   other  network, timeout, a migration mid-flight → `unavailable`.
+ *
+ * The pulled cards are hydrated from `my_cards()` in a second read, because
+ * `open_card_pack` returns ownership rows rather than card rows. If that read
+ * fails the pack is STILL open and the copies are STILL banked — the reveal
+ * just has less to draw, which is why `card` is nullable rather than an error.
+ */
+export async function openPack(): Promise<OpenPackResult> {
+  try {
+    const { data, error } = await supabase.rpc('open_card_pack');
+    if (error) {
+      const code = (error as { code?: string }).code ?? '';
+      const message = (error as { message?: string }).message ?? '';
+      if (code === 'P0001') {
+        return {
+          ok: false,
+          code: 'no_packs',
+          message:
+            message.trim() ||
+            'No packs available yet — you earn one for every 10 hours worked.',
+        };
+      }
+      if (code === '42501') {
+        return {
+          ok: false,
+          code: 'unavailable',
+          message: 'Sign in as a crew member to open packs.',
+        };
+      }
+      return {
+        ok: false,
+        code: 'unavailable',
+        message: message.trim() || 'The pack could not be opened. Try again in a moment.',
+      };
+    }
+
+    const rows = (data ?? []) as Record<string, unknown>[];
+    if (rows.length === 0) {
+      return {
+        ok: false,
+        code: 'unavailable',
+        message: 'The pack came back empty. Try again in a moment.',
+      };
+    }
+
+    const pulls = rows
+      .map((row) => ({
+        userCardId: String(row.user_card_id ?? ''),
+        cardId: String(row.card_id ?? ''),
+        variant: isCardVariant(row.variant) ? row.variant : 'base',
+        isNew: Boolean(row.is_new),
+        slot: num(row.slot) ?? 0,
+        card: null as CardRecord | null,
+      }))
+      .sort((a, b) => a.slot - b.slot);
+
+    const mine = await fetchMyCards();
+    if (mine.status === 'ok') {
+      const byCopy = new Map(mine.cards.map((copy) => [copy.userCardId, copy.card]));
+      const byCard = new Map(mine.cards.map((copy) => [copy.card.id, copy.card]));
+      for (const pull of pulls) {
+        pull.card = byCopy.get(pull.userCardId) ?? byCard.get(pull.cardId) ?? null;
+      }
+    }
+
+    return { ok: true, cards: pulls };
+  } catch (e) {
+    return {
+      ok: false,
+      code: 'unavailable',
+      message: e instanceof Error ? e.message : 'The pack could not be opened.',
+    };
+  }
+}
+
+/** Pulled within the last day — what the deck's "New" filter means. */
+export const NEW_CARD_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export function isRecentlyObtained(at: string | null, now = Date.now()): boolean {
+  if (!at) return false;
+  const ms = Date.parse(at);
+  if (!Number.isFinite(ms)) return false;
+  return now - ms <= NEW_CARD_WINDOW_MS;
+}
+
+/** "×3" for the grid badge, or null for a single copy. */
+export function copiesLabel(copies: number): string | null {
+  return copies > 1 ? `×${copies}` : null;
+}
+
+/** "You own ×3 (foil ×1, holo ×1)". Null when this person owns none. */
+export function ownershipLabel(ownership: CardOwnership): string | null {
+  if (ownership.copies < 1) return null;
+  const extras: string[] = [];
+  if (ownership.countsByVariant.foil > 0) extras.push(`foil ×${ownership.countsByVariant.foil}`);
+  if (ownership.countsByVariant.holo > 0) extras.push(`holo ×${ownership.countsByVariant.holo}`);
+  const base = `You own ×${ownership.copies}`;
+  return extras.length > 0 ? `${base} (${extras.join(', ')})` : base;
+}
+
+export function variantLabel(variant: CardVariant): string {
+  return variant === 'base' ? 'Base' : variant === 'foil' ? 'Foil' : 'Holo';
 }
 
 // ---------------------------------------------------------------------------

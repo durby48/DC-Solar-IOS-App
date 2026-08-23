@@ -7,7 +7,6 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
-  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -24,25 +23,31 @@ import {
   FadeInUp,
   Screen,
   Skeleton,
+  StatTile,
 } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
 import {
   CARD_RARITIES,
   CARD_TYPES,
-  CARD_VARIANTS,
   cardTypeLabel,
+  copiesLabel,
   effectiveVariant,
   fetchCardArtUrls,
-  fetchCards,
   fetchCardSet,
+  fetchMyCards,
+  fetchPackStatus,
+  groupOwnedCards,
+  isRecentlyObtained,
   rarityLabel,
+  variantLabel,
   type CardRarity,
-  type CardRecord,
   type CardSet,
   type CardType,
   type CardVariant,
+  type OwnedGroup,
+  type PackStatus,
 } from '@/lib/cards';
-import { useRole } from '@/lib/role';
+import { useRoleGate } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
 type LoadState = 'loading' | 'ok' | 'unavailable';
@@ -64,51 +69,83 @@ function useSignedIn(): 'loading' | 'in' | 'out' {
   return state;
 }
 
+/** `hours_to_next` and `total_hours` are shown to a tenth. Nothing finer. */
+function tenths(hours: number): number {
+  return Math.round(hours * 10) / 10;
+}
+
+/** The best finish owned, which is the one the grid draws the card in. */
+function bestVariant(group: OwnedGroup): CardVariant {
+  if (group.countsByVariant.holo > 0) return 'holo';
+  if (group.countsByVariant.foil > 0) return 'foil';
+  return 'base';
+}
+
 /**
- * The binder: every card in the set, filterable, in whichever finish you feel
- * like looking at today.
+ * MY DECK — the cards this person actually owns, and nobody else's.
  *
- * The whole deck is 61 rows and every card is signed in ONE storage request,
- * so this loads as a single pass rather than a per-card waterfall. The grid is
- * a `FlashList` because a card is an expensive cell — an SVG wash, a burst
- * badge and up to three gradient overlays each — and recycling them matters
- * more here than in any other list in the app.
+ * ────────────────────────────────────────────────────────────────────────
+ * EVERYONE STARTS AT ZERO
+ * ────────────────────────────────────────────────────────────────────────
+ * This screen used to be the whole 61-card binder, open to any signed-in
+ * crew member. It is now a personal collection: a pack per ten hours worked,
+ * backdated across every hour on the books, seven cards a pack, and the only
+ * way a card gets here is that somebody pulled it. The full catalog moved to
+ * `/cards/catalog` and is admin-only — which is a server rule (`cards` SELECT
+ * is restricted), not a hidden button.
+ *
+ * Admins get a deck too, on exactly the same terms. Being able to edit the
+ * set does not put a card in your binder.
+ *
+ * The grid is grouped by CARD, not by copy: pulling The Mothership three
+ * times is one cell with "×3" on it, plus a chip for each finish owned. A
+ * list of three identical cards would read as a bug.
  */
-export default function CardsScreen() {
+export default function MyDeckScreen() {
   const router = useRouter();
-  const role = useRole();
+  const { role } = useRoleGate();
   const isAdmin = role?.isAdmin ?? false;
   const signedIn = useSignedIn();
   const { width } = useWindowDimensions();
 
   const [state, setState] = useState<LoadState>('loading');
-  const [cards, setCards] = useState<CardRecord[]>([]);
+  const [groups, setGroups] = useState<OwnedGroup[]>([]);
+  const [status, setStatus] = useState<PackStatus | null>(null);
   const [set, setSet] = useState<CardSet | null>(null);
   const [artUrls, setArtUrls] = useState<Map<string, string>>(new Map());
   const [refreshing, setRefreshing] = useState(false);
 
-  const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<CardType | null>(null);
   const [rarityFilter, setRarityFilter] = useState<CardRarity | null>(null);
-  const [variant, setVariant] = useState<CardVariant>('base');
+  const [newOnly, setNewOnly] = useState(false);
   const [packOpen, setPackOpen] = useState(false);
 
   const load = useCallback(async () => {
-    const [setRow, result] = await Promise.all([fetchCardSet(), fetchCards()]);
+    const [setRow, packStatus, mine] = await Promise.all([
+      fetchCardSet(),
+      fetchPackStatus(),
+      fetchMyCards(),
+    ]);
     setSet(setRow);
-    if (result.status !== 'ok') {
-      setCards([]);
+    setStatus(packStatus.status === 'ok' ? packStatus.value : null);
+
+    if (mine.status !== 'ok') {
+      setGroups([]);
       setArtUrls(new Map());
       setState('unavailable');
       return;
     }
-    setCards(result.cards);
+    const grouped = groupOwnedCards(mine.cards);
+    setGroups(grouped);
     setState('ok');
-    setArtUrls(await fetchCardArtUrls(result.cards));
+    // One signing request for the whole deck. A viewer may only sign the art
+    // for cards they own, which is exactly what this list is.
+    setArtUrls(await fetchCardArtUrls(grouped.map((group) => group.card)));
   }, []);
 
   useFocusEffect(
     useCallback(() => {
+      if (signedIn !== 'in') return;
       let cancelled = false;
       void load().catch(() => {
         if (!cancelled) setState('unavailable');
@@ -116,7 +153,7 @@ export default function CardsScreen() {
       return () => {
         cancelled = true;
       };
-    }, [load]),
+    }, [load, signedIn]),
   );
 
   const onRefresh = useCallback(() => {
@@ -125,8 +162,6 @@ export default function CardsScreen() {
   }, [load]);
 
   // --- layout ---------------------------------------------------------------
-  // Three columns is a desktop-browser affordance; a phone in landscape is
-  // still a phone and two columns keeps the type readable.
   const columns = Platform.OS === 'web' && width >= 900 ? 3 : 2;
   const listWidth = Math.min(width, 1280) - spacing.md * 2;
   const cellWidth = listWidth / columns;
@@ -134,33 +169,32 @@ export default function CardsScreen() {
 
   // --- filtering ------------------------------------------------------------
   const visible = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return cards.filter((card) => {
-      if (typeFilter && card.card_type !== typeFilter) return false;
-      if (rarityFilter && card.rarity !== rarityFilter) return false;
-      if (!needle) return true;
-      return [
-        card.title,
-        card.ability,
-        card.flavor,
-        card.job_number,
-        card.location,
-        card.service_type,
-        card.role,
-        card.id,
-      ]
-        .filter(Boolean)
-        .some((field) => String(field).toLowerCase().includes(needle));
+    const now = Date.now();
+    return groups.filter((group) => {
+      if (typeFilter && group.card.card_type !== typeFilter) return false;
+      if (rarityFilter && group.card.rarity !== rarityFilter) return false;
+      if (newOnly && !isRecentlyObtained(group.newest, now)) return false;
+      return true;
     });
-  }, [cards, search, typeFilter, rarityFilter]);
+  }, [groups, typeFilter, rarityFilter, newOnly]);
 
-  const filtered = typeFilter !== null || rarityFilter !== null || search.trim().length > 0;
+  const filtered = typeFilter !== null || rarityFilter !== null || newOnly;
+  const totalCopies = useMemo(
+    () => groups.reduce((sum, group) => sum + group.copies, 0),
+    [groups],
+  );
+
+  const clearFilters = useCallback(() => {
+    setTypeFilter(null);
+    setRarityFilter(null);
+    setNewOnly(false);
+  }, []);
 
   // --- signed out -----------------------------------------------------------
   if (signedIn !== 'in') {
     return (
       <>
-        <Stack.Screen options={{ title: 'Trading Cards' }} />
+        <Stack.Screen options={{ title: 'My Deck' }} />
         <Screen edges={[]}>
           {signedIn === 'loading' ? (
             <Card style={styles.center}>
@@ -172,11 +206,12 @@ export default function CardsScreen() {
                 <Ionicons name="albums" size={26} color={colors.accentPrimary} />
               </View>
               <AppText variant="heading" align="center">
-                Sign in to open the binder
+                Sign in to open your deck
               </AppText>
               <AppText variant="body" color={colors.textMuted} align="center">
-                DC Solar: The Trading Card Game is the company deck — 61 cards of real jobs, real
-                crew and one cow. It is only visible to signed-in crew members.
+                DC Solar: The Trading Card Game is the company deck — real jobs, real crew and one
+                cow. You earn a pack for every ten hours you work, and the cards you pull are
+                yours.
               </AppText>
             </Card>
           )}
@@ -185,58 +220,102 @@ export default function CardsScreen() {
     );
   }
 
-  return (
-    <>
-      <Stack.Screen options={{ title: 'Trading Cards' }} />
-      <Screen edges={[]} scroll={false} padded={false}>
-        {/* The toolbar deliberately does NOT scroll with the grid: a search
-            field inside a list header loses focus every time the list
-            re-renders, which is every keystroke. */}
-        <View style={styles.toolbar}>
-          <View style={styles.setRow}>
-            <View style={styles.setTitles}>
-              <AppText variant="heading">{set?.name ?? 'DC Solar: The Trading Card Game'}</AppText>
-              <AppText variant="caption" color={colors.textMuted}>
-                {set?.tagline ?? 'Catch rays. Get paid.'}
-                {state === 'ok' ? ` · ${cards.length} cards` : ''}
-              </AppText>
-            </View>
+  const packsAvailable = status?.packsAvailable ?? 0;
+  const hoursToNext = tenths(status?.hoursToNext ?? 0);
+
+  const header = (
+    <View style={styles.header}>
+      <Card>
+        <View style={styles.headerTop}>
+          <View style={styles.headerTitles}>
+            <AppText variant="heading">My Deck</AppText>
+            <AppText variant="caption" color={colors.textMuted}>
+              {state === 'ok' && totalCopies > 0
+                ? `${totalCopies} card${totalCopies === 1 ? '' : 's'} · ${groups.length} different`
+                : (set?.tagline ?? 'Catch rays. Get paid.')}
+            </AppText>
+          </View>
+          <View style={styles.headerLinks}>
+            {isAdmin ? (
+              <AnimatedPressable
+                onPress={() => router.push('/cards/catalog')}
+                haptic="tapLight"
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Open the card catalog"
+                style={styles.link}>
+                <Ionicons name="albums-outline" size={15} color={colors.accentLink} />
+                <AppText variant="caption" color={colors.accentLink}>
+                  Catalog
+                </AppText>
+              </AnimatedPressable>
+            ) : null}
             <AnimatedPressable
               onPress={() => router.push('/cards/rules')}
               haptic="tapLight"
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel="Read the rules"
-              style={styles.rulesLink}>
+              style={styles.link}>
               <Ionicons name="book-outline" size={15} color={colors.accentLink} />
               <AppText variant="caption" color={colors.accentLink}>
                 Rules
               </AppText>
             </AnimatedPressable>
           </View>
+        </View>
 
-          <View style={styles.searchWrap}>
-            <Ionicons name="search" size={16} color={colors.textMuted} />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search cards, jobs, abilities"
-              placeholderTextColor={colors.textMuted}
-              autoCorrect={false}
-              style={styles.searchInput}
-              returnKeyType="search"
-            />
-            {search.length > 0 ? (
-              <AnimatedPressable
-                onPress={() => setSearch('')}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Clear search">
-                <Ionicons name="close-circle" size={16} color={colors.textMuted} />
-              </AnimatedPressable>
-            ) : null}
-          </View>
+        <View style={styles.tiles}>
+          <StatTile
+            label={packsAvailable === 1 ? 'Pack available' : 'Packs available'}
+            value={packsAvailable}
+            tone="olive"
+            compact
+            style={styles.tile}
+          />
+          <StatTile
+            label="Hours worked"
+            value={tenths(status?.totalHours ?? 0)}
+            suffix=" h"
+            decimals={1}
+            tone={1}
+            compact
+            style={styles.tile}
+          />
+        </View>
 
+        <AppText variant="caption" color={colors.textMuted} style={styles.rule}>
+          {status
+            ? `1 pack per 10 hours worked · ${
+                packsAvailable > 0
+                  ? `${packsAvailable} waiting`
+                  : `next pack in ${hoursToNext} h`
+              }`
+            : 'Pack status is unavailable right now. Pull down to try again.'}
+        </AppText>
+
+        <Button
+          label="Open a pack"
+          icon="gift-outline"
+          variant="primary"
+          fullWidth
+          disabled={packsAvailable < 1}
+          onPress={() => setPackOpen(true)}
+          style={styles.packButton}
+        />
+        {packsAvailable < 1 ? (
+          <AppText variant="caption" color={colors.textMuted} align="center" style={styles.reason}>
+            {status
+              ? hoursToNext > 0
+                ? `No packs yet — ${hoursToNext} more hour${hoursToNext === 1 ? '' : 's'} on the clock and one is yours.`
+                : 'No packs yet — you earn one for every 10 hours worked.'
+              : 'Packs can’t be counted right now.'}
+          </AppText>
+        ) : null}
+      </Card>
+
+      {state === 'ok' && groups.length > 0 ? (
+        <>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -256,6 +335,13 @@ export default function CardsScreen() {
                 onPress={() => setTypeFilter(typeFilter === type ? null : type)}
               />
             ))}
+            <Chip
+              label="New"
+              tone="sun"
+              icon="sparkles-outline"
+              selected={newOnly}
+              onPress={() => setNewOnly((value) => !value)}
+            />
           </ScrollView>
 
           <ScrollView
@@ -278,123 +364,129 @@ export default function CardsScreen() {
               />
             ))}
           </ScrollView>
+        </>
+      ) : null}
+    </View>
+  );
 
-          <View style={styles.actionRow}>
-            <View style={styles.variantRow}>
-              {CARD_VARIANTS.map((option) => (
-                <Chip
-                  key={option}
-                  label={option === 'base' ? 'Base' : option === 'foil' ? 'Foil' : 'Holo'}
-                  tone="sun"
-                  selected={variant === option}
-                  onPress={() => setVariant(option)}
-                />
-              ))}
-            </View>
-            <View style={styles.variantRow}>
-              {state === 'ok' && cards.length > 0 ? (
-                <Button
-                  label="Open a pack"
-                  icon="gift-outline"
-                  variant="secondary"
-                  size="sm"
-                  onPress={() => setPackOpen(true)}
-                />
-              ) : null}
-              {isAdmin ? (
-                <Button
-                  label="New card"
-                  icon="add"
-                  variant="primary"
-                  size="sm"
-                  onPress={() => router.push('/cards/editor')}
-                />
-              ) : null}
-            </View>
-          </View>
+  const body = () => {
+    if (state === 'loading') {
+      return (
+        <View style={styles.skeletonGrid}>
+          {Array.from({ length: columns * 2 }, (_, i) => (
+            <Skeleton
+              key={i}
+              width={cardWidth}
+              height={cardWidth * 1.4}
+              radius={radii.sm}
+              style={styles.skeletonCell}
+            />
+          ))}
         </View>
+      );
+    }
+    if (state === 'unavailable') {
+      return (
+        <EmptyState
+          icon="cloud-offline-outline"
+          title="Your deck is unavailable"
+          body="Your cards could not be loaded. Pull down to try again once you are back on a signal."
+          action={{ label: 'Try again', onPress: onRefresh }}
+        />
+      );
+    }
+    if (visible.length === 0) {
+      return filtered ? (
+        <EmptyState
+          icon="funnel-outline"
+          title="Nothing in your deck matches that"
+          body="Try a different type or rarity — or clear the filters to see everything you own."
+          action={{ label: 'Clear filters', onPress: clearFilters }}
+        />
+      ) : (
+        <EmptyState
+          icon="gift-outline"
+          title="Open your first pack"
+          body={
+            packsAvailable > 0
+              ? 'Seven cards a pack — four common, two uncommon and one hit. Nothing in your deck yet.'
+              : 'You earn a pack for every ten hours you work, backdated over every hour you have already put in.'
+          }
+          action={{ label: 'Open a pack', onPress: () => setPackOpen(true) }}
+        />
+      );
+    }
+    return null;
+  };
 
-        {state === 'loading' ? (
-          <View style={styles.skeletonGrid}>
-            {Array.from({ length: columns * 2 }, (_, i) => (
-              <Skeleton
-                key={i}
-                width={cardWidth}
-                height={cardWidth * 1.4}
-                radius={radii.sm}
-                style={styles.skeletonCell}
-              />
-            ))}
-          </View>
-        ) : state === 'unavailable' ? (
-          <EmptyState
-            icon="cloud-offline-outline"
-            title="The card set is unavailable"
-            body="The deck could not be loaded. Pull down to try again once you are back on a signal."
-            action={{ label: 'Try again', onPress: onRefresh }}
-          />
-        ) : visible.length === 0 ? (
-          <EmptyState
-            icon="albums-outline"
-            title={filtered ? 'No cards match that' : 'The set is empty'}
-            body={
-              filtered
-                ? 'Try a different type, rarity, or search term.'
-                : isAdmin
-                  ? 'Nothing has been printed yet. Add the first card to start the set.'
-                  : 'Nothing has been printed in this set yet.'
-            }
-            action={
-              filtered
-                ? {
-                    label: 'Clear filters',
-                    onPress: () => {
-                      setSearch('');
-                      setTypeFilter(null);
-                      setRarityFilter(null);
-                    },
-                  }
-                : isAdmin
-                  ? { label: 'Add a card', onPress: () => router.push('/cards/editor') }
-                  : undefined
-            }
-          />
-        ) : (
-          <View style={styles.listWrap}>
-            <FlashList
-            data={visible}
-            numColumns={columns}
-            keyExtractor={(item) => item.id}
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            contentContainerStyle={styles.list}
-            renderItem={({ item, index }) => (
-              <FadeInUp index={index} style={styles.cell}>
-                <AnimatedPressable
-                  onPress={() => router.push({ pathname: '/cards/[id]', params: { id: item.id } })}
-                  haptic="tapLight"
-                  scaleTo={0.97}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${item.title}, ${item.rarity} ${item.card_type} card`}>
+  const empty = body();
+
+  return (
+    <>
+      <Stack.Screen options={{ title: 'My Deck' }} />
+      <Screen edges={[]} scroll={false} padded={false}>
+        <FlashList
+          data={empty ? [] : visible}
+          numColumns={columns}
+          keyExtractor={(item) => item.card.id}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          contentContainerStyle={styles.list}
+          ListHeaderComponent={header}
+          ListEmptyComponent={empty ?? undefined}
+          renderItem={({ item, index }) => (
+            <FadeInUp index={index} style={styles.cell}>
+              <AnimatedPressable
+                onPress={() =>
+                  router.push({ pathname: '/cards/[id]', params: { id: item.card.id } })
+                }
+                haptic="tapLight"
+                scaleTo={0.97}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.card.title}, ${item.card.rarity} ${item.card.card_type} card, ${item.copies} owned`}>
+                <View>
                   <TradingCard
-                    card={item}
-                    artUrl={artUrls.get(item.id) ?? null}
-                    variant={effectiveVariant(item, variant)}
+                    card={item.card}
+                    artUrl={artUrls.get(item.card.id) ?? null}
+                    variant={effectiveVariant(item.card, bestVariant(item))}
                     width={cardWidth}
                   />
-                </AnimatedPressable>
-              </FadeInUp>
-              )}
-            />
-          </View>
-        )}
+                  {copiesLabel(item.copies) ? (
+                    <View style={styles.copies} pointerEvents="none">
+                      <AppText variant="caption" color={colors.textOnDark} style={styles.copiesText}>
+                        {copiesLabel(item.copies)}
+                      </AppText>
+                    </View>
+                  ) : null}
+                  {isRecentlyObtained(item.newest) ? (
+                    <View style={styles.newTag} pointerEvents="none">
+                      <AppText variant="caption" color={colors.ink} style={styles.newTagText}>
+                        NEW
+                      </AppText>
+                    </View>
+                  ) : null}
+                </View>
+
+                <View style={[styles.variantChips, { width: cardWidth }]}>
+                  {item.variants
+                    .filter((variant) => variant !== 'base')
+                    .map((variant) => (
+                      <Chip key={variant} label={variantLabel(variant)} tone="sun" />
+                    ))}
+                </View>
+              </AnimatedPressable>
+            </FadeInUp>
+          )}
+        />
 
         {packOpen ? (
           <PackOpening
-            cards={cards}
-            artUrls={artUrls}
-            variant={variant}
-            onClose={() => setPackOpen(false)}
+            onClose={() => {
+              setPackOpen(false);
+              // The pack was debited and the copies banked server-side, so the
+              // header count and the grid are both stale the moment it closes.
+              void load();
+            }}
           />
         ) : null}
       </Screen>
@@ -416,64 +508,52 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  toolbar: {
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
+  header: {
     gap: spacing.sm,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
   },
-  setRow: {
+  headerTop: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: spacing.sm,
   },
-  setTitles: {
+  headerTitles: {
     flexShrink: 1,
     gap: 2,
   },
-  rulesLink: {
+  headerLinks: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  link: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
     paddingTop: 2,
   },
-  searchWrap: {
+  tiles: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.surface,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: Platform.OS === 'web' ? spacing.sm : spacing.xs + 2,
+    marginTop: spacing.sm,
   },
-  searchInput: {
+  tile: {
     flex: 1,
-    color: colors.textPrimary,
-    fontSize: 15,
-    paddingVertical: 2,
+  },
+  rule: {
+    marginTop: spacing.sm,
+  },
+  packButton: {
+    marginTop: spacing.sm,
+  },
+  reason: {
+    marginTop: spacing.xs,
   },
   chipRow: {
     gap: spacing.xs + 2,
     paddingRight: spacing.md,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    paddingBottom: spacing.xs,
-  },
-  variantRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs + 2,
-    flexWrap: 'wrap',
-  },
-  listWrap: {
-    flex: 1,
   },
   list: {
     paddingHorizontal: spacing.md,
@@ -483,10 +563,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingBottom: spacing.sm,
   },
+  copies: {
+    position: 'absolute',
+    top: spacing.xs,
+    right: spacing.xs,
+    minWidth: 30,
+    alignItems: 'center',
+    backgroundColor: colors.oliveDeep,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 1,
+  },
+  copiesText: {
+    fontWeight: '700',
+  },
+  newTag: {
+    position: 'absolute',
+    top: spacing.xs,
+    left: spacing.xs,
+    backgroundColor: colors.sun,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.xs + 2,
+    paddingVertical: 1,
+  },
+  newTagText: {
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    fontSize: 10,
+  },
+  variantChips: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    paddingTop: spacing.xs,
+    minHeight: 4,
+  },
   skeletonGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: spacing.md,
     gap: spacing.sm,
   },
   skeletonCell: {

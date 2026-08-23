@@ -83,6 +83,7 @@ export const HUB_ITEMS: readonly HubItem[] = [
   { key: 'receipts', title: 'Receipts', icon: 'receipt', href: '/more/receipts', group: 'work', tone: 4, gate: 'all' },
   { key: 'monitoring', title: 'Monitoring Logins', icon: 'pulse', href: '/more/monitoring', group: 'work', tone: 3, gate: 'all' },
   { key: 'marketing-photos', title: 'Marketing Photos', icon: 'images', href: '/marketing-photos', group: 'work', tone: 6, gate: 'all' },
+  { key: 'email', title: 'Email', icon: 'mail', href: '/inbox', group: 'work', tone: 2, gate: 'admin' },
 
   // ---- Money (admin) ----
   { key: 'financials', title: 'Financials', icon: 'wallet', href: '/financials', group: 'money', tone: 'olive', gate: 'admin' },
@@ -91,10 +92,13 @@ export const HUB_ITEMS: readonly HubItem[] = [
   // ---- Customers ----
   { key: 'customers', title: 'Customers', icon: 'people', href: '/customers', group: 'customers', tone: 0, gate: 'all', badge: 'unread' },
   { key: 'messages', title: 'Messages', icon: 'chatbubbles', href: '/crm/inbox', group: 'customers', tone: 7, gate: 'all', badge: 'unread' },
-  { key: 'cards', title: 'Trading Cards', icon: 'albums', href: '/cards', group: 'customers', tone: 3, gate: 'all' },
 
   // ---- Employee ----
   { key: 'hours', title: 'Hours', icon: 'time', href: '/hours', group: 'employee', tone: 1, gate: 'admin' },
+  // Moved out of Customers: the deck is a personal collection now — one pack
+  // per ten hours worked — so it belongs next to Hours and Paystubs, not
+  // alongside the customer list it never had anything to do with.
+  { key: 'cards', title: 'Trading Cards', icon: 'albums', href: '/cards', group: 'employee', tone: 3, gate: 'all' },
   { key: 'time-off', title: 'Time Off', icon: 'airplane', href: '/more/time-off', group: 'employee', tone: 2, gate: 'all' },
   { key: 'paystubs', title: 'Paystubs', icon: 'cash', href: '/more/paystubs', group: 'employee', tone: 6, gate: 'all' },
   { key: 'employees', title: 'Employees', icon: 'id-card', href: '/more/employees', group: 'employee', tone: 4, gate: 'admin' },

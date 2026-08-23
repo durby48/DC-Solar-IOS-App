@@ -26,7 +26,10 @@ import {
   fetchCard,
   fetchCardArtUrls,
   fetchCardEmployeeName,
+  fetchOwnedCard,
+  ownershipLabel,
   rarityLabel,
+  type CardOwnership,
   type CardRecord,
   type CardVariant,
 } from '@/lib/cards';
@@ -44,6 +47,17 @@ type LoadState = 'loading' | 'ok' | 'missing';
  * draws whichever face it was handed. Inverting any two of those makes the
  * back of the card refuse to tilt, or the tilt reset every time you turn it
  * over.
+ *
+ * TWO WAYS IN, BECAUSE THE CATALOG IS ADMIN-ONLY. `cards` SELECT is
+ * restricted to owner/operator, so `fetchCard` returns null for a crew member
+ * on every card — including the one they just pulled. `fetchOwnedCard` is the
+ * fallback: `my_cards()` carries the whole card row for every copy a person
+ * owns, so their own cards open normally and a card they don't own reads as
+ * "not in your deck", which for them is the honest answer.
+ *
+ * Both reads run for everybody, not just for viewers, because the ownership
+ * line ("You own ×3") is shown to admins too — editing the set does not put a
+ * card in your binder.
  */
 export default function CardDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -58,6 +72,7 @@ export default function CardDetailScreen() {
   const [employeeName, setEmployeeName] = useState<string | null>(null);
   const [variant, setVariant] = useState<CardVariant>('base');
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  const [ownership, setOwnership] = useState<CardOwnership | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -73,8 +88,14 @@ export default function CardDetailScreen() {
           return;
         }
 
-        const row = await fetchCard(id);
+        // The catalog read and the personal read, together. Either one alone
+        // is wrong for somebody: admins need the ownership line, crew get
+        // nothing at all from the catalog.
+        const [catalogRow, owned] = await Promise.all([fetchCard(id), fetchOwnedCard(id)]);
         if (cancelled) return;
+
+        setOwnership(owned?.ownership ?? null);
+        const row = catalogRow ?? owned?.card ?? null;
         if (!row) {
           setCard(null);
           setState('missing');
@@ -82,6 +103,14 @@ export default function CardDetailScreen() {
         }
         setCard(row);
         setState('ok');
+
+        // Show it in the best finish this person actually pulled — a foil in
+        // your binder should not open as the base printing.
+        if (owned) {
+          const counts = owned.ownership.countsByVariant;
+          if (counts.holo > 0) setVariant('holo');
+          else if (counts.foil > 0) setVariant('foil');
+        }
 
         const urls = await fetchCardArtUrls([row]);
         if (!cancelled) setArtUrl(urls.get(row.id) ?? null);
@@ -145,9 +174,13 @@ export default function CardDetailScreen() {
         <Screen edges={[]}>
           <EmptyState
             icon="help-circle-outline"
-            title="No card with that name"
-            body={`Nothing in the set is called "${id}". It may have been renamed, or the link is old.`}
-            action={{ label: 'Back to the binder', onPress: () => router.replace('/cards') }}
+            title={isAdmin ? 'No card with that name' : 'Not in your deck'}
+            body={
+              isAdmin
+                ? `Nothing in the set is called "${id}". It may have been renamed, or the link is old.`
+                : `You haven't pulled "${id}" yet — or there is no such card. Open a pack and find out.`
+            }
+            action={{ label: 'Back to My Deck', onPress: () => router.replace('/cards') }}
           />
         </Screen>
       </>
@@ -196,6 +229,26 @@ export default function CardDetailScreen() {
             ))}
           </View>
         )}
+
+        <Card tone={ownership && ownership.copies > 0 ? 'sunk' : undefined}>
+          <View style={styles.ownRow}>
+            <Ionicons
+              name={ownership && ownership.copies > 0 ? 'albums' : 'albums-outline'}
+              size={18}
+              color={ownership && ownership.copies > 0 ? colors.accentPrimary : colors.textMuted}
+            />
+            <View style={styles.ownText}>
+              <AppText variant="bodyStrong">
+                {ownership ? (ownershipLabel(ownership) ?? 'Not in your deck yet') : 'Not in your deck yet'}
+              </AppText>
+              <AppText variant="caption" color={colors.textMuted}>
+                {ownership && ownership.copies > 0
+                  ? 'Your copies. Duplicates are how you end up with a shiny one.'
+                  : 'You earn a pack for every ten hours worked. Seven cards a pack.'}
+              </AppText>
+            </View>
+          </View>
+        </Card>
 
         {card.archived_at ? (
           <Card tone="danger">
@@ -349,6 +402,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     gap: spacing.xs + 2,
+  },
+  ownRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  ownText: {
+    flexShrink: 1,
+    gap: 2,
   },
   detailRow: {
     flexDirection: 'row',
