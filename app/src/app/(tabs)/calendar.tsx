@@ -2,6 +2,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { EmployeeOfMonth } from '@/components/EmployeeOfMonth';
 import { JobCard } from '@/components/JobCard';
 import {
   AnimatedPressable,
@@ -25,9 +26,14 @@ import { formatTimeLabel } from '@/lib/time';
  * This screen used to BE `(tabs)/index.tsx` — it was what the app opened to.
  * When Home took over that slot the calendar moved here whole: the month-grid
  * builder, the Sunday-omitting week rows, the range queries and the crew lines
- * are the same code, and the greeting, clock card, Employee of the Month card,
- * push-token registration and widget sync went to Home with it. Nothing about
- * how the schedule reads or refreshes changed.
+ * are the same code, and the greeting, clock card, push-token registration
+ * and widget sync went to Home with it. Nothing about how the schedule reads
+ * or refreshes changed.
+ *
+ * Employee of the Month came BACK the other way on 2026-08-22, now as a
+ * trophy placard at the top of this screen. It is the one thing here that
+ * isn't the schedule, and it is deliberately above the week/month toggle:
+ * recognition you have to scroll to find is not recognition.
  */
 
 /** One cell of the month grid. */
@@ -257,6 +263,14 @@ export default function CalendarScreen() {
 
   return (
     <Screen header={<AppText variant="title">Calendar</AppText>}>
+      {/* Employee of the Month, as a trophy placard. It lived on Home until
+          2026-08-22; this is the screen you open to look at the month, so the
+          month's award belongs at the top of it. Every role sees it, and it
+          renders nothing at all when there is no award on record — so the
+          week toggle below is the first thing on the screen for a brand-new
+          company. */}
+      <EmployeeOfMonth />
+
       {role?.isAdmin ? (
         <View style={styles.viewToggleRow}>
           {(['week', 'month'] as const).map((mode) => (

@@ -5,7 +5,6 @@ import { ActivityIndicator, StyleSheet, useWindowDimensions, View } from 'react-
 
 import BuildInfo from '@/components/BuildInfo';
 import { ClockCard } from '@/components/ClockCard';
-import { EmployeeOfMonth } from '@/components/EmployeeOfMonth';
 import { HomeHeader } from '@/components/HomeHeader';
 import {
   AnimatedPressable,
@@ -35,11 +34,12 @@ import { supabase } from '@/lib/supabase';
  * Home — the hub the app opens to.
  *
  * This file used to be the Calendar. It is now the front door: greeting and
- * date, the clock card floating over the olive band, company recognition,
- * today's work, and then every screen in the app grouped into sections that
- * respect what this person is actually allowed to do. The calendar itself
- * moved WHOLE to `(tabs)/calendar.tsx`; the clock moved to
- * `components/ClockCard.tsx` with its widget sync intact.
+ * date, the clock card floating over the olive band, today's work, and then
+ * every screen in the app grouped into sections that respect what this person
+ * is actually allowed to do. The calendar itself moved WHOLE to
+ * `(tabs)/calendar.tsx`; the clock moved to `components/ClockCard.tsx` with
+ * its widget sync intact. Employee of the Month followed the calendar over on
+ * 2026-08-22 — Home is where you punch in, not where you linger.
  *
  * WHY THE ROLE HAS AN EXPLICIT LOADING PHASE. `useRole()` returns `null` both
  * while it is loading AND when you are not staff, so a screen that gates on
@@ -58,7 +58,22 @@ export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const gate = useRoleGate();
-  const isAdmin = gate.role?.isAdmin ?? false;
+  /**
+   * ADMIN-ONLY TILES — the Money group (Financials, Sales) and Hours,
+   * Employees, Employee of the Month.
+   *
+   * This is deliberately `ready && isAdmin === true` rather than
+   * `gate.role?.isAdmin ?? false`. The two agree today, because the loading
+   * phase renders skeletons instead of the grid — but they agree by accident,
+   * and the moment somebody rearranges that branch the optimistic form starts
+   * rendering a guess. Every state that is not a CONFIRMED admin — still
+   * loading, lookup failed, signed out, `role === null` — is not an admin
+   * here, and there is no path through this file where an admin tile can be
+   * drawn from a maybe. (`lib/hub.ts` gating is a courtesy either way: the
+   * destinations check for themselves and RLS decides what any query
+   * returns.)
+   */
+  const isAdmin = gate.phase === 'ready' && gate.role?.isAdmin === true;
 
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -174,13 +189,12 @@ export default function HomeScreen() {
             design — see shadows.hero in constants/theme. */}
         <ClockCard style={styles.clock} />
 
-        {/* Company recognition — every role sees this, crew included. Renders
-            nothing at all when there is no award on record. */}
-        <FadeInUp index={0}>
-          <EmployeeOfMonth />
-        </FadeInUp>
+        {/* Employee of the Month used to sit here. It moved to the Calendar
+            on 2026-08-22 at Devon's request — Home is the punch-in screen,
+            and recognition reads better on the screen you open to look at the
+            month. See components/EmployeeOfMonth.tsx. */}
 
-        <FadeInUp index={1}>
+        <FadeInUp index={0}>
           <Card padded={false} style={styles.todayCard}>
             <ListRow
               icon="today"
