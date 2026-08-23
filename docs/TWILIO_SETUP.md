@@ -63,8 +63,9 @@ day one.
 
 1. Console → **Messaging → Regulatory Compliance → Trust Hub → Business
    Profile**. Standard (not Sole Proprietor).
-   - Legal business name: **Durbin Enterprises LLC** trading as **DC Solar KC**
-     (use the name exactly as it appears on the EIN letter)
+   - Legal business name: **DC Solar LLC** trading as **DC Solar KC**
+     (this matches the EIN letter — the legal entity is DC Solar LLC, NOT
+     Durbin Enterprises LLC)
    - EIN: **93-3073873**
    - Business type: LLC · Industry: Energy · Website: `https://dcsolarkc.com`
    - Authorized representative: Devon Durbin, devon@dcsolarkc.com, mobile number
@@ -111,8 +112,8 @@ day one.
 A separate, **unchecked by default** checkbox immediately above the signature,
 in the same size type as everything around it:
 
-> ☐ **Text me about my project.** I agree that DC Solar KC (Durbin Enterprises
-> LLC) may send me text messages about scheduling, job updates, estimates and
+> ☐ **Text me about my project.** I agree that DC Solar KC (DC Solar LLC) may
+> send me text messages about scheduling, job updates, estimates and
 > invoices at the mobile number I provided. Message frequency varies. Message
 > and data rates may apply. Reply STOP to opt out or HELP for help. Consent is
 > not a condition of purchase. See our SMS Terms at dcsolarkc.com/sms-terms and
@@ -125,7 +126,7 @@ Record who ticked it: `customers.sms_opt_in_source` exists for exactly this
 
 The carriers open this URL during review. It has to say, in plain words:
 
-- **who is sending** — DC Solar KC, a trade name of Durbin Enterprises LLC,
+- **who is sending** — DC Solar KC, a trade name of DC Solar LLC,
   Kansas City, MO, (816) 274-2415, devon@dcsolarkc.com;
 - **what is sent** — appointment scheduling and reminders, "on our way" and
   "arrived" notices, job status updates, estimates and invoices, and review
