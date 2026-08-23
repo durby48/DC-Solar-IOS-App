@@ -3,7 +3,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -203,6 +203,22 @@ export default function CustomerDetailScreen() {
   const [segment, setSegment] = useState<Segment>(
     isSegment(params.segment) ? params.segment : 'overview',
   );
+
+  // Horizontal segment track: remember where each segment sits so the active
+  // one can be scrolled into view (a deep link to ?segment=comms lands on the
+  // far right of a phone-width track).
+  const segmentScrollRef = useRef<ScrollView>(null);
+  const segmentLayoutRef = useRef<Partial<Record<Segment, { x: number; width: number }>>>({});
+  const scrollSegmentIntoView = useCallback((key: Segment) => {
+    const box = segmentLayoutRef.current[key];
+    if (!box) return;
+    // Center the segment in the track; ScrollView clamps out-of-range offsets.
+    const target = Math.max(0, box.x + box.width / 2 - 160);
+    segmentScrollRef.current?.scrollTo({ x: target, animated: true });
+  }, []);
+  useEffect(() => {
+    scrollSegmentIntoView(segment);
+  }, [segment, scrollSegmentIntoView]);
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   /**
@@ -1838,25 +1854,45 @@ export default function CustomerDetailScreen() {
     </>
   );
 
+  // Six segments do not fit a phone at equal widths (the old wrap-inside-a-
+  // pill layout pushed "Comms" and "Notes" onto a clipped second row), so the
+  // track scrolls horizontally, each segment is sized to its label, and the
+  // active one is scrolled into view whenever it changes.
   const segmentBar = (
-    <View style={styles.segmentRow}>
-      {segments.map((option) => {
-        const active = option.key === segment;
-        return (
-          <Pressable
-            key={option.key}
-            onPress={() => setSegment(option.key)}
-            style={({ pressed }) => [
-              styles.segment,
-              active && styles.segmentActive,
-              pressed && styles.pressed,
-            ]}>
-            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-              {option.label}
-            </Text>
-          </Pressable>
-        );
-      })}
+    <View style={styles.segmentTrack}>
+      <ScrollView
+        ref={segmentScrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.segmentRow}
+        keyboardShouldPersistTaps="handled">
+        {segments.map((option) => {
+          const active = option.key === segment;
+          return (
+            <Pressable
+              key={option.key}
+              onPress={() => setSegment(option.key)}
+              onLayout={(e) => {
+                const { x, width } = e.nativeEvent.layout;
+                segmentLayoutRef.current[option.key] = { x, width };
+                if (active) scrollSegmentIntoView(option.key);
+              }}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              style={({ pressed }) => [
+                styles.segment,
+                active && styles.segmentActive,
+                pressed && styles.pressed,
+              ]}>
+              <Text
+                numberOfLines={1}
+                style={[styles.segmentText, active && styles.segmentTextActive]}>
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
     </View>
   );
 
@@ -1975,24 +2011,31 @@ const styles = StyleSheet.create({
 
   // Segmented control: a pill track with the active segment filled, matching
   // the Sales tab so the app has one segmented control, not two.
-  segmentRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  segmentTrack: {
     backgroundColor: colors.tan,
     borderRadius: radii.pill,
     padding: 3,
+    overflow: 'hidden',
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    // Lets a short list (a viewer's four segments) still fill the track.
+    minWidth: '100%',
   },
   segment: {
     flexGrow: 1,
-    flexBasis: 0,
-    minWidth: 74,
+    flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radii.pill,
+    minHeight: 34,
     paddingVertical: spacing.sm - 2,
+    paddingHorizontal: spacing.md,
   },
   segmentActive: { backgroundColor: colors.white, ...shadows.card },
-  segmentText: { color: colors.inkSoft, fontSize: 12, fontWeight: '800' },
+  segmentText: { color: colors.inkSoft, fontSize: 13, fontWeight: '800' },
   segmentTextActive: { color: colors.ink },
 
   card: {
