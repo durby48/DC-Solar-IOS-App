@@ -6,6 +6,12 @@
  * the next `DC-#####` moniker from a fresh read of the jobs table, which is
  * why `createJob` still retries once on a 23505 unique violation.
  *
+ * JOB NUMBERS FILL GAPS (2026-08-23). `nextJobNumber` returns the SMALLEST
+ * unused number for the current year, not max + 1 — see the comment on the
+ * function. Deleting a job is what made that necessary, and deleting a job is
+ * `deleteJob` at the bottom of this file: an RPC, because seventeen tables
+ * reference `jobs.id` and three of them hold money or payroll.
+ *
  * HISTORICAL NOTE (2026-08-22). Until this file was rewritten, every write
  * generated 2^4 = 16 candidate payloads — one per subset of the optional
  * column groups (`stage`, PM fields, `completed_on`, the metrics quartet) —
@@ -101,10 +107,69 @@ export async function fetchMyJobHours(params: {
 }
 
 /**
+ * The two-digit year a job number is stamped with: 2026 → '26'. Job numbers
+ * are `DC-<yy><nnn>`, so reading the year off the clock is what rolls the
+ * sequence to DC-27001 on 1 January without anyone editing this file.
+ */
+function jobNumberYear(today: Date): string {
+  return String(today.getFullYear() % 100).padStart(2, '0');
+}
+
+/**
+ * The smallest job number for this year that nobody is using.
+ *
+ * WHY NOT max + 1. Devon can now delete a job (`deleteJob` below). Deleting
+ * DC-26033 and then having the next job come out as DC-26034 leaves a hole
+ * that nothing will ever fill — the paper trail reads as if a job existed and
+ * vanished, and every printed estimate, invoice and contract from then on is
+ * off by one against the count of jobs actually done. Filling the gap is what
+ * he asked for and what the numbering is for.
+ *
+ * ONLY THIS YEAR'S NUMBERS ARE CONSIDERED. Last year's DC-25xxx are matched by
+ * neither the search nor the result, so a gap left in 2025 stays there: the
+ * year prefix is part of the identity of the job, not padding.
+ *
+ * Exported and pure so the gap logic can be tested without a database.
+ */
+export function nextJobNumberFrom(
+  existing: readonly (string | null | undefined)[],
+  today: Date = new Date(),
+): string {
+  const yy = jobNumberYear(today);
+  // `\d{3,}` and not `\d{3}` so a hypothetical DC-261000 (see below) is still
+  // counted as used on the next call rather than handed out twice.
+  const pattern = new RegExp(`^DC-${yy}(\\d{3,})$`);
+
+  const used = new Set<number>();
+  for (const value of existing) {
+    const match = pattern.exec((value ?? '').trim());
+    if (!match) continue;
+    const n = Number(match[1]);
+    if (Number.isInteger(n) && n >= 1) used.add(n);
+  }
+
+  for (let n = 1; n <= 999; n++) {
+    if (!used.has(n)) return `DC-${yy}${String(n).padStart(3, '0')}`;
+  }
+
+  // 999 jobs in one year and not one gap. Keep counting into a fourth digit
+  // rather than returning null — DC-261000 still sorts after DC-26999.
+  let n = 1000;
+  while (used.has(n)) n++;
+  return `DC-${yy}${n}`;
+}
+
+/**
  * Next job moniker, computed from the live jobs table so the app and the
- * dcsolarkc.com ops console never diverge: read every `DC-…` job_number,
- * take the max numeric suffix + 1, keep the same digit width
- * (DC-26001…DC-26018 → DC-26019). Null when the table can't be read.
+ * dcsolarkc.com ops console never hand out the same number.
+ *
+ * The ops console still does max + 1. That is harmless: the two can only ever
+ * disagree about WHICH free number to take, never about whether a number is
+ * free, and `jobs_company_job_number_key` is unique on
+ * (company, lower(job_number)) — so the loser of a race gets a 23505 and
+ * `createJob` recomputes and retries. The visible difference
+ * is that a job created in the app reuses a deleted number and one created on
+ * the website appends. Null when the table can't be read.
  */
 export async function nextJobNumber(): Promise<string | null> {
   try {
@@ -114,21 +179,7 @@ export async function nextJobNumber(): Promise<string | null> {
       .eq('company', COMPANY)
       .like('job_number', 'DC-%');
     if (error || !data) return null;
-
-    let max = 0;
-    let width = 5;
-    for (const row of data as { job_number: string | null }[]) {
-      const match = /^DC-(\d+)$/.exec(row.job_number ?? '');
-      if (!match) continue;
-      const n = Number(match[1]);
-      if (!Number.isFinite(n)) continue;
-      if (n > max) {
-        max = n;
-        width = match[1].length;
-      }
-    }
-    if (max === 0) return 'DC-26001';
-    return `DC-${String(max + 1).padStart(width, '0')}`;
+    return nextJobNumberFrom((data as { job_number: string | null }[]).map((r) => r.job_number));
   } catch {
     return null;
   }
@@ -289,6 +340,129 @@ export async function createJob(fields: JobEditableFields): Promise<CreateJobRes
     return { ok: false, message: 'Could not create the job — the job number was taken twice. Try again.' };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not create the job.' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Deleting a job
+// ---------------------------------------------------------------------------
+
+/** Buckets `delete_job` can orphan objects in. Admins hold delete policies on all three. */
+const DELETABLE_BUCKETS = ['contracts', 'job-photos', 'property-art'] as const;
+
+/** Rows that survived the delete with their `job_id` set to null, by table. */
+export type JobUnassignedCounts = Record<string, number>;
+
+export type DeleteJobResult =
+  | { ok: true; jobNumber: string | null; unassigned: JobUnassignedCounts; filesRemoved: number }
+  | {
+      ok: false;
+      message: string;
+      /** True only when retrying with `{ force: true }` would get past this. */
+      canForce: boolean;
+    };
+
+/**
+ * Remove the storage objects `delete_job` just orphaned. Best effort by
+ * design: the rows are already gone and committed, so a failed remove leaves
+ * an unreferenced file, which is litter, not data loss — whereas throwing here
+ * would tell Devon the delete failed when it did not.
+ */
+async function removeOrphanedFiles(paths: unknown): Promise<number> {
+  const grouped = (paths ?? {}) as Record<string, unknown>;
+  let removed = 0;
+  for (const bucket of DELETABLE_BUCKETS) {
+    const raw = grouped[bucket];
+    const list = Array.isArray(raw)
+      ? raw.filter((p): p is string => typeof p === 'string' && p.length > 0)
+      : [];
+    if (list.length === 0) continue;
+    try {
+      const { error } = await supabase.storage.from(bucket).remove(list);
+      if (!error) removed += list.length;
+    } catch {
+      // Ignore — see the doc comment.
+    }
+  }
+  return removed;
+}
+
+/**
+ * Delete one project. Admin only; never throws.
+ *
+ * All the work happens in the `delete_job` RPC (migration
+ * 2026-08-23_job_delete.sql) because seventeen tables reference `jobs.id` and
+ * three of them hold money or payroll. `public.jobs` has no DELETE policy at
+ * all, so there is no client-side path that could do this by accident.
+ *
+ * The RPC refuses (P0001) when the job carries payments, invoices or logged
+ * hours, and says how many of each. That refusal is recoverable — passing
+ * `{ force: true }` un-assigns them instead (the rows themselves are never
+ * deleted) — and the database marks the recoverable case with HINT = 'force',
+ * which is what `canForce` reports. The internal company job comes back with
+ * HINT = 'never' and no amount of forcing moves it.
+ *
+ * On success the orphaned contract PDFs, job photos and property artwork are
+ * removed from storage best-effort.
+ */
+export async function deleteJob(
+  jobId: string,
+  options?: { force?: boolean },
+): Promise<DeleteJobResult> {
+  const force = options?.force === true;
+  try {
+    const { data, error } = await supabase.rpc('delete_job', {
+      p_job_id: jobId,
+      p_force: force,
+    });
+
+    if (error) {
+      if (error.code === '42501') {
+        return {
+          ok: false,
+          message: 'Only owners and operators can delete a project.',
+          canForce: false,
+        };
+      }
+      if (error.code === 'P0002') {
+        return {
+          ok: false,
+          message: 'That project has already been deleted.',
+          canForce: false,
+        };
+      }
+      return {
+        ok: false,
+        message: error.message || 'Could not delete the project.',
+        // Branch on the database's own hint, never on the message text.
+        canForce: error.code === 'P0001' && error.hint === 'force' && !force,
+      };
+    }
+
+    const result = (data ?? {}) as {
+      deleted?: boolean;
+      job_number?: string | null;
+      storage_paths?: unknown;
+      nulled?: Record<string, unknown>;
+    };
+    if (!result.deleted) {
+      return { ok: false, message: 'Nothing was deleted.', canForce: false };
+    }
+
+    const unassigned: JobUnassignedCounts = {};
+    for (const [table, count] of Object.entries(result.nulled ?? {})) {
+      const n = Number(count);
+      if (Number.isFinite(n) && n > 0) unassigned[table] = n;
+    }
+
+    const filesRemoved = await removeOrphanedFiles(result.storage_paths);
+    return { ok: true, jobNumber: result.job_number ?? null, unassigned, filesRemoved };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : 'Could not delete the project.',
+      canForce: false,
+    };
   }
 }
 

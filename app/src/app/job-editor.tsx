@@ -22,6 +22,7 @@ import * as haptics from '@/lib/haptics';
 import {
   createCustomer,
   createJob,
+  deleteJob,
   fetchCustomers,
   JOB_TYPES,
   nextJobNumber,
@@ -91,6 +92,16 @@ export default function JobEditorScreen() {
   const [hasCritterGuard, setHasCritterGuard] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+
+  // Two-tap delete, same shape as the account-deletion confirm in more.tsx:
+  // the first tap only reveals a danger card spelling out what goes, the
+  // second one actually calls the RPC. `deleteCanForce` is set when the
+  // database refuses because money or hours are attached — that is the only
+  // case where a third tap ("Un-assign and delete anyway") is offered.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteCanForce, setDeleteCanForce] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -269,6 +280,24 @@ export default function JobEditorScreen() {
       if (result.warning) setWarning(result.warning);
       router.replace({ pathname: '/job/[id]', params: { id: result.id } });
     }
+  };
+
+  const removeProject = async (force: boolean) => {
+    if (!jobId) return;
+    setDeleteError(null);
+    setDeleting(true);
+    const result = await deleteJob(jobId, { force });
+    if (!result.ok) {
+      setDeleting(false);
+      setDeleteError(result.message);
+      setDeleteCanForce(result.canForce);
+      haptics.error();
+      return;
+    }
+    haptics.warn();
+    // Back to the board, not back to the detail screen of a job that no
+    // longer exists.
+    router.replace('/pipeline');
   };
 
   const screenTitle = isEdit ? 'Edit project' : 'New project';
@@ -619,6 +648,69 @@ export default function JobEditorScreen() {
           fullWidth
           style={styles.saveButton}
         />
+
+        {/* Deleting is edit-mode only and lives below the save button, where
+            it cannot be hit by someone reaching for it. */}
+        {isEdit ? (
+          confirmingDelete ? (
+            <Card tone="danger" style={styles.dangerCard}>
+              <AppText variant="heading" color={colors.danger}>
+                Delete {jobNumber ?? 'this project'}?
+              </AppText>
+              <AppText variant="body" color={colors.textSecondary}>
+                Removes {jobNumber ?? 'the project'}, its schedule, crew, photos, documents,
+                materials and artwork. Money and hours are never deleted; they get un-assigned.
+              </AppText>
+              <AppText variant="caption" color={colors.textMuted}>
+                {jobNumber ?? 'The number'} goes back into the pool — the next project you create
+                will take it.
+              </AppText>
+              {deleteError ? (
+                <AppText variant="bodyStrong" color={colors.danger}>
+                  {deleteError}
+                </AppText>
+              ) : null}
+              <View style={styles.dangerRow}>
+                <Button
+                  label="Cancel"
+                  variant="ghost"
+                  size="sm"
+                  disabled={deleting}
+                  onPress={() => {
+                    setConfirmingDelete(false);
+                    setDeleteError(null);
+                    setDeleteCanForce(false);
+                  }}
+                />
+                <Button
+                  label={deleteCanForce ? 'Un-assign and delete anyway' : 'Delete project'}
+                  variant="danger"
+                  size="sm"
+                  loading={deleting}
+                  disabled={deleting}
+                  onPress={() => removeProject(deleteCanForce)}
+                />
+              </View>
+            </Card>
+          ) : (
+            <AnimatedPressable
+              onPress={() => {
+                setConfirmingDelete(true);
+                setDeleteError(null);
+                setDeleteCanForce(false);
+              }}
+              haptic="tapLight"
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={`Delete ${jobNumber ?? 'this project'}`}
+              style={styles.deleteLinkWrap}>
+              <Ionicons name="trash" size={16} color={colors.danger} />
+              <AppText variant="caption" color={colors.danger}>
+                Delete project
+              </AppText>
+            </AnimatedPressable>
+          )
+        ) : null}
       </Screen>
     </>
   );
@@ -674,6 +766,27 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   saveButton: {
+    marginTop: spacing.sm,
+  },
+  dangerCard: {
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.danger,
+    marginTop: spacing.md,
+  },
+  dangerRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  deleteLinkWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
     marginTop: spacing.sm,
   },
 });
