@@ -185,6 +185,34 @@ export default function FinancialsScreen() {
   };
 
   /** One selected month's headline figures, from data already fetched. */
+  /**
+   * Auto-adjustment of the anchored bank balance: every CHASE transaction
+   * recorded after the anchor was saved moves the displayed balance without
+   * anyone retyping it. Chase-marked only, on purpose — an expense paid from
+   * someone's own pocket (the ladder rack on Isaiah's card) never touched
+   * the account, and it is already handled by "owed for out-of-pocket".
+   * Re-anchoring the balance resets the adjustment to zero.
+   */
+  const bankAdjustment = useMemo(() => {
+    const anchorAt = settings?.anchorAt;
+    if (!anchorAt || !data) return { total: 0, count: 0 };
+    const isChase = (e: LedgerEntry) =>
+      (e.counterparty ?? '').trim().toLowerCase() === 'chase' ||
+      /account ending in/i.test(e.description ?? '');
+    let total = 0;
+    let count = 0;
+    for (const e of data.allEntries) {
+      if (!e.created_at || e.created_at <= anchorAt) continue;
+      if (!isChase(e)) continue;
+      const inflow = e.type === 'payment' || (e.type === 'investment' && e.direction !== 'out');
+      const outflow = e.type === 'expense' || (e.type === 'investment' && e.direction === 'out');
+      if (!inflow && !outflow) continue;
+      total += inflow ? e.amount : -e.amount;
+      count += 1;
+    }
+    return { total, count };
+  }, [settings, data]);
+
   const overviewMonth = useMemo<OverviewMonth>(() => {
     const ym = overviewYm;
     let paid = 0;
@@ -678,8 +706,13 @@ export default function FinancialsScreen() {
             onNext={() => setOverviewYm((ym) => shiftYm(ym, 1))}
           />
           <CashPositionPanel
-            bankBalance={settings?.bankBalance ?? null}
+            bankBalance={
+              settings?.bankBalance == null
+                ? null
+                : settings.bankBalance + bankAdjustment.total
+            }
             asOf={settings?.bankBalanceAsOf ?? null}
+            adjustment={bankAdjustment}
             capital={capitalInvested.total}
             owed={owedOutOfPocket.total}
             unpaidWages={unpaidWages}

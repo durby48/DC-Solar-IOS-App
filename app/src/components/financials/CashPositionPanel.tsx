@@ -35,6 +35,7 @@ export function CashPositionPanel({
   byPerson,
   capitalEntries = [],
   owedEntries = [],
+  adjustment,
 }: {
   bankBalance: number | null;
   asOf: string | null;
@@ -48,6 +49,8 @@ export function CashPositionPanel({
   capitalEntries?: CashDetailEntry[];
   /** The ledger entries behind "Less owed for out-of-pocket". */
   owedEntries?: CashDetailEntry[];
+  /** Chase transactions recorded since the balance anchor, already applied. */
+  adjustment?: { total: number; count: number };
 }) {
   // Which reconciliation row is expanded to show its ledger entries.
   const [openDetail, setOpenDetail] = useState<string | null>(null);
@@ -70,7 +73,14 @@ export function CashPositionPanel({
     {
       label: 'Bank balance',
       amount: bankBalance,
-      note: asOf ? `as of ${formatShortDate(asOf)}` : undefined,
+      note:
+        asOf && adjustment?.count
+          ? `as of ${formatShortDate(asOf)} ${adjustment.total < 0 ? '−' : '+'} ${adjustment.count} Chase ${
+              adjustment.count === 1 ? 'transaction' : 'transactions'
+            } since`
+          : asOf
+            ? `as of ${formatShortDate(asOf)}`
+            : undefined,
     },
     {
       label: 'Less capital invested',

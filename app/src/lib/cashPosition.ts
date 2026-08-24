@@ -28,6 +28,12 @@ export interface CompanySettings {
   bankBalance: number | null;
   /** The date that balance was true, so the UI can say how stale it is. */
   bankBalanceAsOf: string | null;
+  /**
+   * WHEN the balance was recorded (row timestamp). Ledger entries created
+   * after this moment adjust the displayed balance automatically — see the
+   * Financials screen's bank-adjustment memo.
+   */
+  anchorAt: string | null;
   /** Last day covered by a completed payroll run. */
   payrollThrough: string | null;
 }
@@ -48,13 +54,14 @@ export interface CashPosition extends CompanySettings {
 export async function fetchCompanySettings(): Promise<CompanySettings | null> {
   const { data, error } = await supabase
     .from('company_settings')
-    .select('bank_balance, bank_balance_as_of, payroll_through')
+    .select('bank_balance, bank_balance_as_of, payroll_through, updated_at')
     .eq('company', COMPANY)
     .maybeSingle();
   if (error || !data) return null;
   return {
     bankBalance: data.bank_balance === null ? null : Number(data.bank_balance),
     bankBalanceAsOf: data.bank_balance_as_of ?? null,
+    anchorAt: (data.updated_at as string | null) ?? null,
     payrollThrough: data.payroll_through ?? null,
   };
 }
