@@ -211,6 +211,14 @@ export interface CompanyTotals {
   contracted: number;
   /** Contract values (invoice entries) of Pending Payment jobs only. */
   invoiced: number;
+  /**
+   * Everything contracted this year: actively contracted + Pending Payment +
+   * Complete jobs' invoice totals. A job stays in this figure for the whole
+   * contract lifecycle instead of vanishing the day it is invoiced.
+   */
+  contractedYtd: number;
+  /** Everything invoiced this year: Pending Payment + Complete jobs. */
+  invoicedYtd: number;
   /** Sum of all payment entries. */
   paid: number;
   /**
@@ -300,11 +308,15 @@ export async function fetchCompanyTotals(
     // Contracted vs Invoiced: bucket each job's invoice total by stage.
     let contracted = 0;
     let invoiced = 0;
+    let completedInvoiced = 0;
     for (const [jobId, amount] of invoicedByJob) {
       const stage = stageById.get(jobId);
       if (stage === 'Pending Payment') invoiced += amount;
+      else if (stage === 'Complete') completedInvoiced += amount;
       else if (stage && CONTRACTED_STAGES.includes(stage)) contracted += amount;
     }
+    const invoicedYtd = invoiced + completedInvoiced;
+    const contractedYtd = contracted + invoicedYtd;
 
     const laborMap = await fetchLaborHoursByJob();
     if (!laborMap) return null;
@@ -331,6 +343,8 @@ export async function fetchCompanyTotals(
       estimateJobs: latestByJob.size,
       contracted,
       invoiced,
+      contractedYtd,
+      invoicedYtd,
       paid,
       avgProfitPct,
     };

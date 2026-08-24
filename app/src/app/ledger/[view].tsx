@@ -23,6 +23,7 @@ import { colors, radii, spacing } from '@/constants/theme';
 import { getDocumentUrl } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
 import {
+  deleteFinanceEntry,
   generateContractPdf,
   setJobContractValue,
   updateFinanceEntry,
@@ -46,20 +47,42 @@ import { stageOrDefault, type Stage } from '@/lib/stages';
  * Admin-only (the underlying finance query returns null otherwise).
  */
 
-type ViewKey = 'estimates' | 'invoices' | 'contracted' | 'paid' | 'labor';
+type ViewKey =
+  | 'estimates'
+  | 'invoices'
+  | 'invoiced-active'
+  | 'invoiced-ytd'
+  | 'contracted'
+  | 'contracted-ytd'
+  | 'paid'
+  | 'labor';
 
 const VIEW_TITLES: Record<ViewKey, string> = {
   estimates: 'All estimates',
   invoices: 'All invoices',
-  contracted: 'Jobs under contract',
+  'invoiced-active': 'Actively invoiced',
+  'invoiced-ytd': 'Invoiced YTD',
+  contracted: 'Actively contracted',
+  'contracted-ytd': 'Contracted YTD',
   paid: 'Payments received',
   labor: 'Labor by month',
 };
 
-const ENTRY_TYPE: Record<Exclude<ViewKey, 'contracted' | 'labor'>, LedgerEntry['type']> = {
+const ENTRY_TYPE: Record<
+  Exclude<ViewKey, 'contracted' | 'contracted-ytd' | 'labor'>,
+  LedgerEntry['type']
+> = {
   estimates: 'estimate',
   invoices: 'invoice',
+  'invoiced-active': 'invoice',
+  'invoiced-ytd': 'invoice',
   paid: 'payment',
+};
+
+/** Job stages each stage-scoped view accepts (null = no stage restriction). */
+const VIEW_STAGES: Partial<Record<ViewKey, readonly Stage[]>> = {
+  'invoiced-active': ['Pending Payment'],
+  'invoiced-ytd': ['Pending Payment', 'Complete'],
 };
 
 type Period = 'all' | 'month' | 'quarter' | 'ytd';
@@ -114,7 +137,16 @@ interface JobGroup {
 export default function LedgerScreen() {
   const params = useLocalSearchParams<{ view?: string }>();
   const view: ViewKey = (
-    ['estimates', 'invoices', 'contracted', 'paid', 'labor'] as ViewKey[]
+    [
+      'estimates',
+      'invoices',
+      'invoiced-active',
+      'invoiced-ytd',
+      'contracted',
+      'contracted-ytd',
+      'paid',
+      'labor',
+    ] as ViewKey[]
   ).includes(params.view as ViewKey)
     ? (params.view as ViewKey)
     : 'estimates';
@@ -132,6 +164,10 @@ export default function LedgerScreen() {
   const [jobStatus, setJobStatus] = useState<JobStatusFilter>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Two-tap delete, same pattern as the expense ledger: first tap arms the
+  // row, the second actually deletes.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   // Inline contract-value editing (contracted view).
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -185,11 +221,18 @@ export default function LedgerScreen() {
 
   // Entry views: filter → group per job (pipeline order, company bucket last).
   const groups = useMemo<JobGroup[]>(() => {
-    if (view === 'contracted' || view === 'labor' || !entries) return [];
+    if (view === 'contracted' || view === 'contracted-ytd' || view === 'labor' || !entries)
+      return [];
     const type = ENTRY_TYPE[view];
+    const stages = VIEW_STAGES[view];
     const filtered = entries.filter((e) => {
       if (e.type !== type) return false;
       if (!inPeriod(e.occurred_on, period)) return false;
+      if (stages) {
+        // Stage-scoped views: keep only entries on jobs in those stages.
+        const stage = e.job_id ? jobs.get(e.job_id)?.stage : undefined;
+        if (!stage || !stages.includes(stage)) return false;
+      }
       if (view === 'invoices' && jobStatus !== 'all') {
         const stage = e.job_id ? jobs.get(e.job_id)?.stage : undefined;
         const completed = stage === 'Complete';
@@ -225,9 +268,15 @@ export default function LedgerScreen() {
     return ordered;
   }, [view, entries, jobs, jobOrder, period, jobStatus]);
 
-  // Contracted view: jobs in a contracted stage + their contract (invoice) value.
+  // Contracted views: jobs by stage + their contract (invoice) value.
+  // 'contracted' = actively contracted stages only; 'contracted-ytd' keeps
+  // the job through Pending Payment and Complete — the whole lifecycle.
   const contractedJobs = useMemo(() => {
-    if (view !== 'contracted' || !entries) return [];
+    if ((view !== 'contracted' && view !== 'contracted-ytd') || !entries) return [];
+    const stages: readonly Stage[] =
+      view === 'contracted'
+        ? CONTRACTED_STAGES
+        : [...CONTRACTED_STAGES, 'Pending Payment', 'Complete'];
     const invoiceTotals = new Map<string, number>();
     for (const e of entries) {
       if (e.type === 'invoice' && e.job_id) {
@@ -236,7 +285,7 @@ export default function LedgerScreen() {
     }
     return jobOrder
       .map((id) => jobs.get(id))
-      .filter((job): job is JobInfo => !!job && CONTRACTED_STAGES.includes(job.stage))
+      .filter((job): job is JobInfo => !!job && stages.includes(job.stage))
       .map((job) => ({ job, value: invoiceTotals.get(job.id) ?? 0 }));
   }, [view, entries, jobs, jobOrder]);
 
@@ -314,16 +363,17 @@ export default function LedgerScreen() {
       }));
   }, [view, laborRuns]);
 
+  const jobCardView = view === 'contracted' || view === 'contracted-ytd';
   const total =
     view === 'labor'
       ? laborRuns.reduce((sum, r) => sum + r.totalWithdrawn, 0) + laborEstimate
-      : view === 'contracted'
+      : jobCardView
         ? contractedJobs.reduce((sum, row) => sum + row.value, 0)
         : groups.reduce((sum, g) => sum + g.subtotal, 0);
   const count =
     view === 'labor'
       ? laborRuns.length
-      : view === 'contracted'
+      : jobCardView
         ? contractedJobs.length
         : groups.reduce((sum, g) => sum + g.entries.length, 0);
 
@@ -396,6 +446,24 @@ export default function LedgerScreen() {
     await load();
   };
 
+  const pressDelete = async (entry: LedgerEntry) => {
+    if (confirmDeleteId !== entry.id) {
+      setConfirmDeleteId(entry.id);
+      return;
+    }
+    setDeletingId(entry.id);
+    setError(null);
+    const result = await deleteFinanceEntry(entry.id);
+    setDeletingId(null);
+    setConfirmDeleteId(null);
+    if (result.ok) {
+      haptics.success();
+      await load();
+    } else {
+      setError(result.message);
+    }
+  };
+
   const sharePdf = async (entry: LedgerEntry) => {
     if (!entry.document_path) return;
     setError(null);
@@ -440,6 +508,8 @@ export default function LedgerScreen() {
       (entry.type === 'estimate' || entry.type === 'invoice') && entry.document_number != null;
     const stale = entry.document_meta?.pdf_state === 'stale';
     const status = paymentStatus(entry, jobKey);
+    const confirming = confirmDeleteId === entry.id;
+    const busyDelete = deletingId === entry.id;
     return (
       <View
         key={entry.id}
@@ -521,6 +591,25 @@ export default function LedgerScreen() {
             )}
           </AnimatedPressable>
         ) : null}
+
+        <AnimatedPressable
+          onPress={() => void pressDelete(entry)}
+          disabled={busyDelete}
+          haptic={confirming ? 'warn' : 'tapLight'}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={confirming ? 'Confirm delete' : 'Delete entry'}
+          style={[styles.iconButton, confirming && styles.iconButtonDanger]}>
+          {busyDelete ? (
+            <ActivityIndicator size="small" color={colors.danger} />
+          ) : (
+            <Ionicons
+              name="trash"
+              size={15}
+              color={confirming ? colors.white : colors.textMuted}
+            />
+          )}
+        </AnimatedPressable>
       </View>
     );
   };
@@ -542,7 +631,7 @@ export default function LedgerScreen() {
 
     return (
       <>
-        {view !== 'contracted' && view !== 'labor' ? chipRow(PERIODS, period, setPeriod as never) : null}
+        {!jobCardView && view !== 'labor' ? chipRow(PERIODS, period, setPeriod as never) : null}
         {view === 'invoices' ? chipRow(JOB_STATUS, jobStatus, setJobStatus as never) : null}
 
         <Card style={styles.totalCard}>
@@ -552,7 +641,7 @@ export default function LedgerScreen() {
               ? count === 1
                 ? 'payroll'
                 : 'payrolls'
-              : view === 'contracted'
+              : jobCardView
                 ? count === 1
                   ? 'job'
                   : 'jobs'
@@ -628,7 +717,7 @@ export default function LedgerScreen() {
               </FadeInUp>
             ))}
           </>
-        ) : view === 'contracted'
+        ) : jobCardView
           ? contractedJobs.map(({ job, value }, index) => {
               const editing = editingJobId === job.id;
               const paid = paidByJob.get(job.id) ?? 0;
@@ -890,6 +979,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.oliveSoft,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  iconButtonDanger: {
+    backgroundColor: colors.danger,
   },
   jobCard: {
     gap: spacing.xs,
