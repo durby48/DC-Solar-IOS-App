@@ -1,9 +1,18 @@
+import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { AppText, Card, ListRow, SectionHeader } from '@/components/ui';
 import { colors, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
 import { formatRounded, formatSigned } from './format';
+
+/** One ledger entry behind a reconciliation row (amount signed as displayed). */
+export interface CashDetailEntry {
+  id: string;
+  occurred_on: string | null;
+  label: string;
+  amount: number;
+}
 
 /**
  * Cash position — why the bank balance is not the same number as profit.
@@ -24,6 +33,8 @@ export function CashPositionPanel({
   unpaidWages,
   inTransit,
   byPerson,
+  capitalEntries = [],
+  owedEntries = [],
 }: {
   bankBalance: number | null;
   asOf: string | null;
@@ -33,7 +44,13 @@ export function CashPositionPanel({
   inTransit: number;
   /** Who put the capital in, so the single figure can be broken out. */
   byPerson: { who: string; amount: number }[];
+  /** The ledger entries behind "Less capital invested" — signed (returns negative). */
+  capitalEntries?: CashDetailEntry[];
+  /** The ledger entries behind "Less owed for out-of-pocket". */
+  owedEntries?: CashDetailEntry[];
 }) {
+  // Which reconciliation row is expanded to show its ledger entries.
+  const [openDetail, setOpenDetail] = useState<string | null>(null);
   if (bankBalance === null) {
     return (
       <View style={styles.section}>
@@ -49,14 +66,24 @@ export function CashPositionPanel({
   }
 
   const profitRetained = bankBalance - capital - owed - unpaidWages + inTransit;
-  const rows: { label: string; amount: number; note?: string }[] = [
+  const rows: { label: string; amount: number; note?: string; detail?: CashDetailEntry[] }[] = [
     {
       label: 'Bank balance',
       amount: bankBalance,
       note: asOf ? `as of ${formatShortDate(asOf)}` : undefined,
     },
-    { label: 'Less capital invested', amount: -capital, note: 'contributed, never earned' },
-    { label: 'Less owed for out-of-pocket', amount: -owed, note: 'spent, not yet paid back' },
+    {
+      label: 'Less capital invested',
+      amount: -capital,
+      note: 'contributed, never earned',
+      detail: capitalEntries,
+    },
+    {
+      label: 'Less owed for out-of-pocket',
+      amount: -owed,
+      note: 'spent, not yet paid back',
+      detail: owedEntries,
+    },
     { label: 'Less wages worked, unpaid', amount: -unpaidWages, note: 'earned by the crew + payroll taxes' },
     { label: 'Plus receipts in transit', amount: inTransit, note: 'earned, not yet deposited' },
   ];
@@ -66,20 +93,51 @@ export function CashPositionPanel({
     <View style={styles.section}>
       <SectionHeader title="Cash position" icon="wallet" />
       <Card padded={false}>
-        {visible.map((row, index) => (
-          <ListRow
-            key={row.label}
-            title={row.label}
-            subtitle={row.note}
-            chevron={false}
-            divider={index < visible.length - 1}
-            right={
-              <AppText variant="bodyStrong" style={styles.amount}>
-                {formatSigned(row.amount)}
-              </AppText>
-            }
-          />
-        ))}
+        {visible.map((row, index) => {
+          const expandable = (row.detail?.length ?? 0) > 0;
+          const open = expandable && openDetail === row.label;
+          return (
+            <View key={row.label}>
+              <ListRow
+                title={row.label}
+                subtitle={expandable ? `${row.note} · tap for detail` : row.note}
+                chevron={false}
+                divider={!open && index < visible.length - 1}
+                onPress={
+                  expandable
+                    ? () => setOpenDetail(open ? null : row.label)
+                    : undefined
+                }
+                right={
+                  <AppText variant="bodyStrong" style={styles.amount}>
+                    {formatSigned(row.amount)}
+                  </AppText>
+                }
+              />
+              {open ? (
+                <View style={styles.detail}>
+                  {row.detail!.map((entry) => (
+                    <View key={entry.id} style={styles.detailRow}>
+                      <AppText variant="caption" color={colors.textMuted} style={styles.detailDate}>
+                        {entry.occurred_on ? formatShortDate(entry.occurred_on) : '—'}
+                      </AppText>
+                      <AppText
+                        variant="caption"
+                        color={colors.textSecondary}
+                        style={styles.detailLabel}
+                        numberOfLines={2}>
+                        {entry.label}
+                      </AppText>
+                      <AppText variant="caption" style={styles.amount}>
+                        {formatSigned(entry.amount)}
+                      </AppText>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
 
         {byPerson.length ? (
           <View style={styles.breakdown}>
@@ -105,6 +163,25 @@ export function CashPositionPanel({
 }
 
 const styles = StyleSheet.create({
+  detail: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingVertical: 3,
+  },
+  detailDate: {
+    width: 52,
+  },
+  detailLabel: {
+    flex: 1,
+  },
   section: {
     marginBottom: spacing.md,
   },

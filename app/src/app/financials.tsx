@@ -2,7 +2,10 @@ import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshControl, SectionList, StyleSheet, View } from 'react-native';
 
-import { CashPositionPanel } from '@/components/financials/CashPositionPanel';
+import {
+  CashPositionPanel,
+  type CashDetailEntry,
+} from '@/components/financials/CashPositionPanel';
 import {
   ExpenseForm,
   ExpenseRow,
@@ -274,10 +277,19 @@ export default function FinancialsScreen() {
    * cash is still in the account until the debit lands.
    */
   const owedOutOfPocket = useMemo(() => {
-    if (!data) return 0;
-    return data.expenseEntries
-      .filter((e) => /NOT yet reimbursed|not yet cleared/i.test(e.description ?? ''))
-      .reduce((sum, e) => sum + e.amount, 0);
+    if (!data) return { total: 0, entries: [] as CashDetailEntry[] };
+    const rows = data.expenseEntries.filter((e) =>
+      /NOT yet reimbursed|not yet cleared/i.test(e.description ?? ''),
+    );
+    return {
+      total: rows.reduce((sum, e) => sum + e.amount, 0),
+      entries: rows.map((e) => ({
+        id: e.id,
+        occurred_on: e.occurred_on,
+        label: e.description ?? e.counterparty ?? 'Expense',
+        amount: e.amount,
+      })),
+    };
   }, [data]);
 
   /**
@@ -294,7 +306,13 @@ export default function FinancialsScreen() {
 
   const capitalInvested = useMemo(() => {
     if (!data) {
-      return { total: 0, contributed: 0, returned: 0, byPerson: [] as { who: string; amount: number }[] };
+      return {
+        total: 0,
+        contributed: 0,
+        returned: 0,
+        byPerson: [] as { who: string; amount: number }[],
+        entries: [] as CashDetailEntry[],
+      };
     }
     const byPerson = new Map<string, number>();
     let contributed = 0;
@@ -308,6 +326,18 @@ export default function FinancialsScreen() {
       const who = entry.counterparty?.trim() || 'Unattributed';
       byPerson.set(who, (byPerson.get(who) ?? 0) + signed);
     }
+    const entries: CashDetailEntry[] = data.allEntries
+      .filter((e) => e.type === 'investment')
+      .map((e) => ({
+        id: e.id,
+        occurred_on: e.occurred_on,
+        label:
+          e.description ??
+          `${e.counterparty ?? 'Owner'} ${e.direction === 'out' ? 'capital returned' : 'investment'}`,
+        // Signed the way the row is displayed: returns reduce the figure.
+        amount: e.direction === 'out' ? -e.amount : e.amount,
+      }))
+      .sort((a, b) => (a.occurred_on ?? '').localeCompare(b.occurred_on ?? ''));
     return {
       total: contributed - returned,
       contributed,
@@ -316,6 +346,7 @@ export default function FinancialsScreen() {
         .map(([who, amount]) => ({ who, amount }))
         .filter((p) => p.amount !== 0)
         .sort((a, b) => b.amount - a.amount),
+      entries,
     };
   }, [data]);
 
@@ -501,10 +532,12 @@ export default function FinancialsScreen() {
             bankBalance={settings?.bankBalance ?? null}
             asOf={settings?.bankBalanceAsOf ?? null}
             capital={capitalInvested.total}
-            owed={owedOutOfPocket}
+            owed={owedOutOfPocket.total}
             unpaidWages={unpaidWages}
             inTransit={receiptsInTransit}
             byPerson={capitalInvested.byPerson}
+            capitalEntries={capitalInvested.entries}
+            owedEntries={owedOutOfPocket.entries}
           />
           {totals ? <MirrorTiles totals={totals} /> : null}
 
