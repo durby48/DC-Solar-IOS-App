@@ -114,7 +114,7 @@ function byDateDesc(a: LedgerEntry, b: LedgerEntry): number {
  */
 export async function fetchFinancials(): Promise<FinancialsData | null> {
   try {
-    const [{ data, error }, hoursResult, timeResult, employeesResult] = await Promise.all([
+    const [{ data, error }, hoursResult, timeResult, employeesResult, runsResult] = await Promise.all([
       supabase
         .from('finance_entries')
         .select(
@@ -124,7 +124,7 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       // Wages live here, not in finance_entries. Fetched alongside so `net`
       // can subtract them — the headline overstated profit by every wage
       // dollar ever paid without this.
-      supabase.from('employee_hours').select('hours, rate').eq('company', COMPANY),
+      supabase.from('employee_hours').select('hours, rate, occurred_on').eq('company', COMPANY),
       // Clock in/out hours are the OTHER half of labor — the Hours tab and the
       // per-job view both count them, and until 2026-08-23 this headline did
       // not, so Net overstated profit by every clocked (never hand-logged)
@@ -134,13 +134,33 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
         .select('employee, clock_in, clock_out')
         .eq('company', COMPANY),
       supabase.from('employees').select('email, pay_rate'),
+      // Completed Gusto runs (admin-only). When present, labor for the covered
+      // periods is the money that ACTUALLY left the bank, to the penny.
+      supabase.from('payroll_runs').select('period_end, total_withdrawn').eq('company', COMPANY),
     ]);
     if (error || !data) return null;
+    // Labor = actual withdrawals for every completed payroll run, plus the
+    // loaded ESTIMATE (gross × employer burden, lib/laborCost.ts) only for
+    // hours worked after the newest run's period end. With the runs recorded,
+    // the estimate never covers more than the current pay period, so the
+    // Financials headline matches the bank to the penny for everything paid.
+    const runs = (runsResult.data ?? []) as { period_end: string; total_withdrawn: unknown }[];
+    const paidThrough = runs.reduce((max, r) => (r.period_end > max ? r.period_end : max), '');
+    const laborPaid = runs.reduce((sum, r) => sum + num(r.total_withdrawn), 0);
+
+    let unpaidGross = 0;
+    for (const row of (hoursResult.data ?? []) as {
+      hours: unknown;
+      rate: unknown;
+      occurred_on: string | null;
+    }[]) {
+      if ((row.occurred_on ?? '') > paidThrough) unpaidGross += num(row.hours) * num(row.rate);
+    }
+
     const rateByEmail = new Map<string, number>();
     for (const row of (employeesResult.data ?? []) as { email: string; pay_rate: unknown }[]) {
       if (row.email && row.pay_rate != null) rateByEmail.set(row.email.toLowerCase(), num(row.pay_rate));
     }
-    let clockedWages = 0;
     for (const row of (timeResult.data ?? []) as {
       employee: string | null;
       clock_in: string | null;
@@ -149,19 +169,16 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       if (!row.clock_in || !row.clock_out) continue; // only completed entries
       const ms = new Date(row.clock_out).getTime() - new Date(row.clock_in).getTime();
       if (!Number.isFinite(ms) || ms <= 0) continue;
+      // Payroll periods are Kansas City days; bucket the entry by its local date.
+      const day = new Date(row.clock_in).toLocaleDateString('en-CA', {
+        timeZone: 'America/Chicago',
+      });
+      if (day <= paidThrough) continue; // covered by a recorded run already
       const rate = rateByEmail.get((row.employee ?? '').toLowerCase());
-      if (rate != null) clockedWages += (ms / 3_600_000) * rate;
+      if (rate != null) unpaidGross += (ms / 3_600_000) * rate;
     }
 
-    // Fully loaded: gross wages carry the employer payroll-tax burden.
-    // The ledger's per-run "Employer payroll taxes" rows were removed
-    // 2026-08-23 — this multiplier is where that cost lives now.
-    const labor = loadedLaborCost(
-      (hoursResult.data ?? []).reduce(
-        (sum, row) => sum + num(row.hours) * num(row.rate),
-        0,
-      ) + clockedWages,
-    );
+    const labor = laborPaid + loadedLaborCost(unpaidGross);
 
     const rows = (data as Record<string, unknown>[]).map((row) => ({
       ...row,
