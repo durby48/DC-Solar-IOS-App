@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
+import { JobPicker } from '@/components/financials/ExpenseLedger';
 import { Field } from '@/components/forms/Field';
 import { StatusPill } from '@/components/StatusPill';
 import {
@@ -33,6 +34,7 @@ import * as haptics from '@/lib/haptics';
 import { type Job } from '@/lib/types';
 import { shareDocument, viewDocument } from '@/lib/pdf';
 import { CONTRACTED_STAGES, fetchPipelineJobs } from '@/lib/pipeline';
+import { isCompanyJob } from '@/lib/stages';
 import { useRole } from '@/lib/role';
 import { stageOrDefault, type Stage } from '@/lib/stages';
 
@@ -168,6 +170,11 @@ export default function LedgerScreen() {
   // row, the second actually deletes.
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // "Assign to job" — moving a scanner-filed payment (usually parked on the
+  // Company container) onto the project it actually paid for.
+  const [assignId, setAssignId] = useState<string | null>(null);
+  const [assignJobId, setAssignJobId] = useState<string | null>(null);
+  const [savingAssign, setSavingAssign] = useState(false);
   // Inline contract-value editing (contracted view).
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -446,6 +453,33 @@ export default function LedgerScreen() {
     await load();
   };
 
+  /** Job options for the assign picker: Company first, then pipeline order. */
+  const companyJobId = useMemo(
+    () => jobOrder.find((jid) => isCompanyJob(jobs.get(jid)?.raw ?? null)) ?? null,
+    [jobOrder, jobs],
+  );
+  const assignOptions = useMemo(
+    () =>
+      jobOrder
+        .filter((jid) => jid !== companyJobId)
+        .map((jid) => ({ id: jid, label: jobs.get(jid)?.label ?? 'Job' })),
+    [jobOrder, jobs, companyJobId],
+  );
+
+  const saveAssign = async (entry: LedgerEntry) => {
+    setSavingAssign(true);
+    setError(null);
+    const result = await updateFinanceEntry(entry.id, { job_id: assignJobId });
+    setSavingAssign(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    haptics.success();
+    setAssignId(null);
+    await load();
+  };
+
   const pressDelete = async (entry: LedgerEntry) => {
     if (confirmDeleteId !== entry.id) {
       setConfirmDeleteId(entry.id);
@@ -510,9 +544,9 @@ export default function LedgerScreen() {
     const status = paymentStatus(entry, jobKey);
     const confirming = confirmDeleteId === entry.id;
     const busyDelete = deletingId === entry.id;
+    const assigning = assignId === entry.id;
     return (
       <View
-        key={entry.id}
         style={[
           styles.entryRow,
           index > 0 && styles.rowBorderTop,
@@ -575,6 +609,26 @@ export default function LedgerScreen() {
           </AnimatedPressable>
         ) : null}
 
+        {entry.type === 'payment' ? (
+          <AnimatedPressable
+            onPress={() => {
+              setError(null);
+              if (assigning) {
+                setAssignId(null);
+              } else {
+                setAssignId(entry.id);
+                setAssignJobId(entry.job_id);
+              }
+            }}
+            haptic="tapLight"
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel="Assign payment to a job"
+            style={styles.iconButton}>
+            <Ionicons name="swap-horizontal" size={15} color={colors.accentPrimary} />
+          </AnimatedPressable>
+        ) : null}
+
         {entry.document_path ? (
           <AnimatedPressable
             onPress={() => void sharePdf(entry)}
@@ -613,6 +667,39 @@ export default function LedgerScreen() {
       </View>
     );
   };
+
+  /** The inline "assign to job" panel, rendered under an assigning row. */
+  const renderAssignPanel = (entry: LedgerEntry) => (
+    <View style={styles.assignPanel}>
+      <AppText variant="caption" color={colors.textMuted}>
+        Move this {formatMoney(entry.amount)} payment onto the project it paid for. The job's
+        paid-in-full checks and the P&L follow it.
+      </AppText>
+      <JobPicker
+        label="Job"
+        options={assignOptions}
+        companyJobId={companyJobId}
+        selected={assignJobId}
+        onSelect={setAssignJobId}
+      />
+      <View style={styles.assignButtons}>
+        <Button
+          label="Cancel"
+          variant="ghost"
+          size="sm"
+          disabled={savingAssign}
+          onPress={() => setAssignId(null)}
+        />
+        <Button
+          label="Move payment"
+          size="sm"
+          loading={savingAssign}
+          disabled={savingAssign || assignJobId === undefined}
+          onPress={() => void saveAssign(entry)}
+        />
+      </View>
+    </View>
+  );
 
   const body = () => {
     if (!loaded) {
@@ -871,7 +958,12 @@ export default function LedgerScreen() {
                   </AppText>
                 </AnimatedPressable>
                 <Card padded={false}>
-                  {group.entries.map((entry, i) => renderEntry(entry, i, group.key))}
+                  {group.entries.map((entry, i) => (
+                    <View key={entry.id}>
+                      {renderEntry(entry, i, group.key)}
+                      {assignId === entry.id ? renderAssignPanel(entry) : null}
+                    </View>
+                  ))}
                 </Card>
               </FadeInUp>
             ))}
@@ -982,6 +1074,20 @@ const styles = StyleSheet.create({
   },
   iconButtonDanger: {
     backgroundColor: colors.danger,
+  },
+  assignPanel: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    gap: spacing.xs,
+    backgroundColor: colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  assignButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   jobCard: {
     gap: spacing.xs,
