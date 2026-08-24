@@ -27,7 +27,7 @@ import {
   setJobContractValue,
   updateFinanceEntry,
 } from '@/lib/documents';
-import { fetchFinancials, type LedgerEntry } from '@/lib/financials';
+import { fetchFinancials, type LaborRun, type LedgerEntry } from '@/lib/financials';
 import * as haptics from '@/lib/haptics';
 import { type Job } from '@/lib/types';
 import { shareDocument, viewDocument } from '@/lib/pdf';
@@ -46,16 +46,17 @@ import { stageOrDefault, type Stage } from '@/lib/stages';
  * Admin-only (the underlying finance query returns null otherwise).
  */
 
-type ViewKey = 'estimates' | 'invoices' | 'contracted' | 'paid';
+type ViewKey = 'estimates' | 'invoices' | 'contracted' | 'paid' | 'labor';
 
 const VIEW_TITLES: Record<ViewKey, string> = {
   estimates: 'All estimates',
   invoices: 'All invoices',
   contracted: 'Jobs under contract',
   paid: 'Payments received',
+  labor: 'Labor by month',
 };
 
-const ENTRY_TYPE: Record<Exclude<ViewKey, 'contracted'>, LedgerEntry['type']> = {
+const ENTRY_TYPE: Record<Exclude<ViewKey, 'contracted' | 'labor'>, LedgerEntry['type']> = {
   estimates: 'estimate',
   invoices: 'invoice',
   paid: 'payment',
@@ -113,7 +114,7 @@ interface JobGroup {
 export default function LedgerScreen() {
   const params = useLocalSearchParams<{ view?: string }>();
   const view: ViewKey = (
-    ['estimates', 'invoices', 'contracted', 'paid'] as ViewKey[]
+    ['estimates', 'invoices', 'contracted', 'paid', 'labor'] as ViewKey[]
   ).includes(params.view as ViewKey)
     ? (params.view as ViewKey)
     : 'estimates';
@@ -121,6 +122,8 @@ export default function LedgerScreen() {
   const role = useRole();
 
   const [entries, setEntries] = useState<LedgerEntry[] | null>(null);
+  const [laborRuns, setLaborRuns] = useState<LaborRun[]>([]);
+  const [laborEstimate, setLaborEstimate] = useState(0);
   const [jobs, setJobs] = useState<Map<string, JobInfo>>(new Map());
   const [jobOrder, setJobOrder] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -143,6 +146,8 @@ export default function LedgerScreen() {
         fetchPipelineJobs(),
       ]);
       setEntries(financials?.allEntries ?? null);
+      setLaborRuns(financials?.laborRuns ?? []);
+      setLaborEstimate(financials?.laborUnpaidEstimate ?? 0);
       const map = new Map<string, JobInfo>();
       for (const job of fetched as Job[]) {
         map.set(job.id, {
@@ -180,7 +185,7 @@ export default function LedgerScreen() {
 
   // Entry views: filter → group per job (pipeline order, company bucket last).
   const groups = useMemo<JobGroup[]>(() => {
-    if (view === 'contracted' || !entries) return [];
+    if (view === 'contracted' || view === 'labor' || !entries) return [];
     const type = ENTRY_TYPE[view];
     const filtered = entries.filter((e) => {
       if (e.type !== type) return false;
@@ -287,14 +292,40 @@ export default function LedgerScreen() {
     return { full: paid >= basis - 0.005, paid, basis };
   };
 
+  /** Payroll runs grouped by payday month, newest month first. */
+  const laborMonths = useMemo(() => {
+    if (view !== 'labor') return [];
+    const byMonth = new Map<string, LaborRun[]>();
+    for (const run of laborRuns) {
+      const ym = run.payday.slice(0, 7);
+      byMonth.set(ym, [...(byMonth.get(ym) ?? []), run]);
+    }
+    return [...byMonth.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([ym, runs]) => ({
+        ym,
+        label: new Date(`${ym}-15T12:00:00Z`).toLocaleDateString('en-US', {
+          month: 'long',
+          year: 'numeric',
+          timeZone: 'UTC',
+        }),
+        runs: runs.sort((a, b) => b.payday.localeCompare(a.payday)),
+        total: runs.reduce((sum, r) => sum + r.totalWithdrawn, 0),
+      }));
+  }, [view, laborRuns]);
+
   const total =
-    view === 'contracted'
-      ? contractedJobs.reduce((sum, row) => sum + row.value, 0)
-      : groups.reduce((sum, g) => sum + g.subtotal, 0);
+    view === 'labor'
+      ? laborRuns.reduce((sum, r) => sum + r.totalWithdrawn, 0) + laborEstimate
+      : view === 'contracted'
+        ? contractedJobs.reduce((sum, row) => sum + row.value, 0)
+        : groups.reduce((sum, g) => sum + g.subtotal, 0);
   const count =
-    view === 'contracted'
-      ? contractedJobs.length
-      : groups.reduce((sum, g) => sum + g.entries.length, 0);
+    view === 'labor'
+      ? laborRuns.length
+      : view === 'contracted'
+        ? contractedJobs.length
+        : groups.reduce((sum, g) => sum + g.entries.length, 0);
 
   // `entry.revision` busts the CDN / Safari cache: a revision overwrites the
   // same storage object, so the previous signed URL's bytes are still valid.
@@ -511,19 +542,23 @@ export default function LedgerScreen() {
 
     return (
       <>
-        {view !== 'contracted' ? chipRow(PERIODS, period, setPeriod as never) : null}
+        {view !== 'contracted' && view !== 'labor' ? chipRow(PERIODS, period, setPeriod as never) : null}
         {view === 'invoices' ? chipRow(JOB_STATUS, jobStatus, setJobStatus as never) : null}
 
         <Card style={styles.totalCard}>
           <AppText variant="section" color={colors.ink}>
             {count}{' '}
-            {view === 'contracted'
+            {view === 'labor'
               ? count === 1
-                ? 'job'
-                : 'jobs'
-              : count === 1
-                ? 'entry'
-                : 'entries'}
+                ? 'payroll'
+                : 'payrolls'
+              : view === 'contracted'
+                ? count === 1
+                  ? 'job'
+                  : 'jobs'
+                : count === 1
+                  ? 'entry'
+                  : 'entries'}
           </AppText>
           <CountUp value={total} prefix="$" decimals={2} style={styles.totalValue} />
         </Card>
@@ -546,7 +581,54 @@ export default function LedgerScreen() {
           </AppText>
         ) : null}
 
-        {view === 'contracted'
+        {view === 'labor' ? (
+          <>
+            {laborEstimate > 0 ? (
+              <Card tone="sunk">
+                <AppText variant="bodyStrong">
+                  Current period — accruing {formatMoney(laborEstimate)}
+                </AppText>
+                <AppText variant="caption" color={colors.textMuted}>
+                  Estimate: hours logged since the last recorded run × rate × employer taxes.
+                  Becomes exact when the run is recorded on the Hours tab.
+                </AppText>
+              </Card>
+            ) : null}
+            {laborMonths.map((month, index) => (
+              <FadeInUp key={month.ym} index={index} style={styles.groupWrap}>
+                <View style={styles.groupHeader}>
+                  <SectionHeader
+                    title={month.label}
+                    subtitle={`${month.runs.length} ${month.runs.length === 1 ? 'payroll' : 'payrolls'}`}
+                    style={styles.groupSection}
+                  />
+                  <AppText variant="bodyStrong" color={colors.textMuted} style={styles.figure}>
+                    {formatMoney(month.total)}
+                  </AppText>
+                </View>
+                <Card padded={false}>
+                  {month.runs.map((run, j) => (
+                    <View key={run.payday} style={[styles.entryRow, j > 0 && styles.rowBorderTop]}>
+                      <View style={styles.entryBody}>
+                        <View style={styles.entryText}>
+                          <AppText variant="bodyStrong">
+                            {`Payroll — paid ${formatShortDate(run.payday)}`}
+                          </AppText>
+                          <AppText variant="caption" color={colors.textMuted}>
+                            {`period ${formatShortDate(run.periodStart)} – ${formatShortDate(run.periodEnd)}`}
+                          </AppText>
+                        </View>
+                        <AppText variant="bodyStrong" style={styles.figure}>
+                          {formatMoney(run.totalWithdrawn)}
+                        </AppText>
+                      </View>
+                    </View>
+                  ))}
+                </Card>
+              </FadeInUp>
+            ))}
+          </>
+        ) : view === 'contracted'
           ? contractedJobs.map(({ job, value }, index) => {
               const editing = editingJobId === job.id;
               const paid = paidByJob.get(job.id) ?? 0;

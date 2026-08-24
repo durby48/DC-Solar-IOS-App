@@ -15,13 +15,29 @@ import type { CompanyTotals } from '@/lib/pipeline';
  * chevron is what says "this goes somewhere", and it means the tile itself
  * stays the same component the Overview row uses.
  */
-export function MirrorTiles({ totals }: { totals: CompanyTotals }) {
+export function MirrorTiles({
+  totals,
+  expensesYtd,
+  laborYtd,
+}: {
+  totals: CompanyTotals;
+  /** All-2026 expense total from the Financials rollup. */
+  expensesYtd: number;
+  /** All-2026 loaded labor (actual runs + open accrual). */
+  laborYtd: number;
+}) {
   const router = useRouter();
   const pnl = totals.avgProfitPct;
 
-  const tiles: { label: string; amount: number; view: string; tone: number; note?: string }[] = [
+  const tiles: {
+    label: string;
+    amount: number;
+    view: string | null;
+    tone: number;
+    note?: string;
+  }[] = [
     {
-      label: 'Estimates',
+      label: 'Estimates YTD',
       amount: totals.estimates,
       view: 'estimates',
       tone: 3,
@@ -32,9 +48,12 @@ export function MirrorTiles({ totals }: { totals: CompanyTotals }) {
           ? `newest of ${totals.estimateCount} on ${totals.estimateJobs} jobs`
           : `${totals.estimateCount} on file`,
     },
-    { label: 'Contracted', amount: totals.contracted, view: 'contracted', tone: 2 },
-    { label: 'Invoiced', amount: totals.invoiced, view: 'invoices', tone: 5 },
-    { label: 'Paid', amount: totals.paid, view: 'paid', tone: 1 },
+    { label: 'Contracted YTD', amount: totals.contracted, view: 'contracted', tone: 2 },
+    { label: 'Invoiced YTD', amount: totals.invoiced, view: 'invoices', tone: 5 },
+    { label: 'Paid in YTD', amount: totals.paid, view: 'paid', tone: 1 },
+    // The drill-down for expenses is the ledger at the bottom of the tab.
+    { label: 'Expenses YTD', amount: expensesYtd, view: null, tone: 4 },
+    { label: 'Labor incl. taxes YTD', amount: laborYtd, view: 'labor', tone: 2 },
   ];
 
   return (
@@ -45,10 +64,11 @@ export function MirrorTiles({ totals }: { totals: CompanyTotals }) {
         {tiles.map((tile, index) => (
           <FadeInUp key={tile.label} index={index} style={styles.cell}>
             <AnimatedPressable
-              onPress={() => router.push(`/ledger/${tile.view}` as never)}
+              onPress={tile.view ? () => router.push(`/ledger/${tile.view}` as never) : undefined}
+              disabled={!tile.view}
               haptic="tapLight"
               accessibilityRole="button"
-              accessibilityLabel={`${tile.label}, open ledger`}
+              accessibilityLabel={tile.view ? `${tile.label}, open ledger` : tile.label}
               style={styles.pressable}>
               <StatTile
                 label={tile.label}
@@ -58,12 +78,14 @@ export function MirrorTiles({ totals }: { totals: CompanyTotals }) {
                 countUp
                 style={styles.tile}
               />
-              <Ionicons
-                name="chevron-forward"
-                size={12}
-                color={colors.textMuted}
-                style={styles.chevron}
-              />
+              {tile.view ? (
+                <Ionicons
+                  name="chevron-forward"
+                  size={12}
+                  color={colors.textMuted}
+                  style={styles.chevron}
+                />
+              ) : null}
               {tile.note ? (
                 <AppText variant="caption" color={colors.textMuted} style={styles.note}>
                   {tile.note}

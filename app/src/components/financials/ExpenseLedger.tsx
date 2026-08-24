@@ -160,12 +160,15 @@ export function MonthHeader({
   total,
   open,
   onToggle,
+  noun = 'expense',
 }: {
   label: string;
   count: number;
   total: number;
   open: boolean;
   onToggle: () => void;
+  /** What is being counted — 'expense' (default) or 'payroll'. */
+  noun?: string;
 }) {
   return (
     <AnimatedPressable
@@ -174,11 +177,11 @@ export function MonthHeader({
       scaleTo={0.995}
       accessibilityRole="button"
       accessibilityState={{ expanded: open }}
-      accessibilityLabel={`${label}, ${count} expenses`}
+      accessibilityLabel={`${label}, ${count} ${noun}s`}
       style={styles.monthHeader}>
       <SectionHeader
         title={label}
-        subtitle={`${count} ${count === 1 ? 'expense' : 'expenses'}`}
+        subtitle={`${count} ${count === 1 ? noun : `${noun}s`}`}
         icon={open ? 'chevron-down' : 'chevron-forward'}
         style={styles.monthSection}
       />
@@ -186,6 +189,55 @@ export function MonthHeader({
         {formatMoney(total)}
       </AppText>
     </AnimatedPressable>
+  );
+}
+
+/**
+ * One payroll run inside a month's "Labor Report" dropdown — display-only:
+ * runs are recorded and corrected on the Hours tab, not here.
+ */
+export function LaborReportRow({
+  title,
+  caption,
+  amount,
+  index,
+  isFirst,
+  isLast,
+}: {
+  title: string;
+  caption: string;
+  amount: number;
+  index: number;
+  isFirst: boolean;
+  isLast: boolean;
+}) {
+  return (
+    <FadeInUp index={index}>
+      <View
+        style={[
+          styles.rowCard,
+          !isFirst && styles.rowBorderTop,
+          isFirst && styles.rowFirst,
+          isLast && styles.rowLast,
+        ]}>
+        <View style={styles.row}>
+          <View style={styles.iconWrap}>
+            <Ionicons name="people" size={18} color={colors.accentPrimary} />
+          </View>
+          <View style={styles.rowBody}>
+            <AppText variant="bodyStrong" numberOfLines={1}>
+              {title}
+            </AppText>
+            <AppText variant="caption" color={colors.textMuted}>
+              {caption}
+            </AppText>
+          </View>
+          <AppText variant="bodyStrong" style={styles.figure}>
+            {formatMoney(amount)}
+          </AppText>
+        </View>
+      </View>
+    </FadeInUp>
   );
 }
 

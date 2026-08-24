@@ -69,10 +69,22 @@ export interface LedgerEntry {
   document_meta?: { pdf_state?: string | null } | null;
 }
 
+/** One completed payroll run, as the Financials views consume it. */
+export interface LaborRun {
+  periodStart: string;
+  periodEnd: string;
+  payday: string;
+  /** Everything that left the bank for the run: net pay + all taxes. */
+  totalWithdrawn: number;
+  receiptId: string | null;
+}
+
 /** Company money overview + the full expense ledger. */
 export interface FinancialsData {
   /** Sum of all payment entries (money in). */
   paid: number;
+  /** Payments dated in the current calendar month. */
+  paidThisMonth: number;
   /** Sum of all expense entries (money out). Excludes wages — see `labor`. */
   expenses: number;
   /**
@@ -84,8 +96,16 @@ export interface FinancialsData {
    * to subtract it or the headline reports a profit the business never made.
    */
   labor: number;
+  /** Labor for the current month: runs PAID this month + the open accrual. */
+  laborThisMonth: number;
+  /** Every recorded payroll run, newest payday first. */
+  laborRuns: LaborRun[];
+  /** Loaded estimate for hours worked after the last recorded run. */
+  laborUnpaidEstimate: number;
   /** paid − expenses − labor. The per-job P&L uses the same formula. */
   net: number;
+  /** This month's paid − expenses − labor. */
+  netThisMonth: number;
   /** Expense total for the current calendar month. */
   expensesThisMonth: number;
   /** Contract value signed this calendar year: invoice-type entries
@@ -136,7 +156,10 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       supabase.from('employees').select('email, pay_rate'),
       // Completed Gusto runs (admin-only). When present, labor for the covered
       // periods is the money that ACTUALLY left the bank, to the penny.
-      supabase.from('payroll_runs').select('period_end, total_withdrawn').eq('company', COMPANY),
+      supabase
+        .from('payroll_runs')
+        .select('period_start, period_end, payday, total_withdrawn, receipt_id')
+        .eq('company', COMPANY),
     ]);
     if (error || !data) return null;
     // Labor = actual withdrawals for every completed payroll run, plus the
@@ -144,9 +167,24 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
     // hours worked after the newest run's period end. With the runs recorded,
     // the estimate never covers more than the current pay period, so the
     // Financials headline matches the bank to the penny for everything paid.
-    const runs = (runsResult.data ?? []) as { period_end: string; total_withdrawn: unknown }[];
-    const paidThrough = runs.reduce((max, r) => (r.period_end > max ? r.period_end : max), '');
-    const laborPaid = runs.reduce((sum, r) => sum + num(r.total_withdrawn), 0);
+    const runRows = (runsResult.data ?? []) as {
+      period_start: string;
+      period_end: string;
+      payday: string;
+      total_withdrawn: unknown;
+      receipt_id: string | null;
+    }[];
+    const laborRuns: LaborRun[] = runRows
+      .map((r) => ({
+        periodStart: r.period_start,
+        periodEnd: r.period_end,
+        payday: r.payday,
+        totalWithdrawn: num(r.total_withdrawn),
+        receiptId: r.receipt_id ?? null,
+      }))
+      .sort((a, b) => b.payday.localeCompare(a.payday));
+    const paidThrough = laborRuns.reduce((max, r) => (r.periodEnd > max ? r.periodEnd : max), '');
+    const laborPaid = laborRuns.reduce((sum, r) => sum + r.totalWithdrawn, 0);
 
     let unpaidGross = 0;
     for (const row of (hoursResult.data ?? []) as {
@@ -178,7 +216,8 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       if (rate != null) unpaidGross += (ms / 3_600_000) * rate;
     }
 
-    const labor = laborPaid + loadedLaborCost(unpaidGross);
+    const laborUnpaidEstimate = loadedLaborCost(unpaidGross);
+    const labor = laborPaid + laborUnpaidEstimate;
 
     const rows = (data as Record<string, unknown>[]).map((row) => ({
       ...row,
@@ -188,12 +227,16 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
     const thisMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
     const thisYear = thisMonth.slice(0, 4);
     let paid = 0;
+    let paidThisMonth = 0;
     let expenses = 0;
     let expensesThisMonth = 0;
     let contractedYtd = 0;
     const expenseEntries: LedgerEntry[] = [];
     for (const row of rows) {
-      if (row.type === 'payment') paid += row.amount;
+      if (row.type === 'payment') {
+        paid += row.amount;
+        if ((row.occurred_on ?? '').startsWith(thisMonth)) paidThisMonth += row.amount;
+      }
       if (row.type === 'invoice' && (row.occurred_on ?? '').startsWith(thisYear)) {
         contractedYtd += row.amount;
       }
@@ -206,11 +249,24 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
     expenseEntries.sort(byDateDesc);
     const allEntries = [...rows].sort(byDateDesc);
 
+    // Runs land in the month their PAYDAY falls in — the same month the
+    // money left the account. The open period's accrual estimate belongs to
+    // the current month by construction (payroll_through is current).
+    const laborThisMonth =
+      laborRuns
+        .filter((r) => r.payday.startsWith(thisMonth))
+        .reduce((sum, r) => sum + r.totalWithdrawn, 0) + laborUnpaidEstimate;
+
     return {
       paid,
+      paidThisMonth,
       expenses,
       labor,
+      laborThisMonth,
+      laborRuns,
+      laborUnpaidEstimate,
       net: paid - expenses - labor,
+      netThisMonth: paidThisMonth - expensesThisMonth - laborThisMonth,
       expensesThisMonth,
       contractedYtd,
       expenseEntries,

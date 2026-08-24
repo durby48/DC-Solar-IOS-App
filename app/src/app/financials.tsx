@@ -9,6 +9,7 @@ import {
 import {
   ExpenseForm,
   ExpenseRow,
+  LaborReportRow,
   MonthHeader,
   type JobOption,
 } from '@/components/financials/ExpenseLedger';
@@ -18,7 +19,7 @@ import { OverviewTiles } from '@/components/financials/OverviewTiles';
 import { PnlSheet, type PnlRow } from '@/components/financials/PnlSheet';
 import { AppText, Button, Card, EmptyState, SectionHeader, SkeletonList } from '@/components/ui';
 import { colors, spacing } from '@/constants/theme';
-import { todayISO } from '@/lib/dates';
+import { formatShortDate, todayISO } from '@/lib/dates';
 import { deleteFinanceEntry, updateFinanceEntry } from '@/lib/documents';
 import {
   fetchFinancials,
@@ -168,14 +169,83 @@ export default function FinancialsScreen() {
     setMonthsInitialized(true);
   }, [monthGroups, monthsInitialized]);
 
-  const sections = useMemo(
-    () =>
-      monthGroups.map((month) => ({
+  /**
+   * Payroll runs by PAYDAY month, shaped as display rows for the "Labor
+   * Report" dropdowns. The open period's accrual estimate rides in the
+   * current month so August shows what August is really costing.
+   */
+  const laborMonthRows = useMemo(() => {
+    const byMonth = new Map<string, { id: string; title: string; caption: string; amount: number }[]>();
+    for (const run of data?.laborRuns ?? []) {
+      const ym = run.payday.slice(0, 7);
+      const rows = byMonth.get(ym) ?? [];
+      rows.push({
+        id: `run-${run.payday}`,
+        title: `Payroll — paid ${formatShortDate(run.payday)}`,
+        caption: `period ${formatShortDate(run.periodStart)} – ${formatShortDate(run.periodEnd)}`,
+        amount: run.totalWithdrawn,
+      });
+      byMonth.set(ym, rows);
+    }
+    if (data && data.laborUnpaidEstimate > 0) {
+      const ym = todayISO().slice(0, 7);
+      const rows = byMonth.get(ym) ?? [];
+      rows.push({
+        id: 'run-accruing',
+        title: 'Current period — accruing',
+        caption: 'estimate: hours logged × rate × employer taxes',
+        amount: data.laborUnpaidEstimate,
+      });
+      byMonth.set(ym, rows);
+    }
+    for (const rows of byMonth.values()) rows.sort((a, b) => b.id.localeCompare(a.id));
+    return byMonth;
+  }, [data]);
+
+  const sections = useMemo(() => {
+    const result: {
+      key: string;
+      label: string;
+      total: number;
+      entries: LedgerEntry[];
+      kind?: 'labor';
+      data: LedgerEntry[];
+    }[] = [];
+    const seenMonths = new Set<string>();
+    const laborSection = (ym: string, monthLabel: string) => {
+      const rows = laborMonthRows.get(ym);
+      if (!rows) return null;
+      return {
+        key: `labor-${ym}`,
+        kind: 'labor' as const,
+        label: `Labor Report: ${monthLabel}`,
+        total: rows.reduce((sum, r) => sum + r.amount, 0),
+        entries: rows as unknown as LedgerEntry[],
+        data: openMonths.has(`labor-${ym}`) ? (rows as unknown as LedgerEntry[]) : [],
+      };
+    };
+    for (const month of monthGroups) {
+      result.push({
         ...month,
         data: openMonths.has(month.key) ? month.entries : [],
-      })),
-    [monthGroups, openMonths],
-  );
+      });
+      seenMonths.add(month.key);
+      const labor = laborSection(month.key, month.label);
+      if (labor) result.push(labor);
+    }
+    // Months with payroll but no expenses (rare) still get their report.
+    const extra = [...laborMonthRows.keys()]
+      .filter((ym) => !seenMonths.has(ym))
+      .sort((a, b) => b.localeCompare(a));
+    for (const ym of extra) {
+      const [y, m] = ym.split('-');
+      const label = `${new Date(`${ym}-15T12:00:00Z`).toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' })} ${y}`;
+      void m;
+      const labor = laborSection(ym, label);
+      if (labor) result.push(labor);
+    }
+    return result;
+  }, [monthGroups, openMonths, laborMonthRows]);
 
   const toggleMonth = (key: string) => {
     setOpenMonths((prev) => {
@@ -480,34 +550,49 @@ export default function FinancialsScreen() {
   }: {
     item: LedgerEntry;
     index: number;
-    section: { data: LedgerEntry[] };
-  }) => (
-    <ExpenseRow
-      entry={item}
-      index={index}
-      isFirst={index === 0}
-      isLast={index === section.data.length - 1}
-      jobLabel={item.job_id ? (jobLabels.get(item.job_id) ?? null) : null}
-      editing={editingId === item.id}
-      confirming={confirmDeleteId === item.id}
-      busyDelete={deletingId === item.id}
-      savingEdit={savingEdit}
-      editAmount={editAmount}
-      onEditAmount={setEditAmount}
-      editDate={editDate}
-      onEditDate={setEditDate}
-      editDescription={editDescription}
-      onEditDescription={setEditDescription}
-      editJobId={editJobId}
-      onEditJobId={setEditJobId}
-      jobOptions={jobOptions}
-      companyJobId={companyJobId}
-      onToggleEdit={() => (editingId === item.id ? setEditingId(null) : startEdit(item))}
-      onCancelEdit={() => setEditingId(null)}
-      onSaveEdit={() => void saveEdit(item)}
-      onDelete={() => void pressDelete(item)}
-    />
-  );
+    section: { data: LedgerEntry[]; kind?: 'labor' };
+  }) => {
+    if (section.kind === 'labor') {
+      const row = item as unknown as { title: string; caption: string; amount: number };
+      return (
+        <LaborReportRow
+          title={row.title}
+          caption={row.caption}
+          amount={row.amount}
+          index={index}
+          isFirst={index === 0}
+          isLast={index === section.data.length - 1}
+        />
+      );
+    }
+    return (
+      <ExpenseRow
+        entry={item}
+        index={index}
+        isFirst={index === 0}
+        isLast={index === section.data.length - 1}
+        jobLabel={item.job_id ? (jobLabels.get(item.job_id) ?? null) : null}
+        editing={editingId === item.id}
+        confirming={confirmDeleteId === item.id}
+        busyDelete={deletingId === item.id}
+        savingEdit={savingEdit}
+        editAmount={editAmount}
+        onEditAmount={setEditAmount}
+        editDate={editDate}
+        onEditDate={setEditDate}
+        editDescription={editDescription}
+        onEditDescription={setEditDescription}
+        editJobId={editJobId}
+        onEditJobId={setEditJobId}
+        jobOptions={jobOptions}
+        companyJobId={companyJobId}
+        onToggleEdit={() => (editingId === item.id ? setEditingId(null) : startEdit(item))}
+        onCancelEdit={() => setEditingId(null)}
+        onSaveEdit={() => void saveEdit(item)}
+        onDelete={() => void pressDelete(item)}
+      />
+    );
+  };
 
   const placeholder = (message: string) => (
     <Card>
@@ -539,7 +624,9 @@ export default function FinancialsScreen() {
             capitalEntries={capitalInvested.entries}
             owedEntries={owedOutOfPocket.entries}
           />
-          {totals ? <MirrorTiles totals={totals} /> : null}
+          {totals ? (
+            <MirrorTiles totals={totals} expensesYtd={data.expenses} laborYtd={data.labor} />
+          ) : null}
 
           {pnlRows.length > 0 ? (
             <PnlSheet
@@ -630,6 +717,7 @@ export default function FinancialsScreen() {
             total={section.total}
             open={openMonths.has(section.key)}
             onToggle={() => toggleMonth(section.key)}
+            noun={section.kind === 'labor' ? 'payroll' : 'expense'}
           />
         )}
         renderItem={renderRow}
