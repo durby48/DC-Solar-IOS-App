@@ -15,7 +15,7 @@ import {
 } from '@/components/financials/ExpenseLedger';
 import { formatMoney } from '@/components/financials/format';
 import { MirrorTiles } from '@/components/financials/MirrorTiles';
-import { OverviewTiles } from '@/components/financials/OverviewTiles';
+import { OverviewTiles, type OverviewMonth } from '@/components/financials/OverviewTiles';
 import { PnlSheet, type PnlRow } from '@/components/financials/PnlSheet';
 import { AppText, Button, Card, EmptyState, SectionHeader, SkeletonList } from '@/components/ui';
 import { colors, spacing } from '@/constants/theme';
@@ -155,6 +155,64 @@ export default function FinancialsScreen() {
       setRefreshing(false);
     }
   }, [load]);
+
+  // Which month the Overview header shows. Defaults to the current month;
+  // the ‹ › arrows page back through every month that has any data.
+  const [overviewYm, setOverviewYm] = useState(() => todayISO().slice(0, 7));
+
+  const currentYm = todayISO().slice(0, 7);
+
+  /** Earliest month with any money activity — the back arrow's floor. */
+  const earliestYm = useMemo(() => {
+    let min = currentYm;
+    for (const e of data?.allEntries ?? []) {
+      const ym = (e.occurred_on ?? '').slice(0, 7);
+      if (ym && ym < min) min = ym;
+    }
+    for (const run of data?.laborRuns ?? []) {
+      const ym = run.payday.slice(0, 7);
+      if (ym < min) min = ym;
+    }
+    return min;
+  }, [data, currentYm]);
+
+  const shiftYm = (ym: string, delta: number): string => {
+    const [y, m] = ym.split('-').map(Number);
+    const total = y * 12 + (m - 1) + delta;
+    const ny = Math.floor(total / 12);
+    const nm = (total % 12) + 1;
+    return `${ny}-${String(nm).padStart(2, '0')}`;
+  };
+
+  /** One selected month's headline figures, from data already fetched. */
+  const overviewMonth = useMemo<OverviewMonth>(() => {
+    const ym = overviewYm;
+    let paid = 0;
+    let expenses = 0;
+    for (const e of data?.allEntries ?? []) {
+      if (!(e.occurred_on ?? '').startsWith(ym)) continue;
+      if (e.type === 'payment') paid += e.amount;
+      else if (e.type === 'expense') expenses += e.amount;
+    }
+    // Labor lands in the month its PAYDAY falls in; the open accrual belongs
+    // to the current month by construction (payroll_through is current).
+    let labor = (data?.laborRuns ?? [])
+      .filter((r) => r.payday.startsWith(ym))
+      .reduce((sum, r) => sum + r.totalWithdrawn, 0);
+    if (ym === currentYm) labor += data?.laborUnpaidEstimate ?? 0;
+    return {
+      ym,
+      label: new Date(`${ym}-15T12:00:00Z`).toLocaleDateString('en-US', {
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'UTC',
+      }),
+      paid,
+      expenses,
+      labor,
+      net: paid - expenses - labor,
+    };
+  }, [data, overviewYm, currentYm]);
 
   // Expense months are collapsible: a closed month contributes no rows.
   const monthGroups = useMemo(
@@ -612,7 +670,13 @@ export default function FinancialsScreen() {
         placeholder('Financials are not available right now.')
       ) : (
         <>
-          <OverviewTiles data={data} />
+          <OverviewTiles
+            month={overviewMonth}
+            canPrev={overviewYm > earliestYm}
+            canNext={overviewYm < currentYm}
+            onPrev={() => setOverviewYm((ym) => shiftYm(ym, -1))}
+            onNext={() => setOverviewYm((ym) => shiftYm(ym, 1))}
+          />
           <CashPositionPanel
             bankBalance={settings?.bankBalance ?? null}
             asOf={settings?.bankBalanceAsOf ?? null}

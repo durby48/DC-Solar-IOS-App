@@ -52,7 +52,7 @@ export function MirrorTiles({
     { label: 'Invoiced YTD', amount: totals.invoiced, view: 'invoices', tone: 5 },
     { label: 'Paid in YTD', amount: totals.paid, view: 'paid', tone: 1 },
     // The drill-down for expenses is the ledger at the bottom of the tab.
-    { label: 'Expenses YTD', amount: expensesYtd, view: null, tone: 4 },
+    { label: 'Expenses YTD (excl. labor)', amount: expensesYtd, view: null, tone: 4 },
     { label: 'Labor incl. taxes YTD', amount: laborYtd, view: 'labor', tone: 2 },
   ];
 
