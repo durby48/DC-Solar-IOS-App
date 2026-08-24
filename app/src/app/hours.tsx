@@ -1,11 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 
 import {
   AnimatedPressable,
   AppText,
+  Button,
   Card,
   Chip,
   EmptyState,
@@ -18,11 +19,14 @@ import {
 import { colors, radii, spacing } from '@/constants/theme';
 import {
   fetchHoursData,
+  fetchPayrollRuns,
   formatPayrollDate,
   listPayrollPeriods,
   payrollState,
+  recordPayrollRun,
   summarizePeriod,
   type HoursData,
+  type PayrollRun,
   type PayrollState,
 } from '@/lib/payroll';
 import { useRole } from '@/lib/role';
@@ -72,6 +76,15 @@ export default function HoursScreen() {
   const role = useRole();
   const [data, setData] = useState<HoursData | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // Recorded Gusto runs, keyed by period_end (see payroll_runs).
+  const [runs, setRuns] = useState<Map<string, PayrollRun>>(new Map());
+  const [runFormOpen, setRunFormOpen] = useState(false);
+  const [runPayday, setRunPayday] = useState('');
+  const [runGross, setRunGross] = useState('');
+  const [runWithdrawn, setRunWithdrawn] = useState('');
+  const [runReceiptId, setRunReceiptId] = useState('');
+  const [runSaving, setRunSaving] = useState(false);
+  const [runMessage, setRunMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [openNames, setOpenNames] = useState<Set<string>>(new Set());
 
@@ -83,7 +96,13 @@ export default function HoursScreen() {
   const isPaid = state === 'paid';
 
   const load = useCallback(async () => {
-    setData(role?.isAdmin ? await fetchHoursData() : null);
+    if (role?.isAdmin) {
+      const [hoursData, runMap] = await Promise.all([fetchHoursData(), fetchPayrollRuns()]);
+      setData(hoursData);
+      setRuns(runMap);
+    } else {
+      setData(null);
+    }
     setLoaded(true);
   }, [role]);
 
@@ -106,6 +125,52 @@ export default function HoursScreen() {
     () => (data ? summarizePeriod(data, period) : null),
     [data, period],
   );
+
+  const recordedRun = period.pre ? undefined : runs.get(period.end);
+
+  const openRunForm = () => {
+    // Prefill from what the screen already knows: Gusto pays on the period's
+    // payday, and gross is the period's hours × rates. Withdrawn comes off
+    // the pay receipt / Chase and has no in-app source, so it starts blank.
+    setRunPayday(recordedRun?.payday ?? period.payOn ?? '');
+    setRunGross(
+      recordedRun ? String(recordedRun.gross_wages) : (overview?.totalPeriodPay ?? 0).toFixed(2),
+    );
+    setRunWithdrawn(recordedRun ? String(recordedRun.total_withdrawn) : '');
+    setRunReceiptId(recordedRun?.receipt_id ?? '');
+    setRunMessage(null);
+    setRunFormOpen(true);
+  };
+
+  const saveRun = async () => {
+    const gross = Number(runGross);
+    const withdrawn = Number(runWithdrawn);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(runPayday.trim())) {
+      setRunMessage('Payday must be YYYY-MM-DD.');
+      return;
+    }
+    if (!Number.isFinite(gross) || gross < 0 || !Number.isFinite(withdrawn) || withdrawn <= 0) {
+      setRunMessage('Enter the gross wages and the total withdrawn from the bank.');
+      return;
+    }
+    setRunSaving(true);
+    setRunMessage(null);
+    const result = await recordPayrollRun({
+      periodStart: period.start,
+      periodEnd: period.end,
+      payday: runPayday.trim(),
+      grossWages: gross,
+      totalWithdrawn: withdrawn,
+      receiptId: runReceiptId.trim() || null,
+    });
+    setRunSaving(false);
+    if (result.ok) {
+      setRunFormOpen(false);
+      await load();
+    } else {
+      setRunMessage(result.message);
+    }
+  };
 
   const toggle = (name: string) => {
     setOpenNames((prev) => {
@@ -217,6 +282,107 @@ export default function HoursScreen() {
                 Two-week periods. Payroll is submitted the Wednesday after a period closes and
                 paid the Friday after. Use the arrows to review past payrolls.
               </AppText>
+
+              {/* Recorded Gusto run for this period — the Financials labor
+                  figure uses the ACTUAL withdrawal instead of the tax
+                  estimate once this exists (see payroll_runs). */}
+              {!period.pre ? (
+                runFormOpen ? (
+                  <View style={styles.runForm}>
+                    <AppText variant="section" color={colors.textMuted}>
+                      {recordedRun ? 'Correct payroll run' : 'Record payroll run'}
+                    </AppText>
+                    <AppText variant="caption" color={colors.textMuted}>
+                      From the Gusto pay receipt. “Total withdrawn” is the run&apos;s whole
+                      withdrawal — net pay plus every tax, both sides.
+                    </AppText>
+                    <AppText variant="section" color={colors.textMuted} style={styles.runLabel}>
+                      Payday (YYYY-MM-DD)
+                    </AppText>
+                    <TextInput
+                      value={runPayday}
+                      onChangeText={setRunPayday}
+                      placeholder="2026-08-24"
+                      placeholderTextColor={colors.textMuted}
+                      autoCapitalize="none"
+                      style={styles.runInput}
+                    />
+                    <AppText variant="section" color={colors.textMuted} style={styles.runLabel}>
+                      Gross wages
+                    </AppText>
+                    <TextInput
+                      value={runGross}
+                      onChangeText={setRunGross}
+                      placeholder="0.00"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="decimal-pad"
+                      style={styles.runInput}
+                    />
+                    <AppText variant="section" color={colors.textMuted} style={styles.runLabel}>
+                      Total withdrawn by the bank
+                    </AppText>
+                    <TextInput
+                      value={runWithdrawn}
+                      onChangeText={setRunWithdrawn}
+                      placeholder="0.00"
+                      placeholderTextColor={colors.textMuted}
+                      keyboardType="decimal-pad"
+                      style={styles.runInput}
+                    />
+                    <AppText variant="section" color={colors.textMuted} style={styles.runLabel}>
+                      Gusto receipt ID (optional)
+                    </AppText>
+                    <TextInput
+                      value={runReceiptId}
+                      onChangeText={setRunReceiptId}
+                      placeholder="65640bd2-…"
+                      placeholderTextColor={colors.textMuted}
+                      autoCapitalize="none"
+                      style={styles.runInput}
+                    />
+                    {runMessage ? (
+                      <AppText variant="caption" color={colors.danger}>
+                        {runMessage}
+                      </AppText>
+                    ) : null}
+                    <View style={styles.runButtons}>
+                      <Button
+                        label="Cancel"
+                        size="sm"
+                        variant="secondary"
+                        onPress={() => setRunFormOpen(false)}
+                        disabled={runSaving}
+                      />
+                      {runSaving ? (
+                        <ActivityIndicator color={colors.accentPrimary} />
+                      ) : (
+                        <Button label="Save run" size="sm" onPress={() => void saveRun()} />
+                      )}
+                    </View>
+                  </View>
+                ) : recordedRun ? (
+                  <View style={styles.runRecordedRow}>
+                    <View style={styles.runRecordedText}>
+                      <AppText variant="caption" color={colors.mintDeep}>
+                        {`Run recorded — ${formatMoney(recordedRun.total_withdrawn)} withdrawn, paid ${formatPayrollDate(recordedRun.payday)}`}
+                      </AppText>
+                      {recordedRun.receipt_id ? (
+                        <AppText variant="caption" color={colors.textMuted} numberOfLines={1}>
+                          {`Receipt ${recordedRun.receipt_id}`}
+                        </AppText>
+                      ) : null}
+                    </View>
+                    <Chip label="Edit" tone="olive" onPress={openRunForm} />
+                  </View>
+                ) : (
+                  <Button
+                    label="Record payroll run"
+                    size="sm"
+                    variant="secondary"
+                    onPress={openRunForm}
+                  />
+                )
+              ) : null}
             </Card>
 
             {overview.employees.length === 0
@@ -355,6 +521,43 @@ export default function HoursScreen() {
 }
 
 const styles = StyleSheet.create({
+  runForm: {
+    gap: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    paddingTop: spacing.sm,
+  },
+  runLabel: {
+    marginTop: spacing.xs,
+  },
+  runInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.sm,
+    color: colors.textPrimary,
+    fontSize: 15,
+    backgroundColor: colors.surfaceSunk,
+  },
+  runButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  runRecordedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    paddingTop: spacing.sm,
+  },
+  runRecordedText: {
+    flex: 1,
+  },
   periodCard: {
     gap: spacing.sm,
   },

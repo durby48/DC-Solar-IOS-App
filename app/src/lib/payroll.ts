@@ -368,3 +368,101 @@ export function summarizePeriod(data: HoursData, period: PayrollPeriod): HoursOv
 
   return { period, employees, totalPeriodHours, totalPeriodPay };
 }
+
+// ---------------------------------------------------------------------------
+// Recorded payroll runs (payroll_runs table, admin-only)
+// ---------------------------------------------------------------------------
+
+/** One completed Gusto run as recorded for the Financials rollup. */
+export interface PayrollRun {
+  id: string;
+  period_start: string;
+  period_end: string;
+  payday: string;
+  gross_wages: number;
+  total_withdrawn: number;
+  receipt_id: string | null;
+}
+
+/** Recorded runs keyed by period_end. Empty map on any error. */
+export async function fetchPayrollRuns(): Promise<Map<string, PayrollRun>> {
+  const runs = new Map<string, PayrollRun>();
+  try {
+    const { data, error } = await supabase
+      .from('payroll_runs')
+      .select('id, period_start, period_end, payday, gross_wages, total_withdrawn, receipt_id')
+      .eq('company', COMPANY);
+    if (error || !data) return runs;
+    for (const row of data as Record<string, unknown>[]) {
+      const run: PayrollRun = {
+        id: row.id as string,
+        period_start: row.period_start as string,
+        period_end: row.period_end as string,
+        payday: row.payday as string,
+        gross_wages: Number(row.gross_wages) || 0,
+        total_withdrawn: Number(row.total_withdrawn) || 0,
+        receipt_id: (row.receipt_id as string | null) ?? null,
+      };
+      runs.set(run.period_end, run);
+    }
+    return runs;
+  } catch {
+    return runs;
+  }
+}
+
+export type RecordRunResult = { ok: true } | { ok: false; message: string };
+
+/**
+ * Record (or correct) a completed payroll run and advance
+ * `company_settings.payroll_through` so the cash position stops counting the
+ * period's wages as unpaid. Upserts on (company, period_end), so re-saving a
+ * period fixes a typo instead of erroring. Admin-only via RLS.
+ */
+export async function recordPayrollRun(params: {
+  periodStart: string;
+  periodEnd: string;
+  payday: string;
+  grossWages: number;
+  totalWithdrawn: number;
+  receiptId: string | null;
+}): Promise<RecordRunResult> {
+  try {
+    const { error } = await supabase.from('payroll_runs').upsert(
+      {
+        company: COMPANY,
+        period_start: params.periodStart,
+        period_end: params.periodEnd,
+        payday: params.payday,
+        gross_wages: params.grossWages,
+        total_withdrawn: params.totalWithdrawn,
+        receipt_id: params.receiptId,
+      },
+      { onConflict: 'company,period_end' },
+    );
+    if (error) return { ok: false, message: error.message };
+
+    // Forward only: recording an OLD run must never rewind the marker.
+    const { data: settings } = await supabase
+      .from('company_settings')
+      .select('payroll_through')
+      .eq('company', COMPANY)
+      .maybeSingle();
+    const current = (settings?.payroll_through as string | null) ?? '';
+    if (params.periodEnd > current) {
+      const { error: settingsError } = await supabase
+        .from('company_settings')
+        .update({ payroll_through: params.periodEnd, updated_at: new Date().toISOString() })
+        .eq('company', COMPANY);
+      if (settingsError) {
+        return {
+          ok: false,
+          message: `Run saved, but payroll_through could not be advanced: ${settingsError.message}`,
+        };
+      }
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not record the run.' };
+  }
+}
