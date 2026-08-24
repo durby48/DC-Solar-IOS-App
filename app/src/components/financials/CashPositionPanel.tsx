@@ -57,7 +57,7 @@ export function CashPositionPanel({
     },
     { label: 'Less capital invested', amount: -capital, note: 'contributed, never earned' },
     { label: 'Less owed for out-of-pocket', amount: -owed, note: 'spent, not yet paid back' },
-    { label: 'Less wages worked, unpaid', amount: -unpaidWages, note: 'earned by the crew' },
+    { label: 'Less wages worked, unpaid', amount: -unpaidWages, note: 'earned by the crew + payroll taxes' },
     { label: 'Plus receipts in transit', amount: inTransit, note: 'earned, not yet deposited' },
   ];
   const visible = rows.filter((r) => r.amount !== 0 || r.label === 'Bank balance');

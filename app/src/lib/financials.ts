@@ -6,6 +6,7 @@
  * so the screen can degrade to a friendly placeholder.
  */
 
+import { loadedLaborCost } from '@/lib/laborCost';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
@@ -75,7 +76,8 @@ export interface FinancialsData {
   /** Sum of all expense entries (money out). Excludes wages — see `labor`. */
   expenses: number;
   /**
-   * Wages from employee_hours (hours × rate), across every job.
+   * Fully-loaded wages from employee_hours (hours × rate × employer burden —
+   * see lib/laborCost.ts), across every job.
    *
    * Payroll deliberately does NOT live in finance_entries — booking it in both
    * places double-counted it once already. But it is a real cost, so `net` has
@@ -125,9 +127,14 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       supabase.from('employee_hours').select('hours, rate').eq('company', COMPANY),
     ]);
     if (error || !data) return null;
-    const labor = (hoursResult.data ?? []).reduce(
-      (sum, row) => sum + num(row.hours) * num(row.rate),
-      0,
+    // Fully loaded: gross wages carry the employer payroll-tax burden.
+    // The ledger's per-run "Employer payroll taxes" rows were removed
+    // 2026-08-23 — this multiplier is where that cost lives now.
+    const labor = loadedLaborCost(
+      (hoursResult.data ?? []).reduce(
+        (sum, row) => sum + num(row.hours) * num(row.rate),
+        0,
+      ),
     );
 
     const rows = (data as Record<string, unknown>[]).map((row) => ({

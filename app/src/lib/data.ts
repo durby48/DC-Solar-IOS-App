@@ -1,5 +1,6 @@
 import { CUSTOMER_COLUMNS } from '@/lib/crm';
 import { compressForUpload } from '@/lib/images';
+import { loadedLaborCost } from '@/lib/laborCost';
 import { supabase } from '@/lib/supabase';
 import { type Job, type ScheduleDate } from '@/lib/types';
 
@@ -592,7 +593,8 @@ export interface JobFinanceSummary {
   expenses: number;
   /** employee_hours + completed time_entries durations, in hours. */
   hours: number;
-  /** Labor cost: employee_hours (hours*rate) + time_entries * pay_rate. */
+  /** Fully-loaded labor: (employee_hours hours*rate + time_entries * pay_rate)
+   *  times the employer payroll-tax burden — see lib/laborCost.ts. */
   labor: number;
   /** Per-employee hour totals (display name → hours), highest first. */
   byEmployee: { name: string; hours: number }[];
@@ -607,7 +609,7 @@ export async function fetchJobFinance(jobId: string): Promise<JobFinanceSummary 
   try {
     const { data: finance, error: financeError } = await supabase
       .from('finance_entries')
-      .select('type, amount, occurred_on, created_at')
+      .select('type, amount, direction, occurred_on, created_at')
       .eq('company', COMPANY)
       .eq('job_id', jobId);
     if (financeError || !finance) return null;
@@ -646,6 +648,7 @@ export async function fetchJobFinance(jobId: string): Promise<JobFinanceSummary 
     for (const entry of finance as {
       type: string;
       amount: unknown;
+      direction: string | null;
       occurred_on: string | null;
       created_at?: string | null;
     }[]) {
@@ -675,6 +678,15 @@ export async function fetchJobFinance(jobId: string): Promise<JobFinanceSummary 
           break;
         case 'payment':
           paid += amount;
+          break;
+        // Owner capital counts as money PAID IN on the job it sits on (the
+        // Company container): Devon's and Clark's contributions are real
+        // deposits, and showing them outside the paid figure made the job
+        // look as if the money never arrived. Direction-aware, so capital
+        // returned comes back out. Company-wide rollups (lib/financials.ts)
+        // still keep investment out of revenue — that is deliberate.
+        case 'investment':
+          paid += entry.direction === 'out' ? -amount : amount;
           break;
         case 'expense':
           expenses += amount;
@@ -729,7 +741,7 @@ export async function fetchJobFinance(jobId: string): Promise<JobFinanceSummary 
       .map(([name, h]) => ({ name, hours: h }))
       .sort((a, b) => b.hours - a.hours);
 
-    return { estimate, invoiced, paid, expenses, hours, labor, byEmployee };
+    return { estimate, invoiced, paid, expenses, hours, labor: loadedLaborCost(labor), byEmployee };
   } catch {
     return null;
   }

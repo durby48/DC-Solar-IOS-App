@@ -18,6 +18,7 @@
  * starts from the balance and reports profit.
  */
 
+import { loadedLaborCost } from '@/lib/laborCost';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
@@ -76,9 +77,11 @@ export async function fetchUnpaidWages(
     .eq('company', COMPANY)
     .gt('occurred_on', payrollThrough);
   if (error || !data) return 0;
-  return data.reduce(
-    (sum, row) => sum + Number(row.hours ?? 0) * Number(row.rate ?? 0),
-    0,
+  // Loaded, not gross: the payroll withdrawal Gusto makes is gross wages PLUS
+  // the employer taxes, so this is the amount that will actually leave the
+  // account (within pennies of every 2026 run).
+  return loadedLaborCost(
+    data.reduce((sum, row) => sum + Number(row.hours ?? 0) * Number(row.rate ?? 0), 0),
   );
 }
 

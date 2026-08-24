@@ -22,7 +22,8 @@ export function OverviewTiles({ data }: { data: FinancialsData }) {
   const tiles: { label: string; value: number; prefix: string; tone: number }[] = [
     { label: 'Paid in', value: data.paid, prefix: '$', tone: 1 },
     { label: 'Expenses', value: data.expenses, prefix: '$', tone: 4 },
-    { label: 'Labor', value: data.labor, prefix: '$', tone: 2 },
+    // Loaded cost: gross wages × employer-tax burden (lib/laborCost.ts).
+    { label: 'Labor incl. taxes', value: data.labor, prefix: '$', tone: 2 },
     {
       label: 'Net',
       // Absolute value + an explicit sign in the prefix: `CountUp` formats a
