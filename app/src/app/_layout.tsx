@@ -136,6 +136,8 @@ export default function RootLayout() {
           <Stack.Screen name="customer" options={{ headerShown: false, gestureEnabled: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="job/[id]" options={{ title: 'Job' }} />
+          <Stack.Screen name="leads/index" options={{ title: 'Sales Pipeline' }} />
+          <Stack.Screen name="leads/[id]" options={{ title: 'Lead' }} />
           <Stack.Screen name="document-builder" options={{ title: 'New document' }} />
           <Stack.Screen name="job-editor" options={{ title: 'Project' }} />
         </Stack>

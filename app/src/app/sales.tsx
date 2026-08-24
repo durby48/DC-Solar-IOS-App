@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Stack, useFocusEffect } from 'expo-router';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -141,6 +141,7 @@ function Funnel({ funnel }: { funnel: SalesFunnel }) {
 }
 
 export default function SalesScreen() {
+  const router = useRouter();
   const role = useRole();
   const [segment, setSegment] = useState<SalesSegment>('leads');
   const [data, setData] = useState<SalesData | null>(null);
@@ -261,6 +262,12 @@ export default function SalesScreen() {
               ) : null}
 
               <Text style={styles.sectionTitle}>Leads</Text>
+              <Pressable
+                onPress={() => router.push('/leads' as never)}
+                accessibilityRole="button"
+                style={styles.pipelineLink}>
+                <Text style={styles.pipelineLinkText}>Open the sales pipeline →</Text>
+              </Pressable>
               {data.leads.length === 0 ? (
                 <View style={styles.card}>
                   <Text style={styles.emptyLead}>
@@ -319,6 +326,10 @@ function statusTone(status: string) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.cream },
+  pipelineLink: {
+    paddingVertical: spacing.xs,
+  },
+  pipelineLinkText: { color: colors.ocean, fontWeight: '600', fontSize: 14 },
   container: { padding: spacing.lg, paddingBottom: spacing.xl * 2, gap: spacing.sm },
   subtitle: { color: colors.inkSoft, fontSize: 14, marginBottom: spacing.sm },
   // Segmented control: a pill track with the active half filled, so it reads

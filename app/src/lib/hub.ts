@@ -88,6 +88,8 @@ export const HUB_ITEMS: readonly HubItem[] = [
   // ---- Money (admin) ----
   { key: 'financials', title: 'Financials', icon: 'wallet', href: '/financials', group: 'money', tone: 'olive', gate: 'admin' },
   { key: 'sales', title: 'Sales', icon: 'trending-up', href: '/sales', group: 'money', tone: 5, gate: 'admin' },
+  // href cast until the dev server regenerates typed routes for /leads.
+  { key: 'leads', title: 'Leads', icon: 'person-add', href: '/leads' as never, group: 'money', tone: 3, gate: 'admin' },
 
   // ---- Customers ----
   { key: 'customers', title: 'Customers', icon: 'people', href: '/customers', group: 'customers', tone: 0, gate: 'all', badge: 'unread' },

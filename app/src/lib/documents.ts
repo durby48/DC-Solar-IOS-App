@@ -382,7 +382,8 @@ export function computeTotals(
 }
 
 export interface DocumentHtmlParams {
-  type: DocumentType | 'contract';
+  /** 'projection' is a LEAD document — same layout, zero financial weight. */
+  type: DocumentType | 'contract' | 'projection';
   documentNumber: string;
   /** YYYY-MM-DD */
   dateISO: string;
@@ -419,7 +420,13 @@ export interface DocumentHtmlParams {
  */
 export function buildDocumentHtml(params: DocumentHtmlParams): string {
   const title =
-    params.type === 'invoice' ? 'Invoice' : params.type === 'contract' ? 'Contract' : 'Estimate';
+    params.type === 'invoice'
+      ? 'Invoice'
+      : params.type === 'contract'
+        ? 'Contract'
+        : params.type === 'projection'
+          ? 'Projection'
+          : 'Estimate';
   const totals = computeTotals(params.lineItems, params.discount, params.tax);
   const total = totals.total;
   const date = new Date(`${params.dateISO}T12:00:00`).toLocaleDateString('en-US', {
