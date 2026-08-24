@@ -51,11 +51,10 @@ export function OverviewTiles({
     prefix: string;
     tone: number;
     view?: string;
+    /** Cost-trio tiles sit 3-up on one row; everything else is 2-up. */
+    third?: boolean;
   }[] = [
     { label: 'Paid in', value: month.paid, prefix: '$', tone: 1 },
-    { label: 'Expenses excluding labor', value: month.expenses, prefix: '$', tone: 4 },
-    // Actual run withdrawals paid this month + the open period's accrual.
-    { label: 'Labor incl. taxes', value: month.labor, prefix: '$', tone: 2, view: 'labor' },
     {
       label: 'Net',
       // Absolute value + an explicit sign in the prefix: `CountUp` formats a
@@ -63,6 +62,31 @@ export function OverviewTiles({
       value: Math.abs(month.net),
       prefix: netPositive ? '+$' : '−$',
       tone: netPositive ? 6 : 7,
+    },
+    // The cost trio, reading left to right: expenses + labor = total. Red is
+    // reserved for the total on the far right.
+    {
+      label: 'Expenses excluding labor',
+      value: month.expenses,
+      prefix: '$',
+      tone: 5,
+      third: true,
+    },
+    // Actual run withdrawals paid this month + the open period's accrual.
+    {
+      label: 'Labor incl. taxes',
+      value: month.labor,
+      prefix: '$',
+      tone: 2,
+      view: 'labor',
+      third: true,
+    },
+    {
+      label: 'Total Expenses',
+      value: month.expenses + month.labor,
+      prefix: '$',
+      tone: 4,
+      third: true,
     },
   ];
 
@@ -109,7 +133,10 @@ export function OverviewTiles({
 
       <View style={styles.grid}>
         {tiles.map((tile, index) => (
-          <FadeInUp key={tile.label} index={index} style={styles.cell}>
+          <FadeInUp
+            key={tile.label}
+            index={index}
+            style={[styles.cell, tile.third && styles.cellThird]}>
             {tile.view ? (
               <AnimatedPressable
                 onPress={() => router.push(`/ledger/${tile.view}` as never)}
@@ -122,6 +149,7 @@ export function OverviewTiles({
                   value={tile.value}
                   prefix={tile.prefix}
                   tone={tile.tone}
+                  compact={tile.third}
                   countUp
                   style={styles.tile}
                 />
@@ -138,6 +166,7 @@ export function OverviewTiles({
                 value={tile.value}
                 prefix={tile.prefix}
                 tone={tile.tone}
+                compact={tile.third}
                 countUp
                 style={styles.tile}
               />
@@ -191,6 +220,10 @@ const styles = StyleSheet.create({
     width: '50%',
     paddingHorizontal: spacing.xs,
     paddingBottom: spacing.sm,
+  },
+  /** The expenses + labor = total trio: three across one row. */
+  cellThird: {
+    width: '33.333%',
   },
   pressable: {
     position: 'relative',

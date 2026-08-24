@@ -35,6 +35,8 @@ export function MirrorTiles({
     view: string | null;
     tone: number;
     note?: string;
+    /** Cost-trio tiles sit 3-up on one row; everything else is 2-up. */
+    third?: boolean;
   }[] = [
     {
       label: 'Estimates YTD',
@@ -55,9 +57,24 @@ export function MirrorTiles({
     { label: 'Contracted YTD', amount: totals.contractedYtd, view: 'contracted-ytd', tone: 2 },
     { label: 'Invoiced YTD', amount: totals.invoicedYtd, view: 'invoiced-ytd', tone: 5 },
     { label: 'Paid in YTD', amount: totals.paid, view: 'paid', tone: 1 },
-    // The drill-down for expenses is the ledger at the bottom of the tab.
-    { label: 'Expenses YTD (excl. labor)', amount: expensesYtd, view: null, tone: 4 },
-    { label: 'Labor incl. taxes YTD', amount: laborYtd, view: 'labor', tone: 2 },
+    // The cost trio, reading left to right: expenses + labor = total. Red is
+    // reserved for the total on the far right. The expenses drill-down is the
+    // ledger at the bottom of the tab.
+    {
+      label: 'Expenses YTD (excl. labor)',
+      amount: expensesYtd,
+      view: null,
+      tone: 5,
+      third: true,
+    },
+    { label: 'Labor incl. taxes YTD', amount: laborYtd, view: 'labor', tone: 2, third: true },
+    {
+      label: 'Total Expenses YTD',
+      amount: expensesYtd + laborYtd,
+      view: null,
+      tone: 4,
+      third: true,
+    },
   ];
 
   return (
@@ -66,7 +83,10 @@ export function MirrorTiles({
 
       <View style={styles.grid}>
         {tiles.map((tile, index) => (
-          <FadeInUp key={tile.label} index={index} style={styles.cell}>
+          <FadeInUp
+            key={tile.label}
+            index={index}
+            style={[styles.cell, tile.third && styles.cellThird]}>
             <AnimatedPressable
               onPress={tile.view ? () => router.push(`/ledger/${tile.view}` as never) : undefined}
               disabled={!tile.view}
@@ -79,6 +99,7 @@ export function MirrorTiles({
                 value={tile.amount}
                 prefix="$"
                 tone={tile.tone}
+                compact={tile.third}
                 countUp
                 style={styles.tile}
               />
@@ -140,6 +161,10 @@ const styles = StyleSheet.create({
     width: '50%',
     paddingHorizontal: spacing.xs,
     paddingBottom: spacing.sm,
+  },
+  /** The expenses + labor = total trio: three across one row. */
+  cellThird: {
+    width: '33.333%',
   },
   pressable: {
     // The chevron is positioned against this box, so it has to be the tile's
