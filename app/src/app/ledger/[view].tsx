@@ -235,6 +235,58 @@ export default function LedgerScreen() {
       .map((job) => ({ job, value: invoiceTotals.get(job.id) ?? 0 }));
   }, [view, entries, jobs, jobOrder]);
 
+  /** job key ('company' for no job) -> sum of payments received. */
+  const paidByJob = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const e of entries ?? []) {
+      if (e.type !== 'payment') continue;
+      const key = e.job_id ?? 'company';
+      map.set(key, (map.get(key) ?? 0) + e.amount);
+    }
+    return map;
+  }, [entries]);
+
+  /**
+   * What a job is expected to collect - the basis the PAID view compares
+   * payments against: the invoiced total when any invoice exists, else the
+   * newest estimate's amount. (Estimate/invoice rows compare against their
+   * own amount instead.)
+   */
+  const dueByJob = useMemo(() => {
+    const invoiced = new Map<string, number>();
+    const newestEstimate = new Map<string, { amount: number; when: string }>();
+    for (const e of entries ?? []) {
+      if (!e.job_id) continue;
+      if (e.type === 'invoice') {
+        invoiced.set(e.job_id, (invoiced.get(e.job_id) ?? 0) + e.amount);
+      } else if (e.type === 'estimate') {
+        const when = `${e.occurred_on ?? ''}|${e.created_at ?? ''}`;
+        const prev = newestEstimate.get(e.job_id);
+        if (!prev || when >= prev.when) newestEstimate.set(e.job_id, { amount: e.amount, when });
+      }
+    }
+    const map = new Map<string, number>();
+    for (const [id, v] of newestEstimate) map.set(id, v.amount);
+    for (const [id, v] of invoiced) map.set(id, v);
+    return map;
+  }, [entries]);
+
+  /**
+   * Payment status for one row: green + checked box when the JOB has paid the
+   * row's figure in full, otherwise how much has arrived (even $0). Null for
+   * the company bucket and for zero bases, where "paid in full" is undefined.
+   */
+  const paymentStatus = (
+    entry: LedgerEntry,
+    jobKey: string,
+  ): { full: boolean; paid: number; basis: number } | null => {
+    if (jobKey === 'company') return null;
+    const basis = entry.type === 'payment' ? (dueByJob.get(jobKey) ?? 0) : entry.amount;
+    if (!(basis > 0)) return null;
+    const paid = paidByJob.get(jobKey) ?? 0;
+    return { full: paid >= basis - 0.005, paid, basis };
+  };
+
   const total =
     view === 'contracted'
       ? contractedJobs.reduce((sum, row) => sum + row.value, 0)
@@ -351,13 +403,20 @@ export default function LedgerScreen() {
     </ScrollView>
   );
 
-  const renderEntry = (entry: LedgerEntry, index: number) => {
+  const renderEntry = (entry: LedgerEntry, index: number, jobKey: string) => {
     const revision = entry.revision ?? 1;
     const revisable =
       (entry.type === 'estimate' || entry.type === 'invoice') && entry.document_number != null;
     const stale = entry.document_meta?.pdf_state === 'stale';
+    const status = paymentStatus(entry, jobKey);
     return (
-      <View key={entry.id} style={[styles.entryRow, index > 0 && styles.rowBorderTop]}>
+      <View
+        key={entry.id}
+        style={[
+          styles.entryRow,
+          index > 0 && styles.rowBorderTop,
+          status?.full && styles.entryRowPaid,
+        ]}>
         <AnimatedPressable
           onPress={() => void openPdf(entry)}
           disabled={!entry.document_path}
@@ -379,6 +438,23 @@ export default function LedgerScreen() {
             </AppText>
             {stale ? (
               <Chip label="PDF out of date" icon="warning" tone="danger" style={styles.staleChip} />
+            ) : null}
+            {status ? (
+              status.full ? (
+                <View style={styles.paidRow}>
+                  <Ionicons name="checkbox" size={14} color={colors.mintDeep} />
+                  <AppText variant="caption" color={colors.mintDeep}>
+                    Paid in full
+                  </AppText>
+                </View>
+              ) : (
+                <View style={styles.paidRow}>
+                  <Ionicons name="square-outline" size={14} color={colors.textMuted} />
+                  <AppText variant="caption" color={colors.textMuted}>
+                    {`${formatMoney(status.paid)} of ${formatMoney(status.basis)} paid`}
+                  </AppText>
+                </View>
+              )
             ) : null}
           </View>
           <AppText variant="bodyStrong" style={styles.figure}>
@@ -473,9 +549,11 @@ export default function LedgerScreen() {
         {view === 'contracted'
           ? contractedJobs.map(({ job, value }, index) => {
               const editing = editingJobId === job.id;
+              const paid = paidByJob.get(job.id) ?? 0;
+              const fullyPaid = value > 0 && paid >= value - 0.005;
               return (
                 <FadeInUp key={job.id} index={index}>
-                  <Card style={styles.jobCard}>
+                  <Card style={[styles.jobCard, fullyPaid && styles.jobCardPaid]}>
                     <AnimatedPressable
                       onPress={() => router.push({ pathname: '/job/[id]', params: { id: job.id } })}
                       haptic="tapLight"
@@ -497,9 +575,30 @@ export default function LedgerScreen() {
                     </AnimatedPressable>
 
                     <View style={styles.valueRow}>
-                      <AppText variant="bodyStrong" color={colors.oliveDeep} style={styles.figure}>
-                        Contract value {formatMoney(value)}
-                      </AppText>
+                      <View style={styles.contractValueWrap}>
+                        <AppText
+                          variant="bodyStrong"
+                          color={colors.oliveDeep}
+                          style={styles.figure}>
+                          Contract value {formatMoney(value)}
+                        </AppText>
+                        {value > 0 ? (
+                          <View style={styles.paidRow}>
+                            <Ionicons
+                              name={fullyPaid ? 'checkbox' : 'square-outline'}
+                              size={14}
+                              color={fullyPaid ? colors.mintDeep : colors.textMuted}
+                            />
+                            <AppText
+                              variant="caption"
+                              color={fullyPaid ? colors.mintDeep : colors.textMuted}>
+                              {fullyPaid
+                                ? 'Paid in full'
+                                : `${formatMoney(paid)} of ${formatMoney(value)} paid`}
+                            </AppText>
+                          </View>
+                        ) : null}
+                      </View>
                       <AnimatedPressable
                         onPress={() => {
                           setError(null);
@@ -600,7 +699,9 @@ export default function LedgerScreen() {
                     {formatMoney(group.subtotal)}
                   </AppText>
                 </AnimatedPressable>
-                <Card padded={false}>{group.entries.map(renderEntry)}</Card>
+                <Card padded={false}>
+                  {group.entries.map((entry, i) => renderEntry(entry, i, group.key))}
+                </Card>
               </FadeInUp>
             ))}
 
@@ -664,6 +765,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingRight: spacing.sm,
     backgroundColor: colors.surface,
+  },
+  /** Soft green when the job has paid this row's figure in full. */
+  entryRowPaid: {
+    backgroundColor: colors.mintSoft,
+  },
+  jobCardPaid: {
+    backgroundColor: colors.mintSoft,
+  },
+  paidRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  contractValueWrap: {
+    flex: 1,
+    gap: 2,
   },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
