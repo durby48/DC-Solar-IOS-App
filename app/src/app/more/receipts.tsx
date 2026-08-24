@@ -569,7 +569,13 @@ export default function ReceiptsScreen() {
                       {jobs.map((job) => (
                         <Chip
                           key={job.id}
-                          label={job.job_number ? `Job ${job.job_number}` : job.name}
+                          label={
+                            job.is_internal
+                              ? 'Company'
+                              : job.job_number
+                                ? `Job ${job.job_number}`
+                                : job.name
+                          }
                           tone="sun"
                           selected={jobId === job.id}
                           onPress={() => setJobId(job.id)}

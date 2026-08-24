@@ -54,6 +54,8 @@ export interface JobOption {
   job_number: string | null;
   name: string;
   status: string;
+  /** True for the company overhead container ("DC Solar Company"). */
+  is_internal?: boolean | null;
 }
 
 function normalizeReceipt(row: Record<string, unknown>): Receipt {
@@ -98,17 +100,23 @@ export async function fetchPendingReceipts(): Promise<ReceiptsResult> {
   }
 }
 
-/** Active jobs for the optional job picker. Returns [] on any error. */
+/**
+ * Jobs for the optional job picker: every active job PLUS the internal
+ * "DC Solar Company" container (which is completed, so a plain active filter
+ * hid it — and overhead receipts like a ladder rack have no other home).
+ * The container sorts first. Returns [] on any error.
+ */
 export async function fetchActiveJobs(): Promise<JobOption[]> {
   try {
     const { data, error } = await supabase
       .from('jobs')
-      .select('id, job_number, name, status')
+      .select('id, job_number, name, status, is_internal')
       .eq('company', COMPANY)
-      .eq('status', 'active')
+      .or('status.eq.active,is_internal.eq.true')
       .order('job_number', { ascending: true });
     if (error || !data) return [];
-    return data as JobOption[];
+    const rows = data as (JobOption & { is_internal: boolean | null })[];
+    return rows.sort((a, b) => Number(b.is_internal ?? false) - Number(a.is_internal ?? false));
   } catch {
     return [];
   }
@@ -235,7 +243,14 @@ export async function approveReceipt(
         direction: 'out',
         amount: receipt.amount,
         currency: 'USD',
-        description: receipt.description ?? `Receipt from ${receipt.employee}`,
+        // The [... NOT yet reimbursed] marker is what the Financials cash
+        // position reads to build "Less owed for out-of-pocket" — without it
+        // an out-of-pocket receipt was invisible to the reconciliation.
+        description:
+          (receipt.description ?? `Receipt from ${receipt.employee}`) +
+          (receipt.needs_reimbursed
+            ? ` [${receipt.method?.trim() || receipt.employee} — NOT yet reimbursed]`
+            : ''),
         occurred_on: occurredOn,
         status: 'recorded',
         job_id: receipt.job_id,
