@@ -1,12 +1,19 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
-import { AppText, FadeInUp, GradientSurface, PulseRing } from '@/components/ui';
+import { MediaLightbox } from '@/components/MediaLightbox';
+import { AnimatedPressable, AppText, FadeInUp, GradientSurface, PulseRing } from '@/components/ui';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
-import { fetchEmployeeOfMonth, formatMonthLabel, type EmployeeOfMonthCard } from '@/lib/eom';
+import {
+  currentMonthISO,
+  formatMonthLabel,
+  listEmployeeOfMonth,
+  type EmployeeOfMonthCard,
+  type EmployeeOfMonthEntry,
+} from '@/lib/eom';
 import { DURATION, useMotion } from '@/lib/motion';
 import { useRole } from '@/lib/role';
 
@@ -43,7 +50,11 @@ import { useRole } from '@/lib/role';
  * quietly backdating the headline. See lib/eom.ts for why.
  */
 export function EmployeeOfMonth() {
-  const [card, setCard] = useState<EmployeeOfMonthCard | null>(null);
+  // Every month on record, newest first — the arrows page through them.
+  // `employee_of_month` is member-SELECT, so the crew sees the history too.
+  const [entries, setEntries] = useState<EmployeeOfMonthEntry[]>([]);
+  const [monthIndex, setMonthIndex] = useState(0);
+  const [viewerOpen, setViewerOpen] = useState(false);
   const role = useRole();
 
   // Refetch on focus so an admin who just added this month's photo sees it
@@ -52,8 +63,14 @@ export function EmployeeOfMonth() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      fetchEmployeeOfMonth().then((next) => {
-        if (!cancelled) setCard(next);
+      listEmployeeOfMonth().then((result) => {
+        if (cancelled) return;
+        const rows =
+          result.status === 'ok'
+            ? result.entries.filter((e) => e.month <= currentMonthISO())
+            : [];
+        setEntries(rows);
+        setMonthIndex((i) => Math.min(i, Math.max(0, rows.length - 1)));
       });
       return () => {
         cancelled = true;
@@ -61,9 +78,62 @@ export function EmployeeOfMonth() {
     }, []),
   );
 
+  const entry = entries[monthIndex];
+  const card = useMemo<EmployeeOfMonthCard | null>(() => {
+    if (!entry) return null;
+    const thisMonth = currentMonthISO();
+    // Index 0 keeps the original semantics: the headline names the CURRENT
+    // month, and an older standing winner says so in its own line. Paged
+    // months are historical and simply say their month.
+    const headline = monthIndex === 0 ? thisMonth : entry.month;
+    return {
+      month: entry.month,
+      label: formatMonthLabel(headline),
+      employeeName: entry.employee_name ?? entry.employee_email,
+      employeeEmail: entry.employee_email,
+      photoUrl: entry.photoUrl,
+      caption: entry.caption ?? null,
+      isFallback: monthIndex === 0 && entry.month !== thisMonth,
+    };
+  }, [entry, monthIndex]);
+
   if (!card) return null;
 
-  return <EmployeeOfMonthPlacard card={card} isAdmin={role?.isAdmin ?? false} />;
+  return (
+    <>
+      <EmployeeOfMonthPlacard
+        card={card}
+        isAdmin={role?.isAdmin ?? false}
+        pager={
+          entries.length > 1
+            ? {
+                // Prev = older months (higher index), Next = back toward now.
+                canPrev: monthIndex < entries.length - 1,
+                canNext: monthIndex > 0,
+                onPrev: () => setMonthIndex((i) => Math.min(entries.length - 1, i + 1)),
+                onNext: () => setMonthIndex((i) => Math.max(0, i - 1)),
+              }
+            : undefined
+        }
+        onPhotoPress={card.photoUrl ? () => setViewerOpen(true) : undefined}
+      />
+      {card.photoUrl ? (
+        <MediaLightbox
+          items={[
+            {
+              id: card.month,
+              url: card.photoUrl,
+              caption: `${card.employeeName} — Employee of the Month, ${formatMonthLabel(card.month)}`,
+              fileName: `employee-of-month-${card.month}.jpg`,
+            },
+          ]}
+          index={0}
+          visible={viewerOpen}
+          onClose={() => setViewerOpen(false)}
+        />
+      ) : null}
+    </>
+  );
 }
 
 /**
@@ -77,10 +147,16 @@ export function EmployeeOfMonth() {
 export function EmployeeOfMonthPlacard({
   card,
   isAdmin = false,
+  pager,
+  onPhotoPress,
 }: {
   card: EmployeeOfMonthCard;
   /** Owners and operators get the "where do I add the photo" line. */
   isAdmin?: boolean;
+  /** Month arrows — shown to everyone when there is history to page. */
+  pager?: { canPrev: boolean; canNext: boolean; onPrev: () => void; onNext: () => void };
+  /** Set when the photo can open full-size (tap → lightbox). */
+  onPhotoPress?: () => void;
 }) {
   const motion = useMotion();
 
@@ -131,6 +207,30 @@ export function EmployeeOfMonthPlacard({
                 {card.label}
               </AppText>
             </View>
+            {pager ? (
+              <View style={styles.pager}>
+                <AnimatedPressable
+                  onPress={pager.onPrev}
+                  disabled={!pager.canPrev}
+                  haptic="tapLight"
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel="Previous month's employee of the month"
+                  style={[styles.arrow, !pager.canPrev && styles.arrowDisabled]}>
+                  <Ionicons name="chevron-back" size={15} color={colors.sunLight} />
+                </AnimatedPressable>
+                <AnimatedPressable
+                  onPress={pager.onNext}
+                  disabled={!pager.canNext}
+                  haptic="tapLight"
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel="Next month's employee of the month"
+                  style={[styles.arrow, !pager.canNext && styles.arrowDisabled]}>
+                  <Ionicons name="chevron-forward" size={15} color={colors.sunLight} />
+                </AnimatedPressable>
+              </View>
+            ) : null}
           </View>
 
           {/* The engraved line across a real plaque. */}
@@ -141,6 +241,7 @@ export function EmployeeOfMonthPlacard({
               photoUrl={card.photoUrl}
               name={card.employeeName}
               transition={motion.ms(DURATION.base)}
+              onPress={onPhotoPress}
             />
 
             <View style={styles.body}>
@@ -183,25 +284,40 @@ function PhotoSlot({
   photoUrl,
   name,
   transition,
+  onPress,
 }: {
   photoUrl: string | null;
   name: string;
   /** Fade duration in ms, already zeroed by `useMotion` when reduced. */
   transition: number;
+  /** Tap → full-size viewer (zoomable, with its own close button). */
+  onPress?: () => void;
 }) {
   if (photoUrl) {
-    return (
-      <View style={[styles.frame, styles.frameFilled]}>
-        <Image
-          source={{ uri: photoUrl }}
-          style={styles.photo}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={transition}
-          accessibilityLabel={`Photo of ${name}`}
-        />
-      </View>
+    const photo = (
+      <Image
+        source={{ uri: photoUrl }}
+        style={styles.photo}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+        transition={transition}
+        accessibilityLabel={`Photo of ${name}`}
+      />
     );
+    if (onPress) {
+      return (
+        <AnimatedPressable
+          onPress={onPress}
+          haptic="tapLight"
+          scaleTo={0.98}
+          accessibilityRole="imagebutton"
+          accessibilityLabel={`Photo of ${name} — tap to view full size`}
+          style={[styles.frame, styles.frameFilled]}>
+          {photo}
+        </AnimatedPressable>
+      );
+    }
+    return <View style={[styles.frame, styles.frameFilled]}>{photo}</View>;
   }
 
   return (
@@ -247,6 +363,22 @@ const styles = StyleSheet.create({
   },
   eyebrow: {
     flex: 1,
+  },
+  pager: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  arrow: {
+    width: 26,
+    height: 26,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: 'rgba(255,211,166,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arrowDisabled: {
+    opacity: 0.35,
   },
   rule: {
     height: 1,
