@@ -38,6 +38,10 @@ export function MirrorTiles({
     /** Cost-trio tiles sit 3-up on one row; everything else is 2-up. */
     third?: boolean;
   }[] = [
+    // "Actively" = the job is IN that stage right now; the YTD pair below
+    // keeps jobs for the whole lifecycle (completed ones included).
+    { label: 'Actively Contracted', amount: totals.contracted, view: 'contracted', tone: 2 },
+    { label: 'Actively Invoiced', amount: totals.invoiced, view: 'invoiced-active', tone: 5 },
     {
       label: 'Estimates YTD',
       amount: totals.estimates,
@@ -50,10 +54,6 @@ export function MirrorTiles({
           ? `newest of ${totals.estimateCount} on ${totals.estimateJobs} jobs`
           : `${totals.estimateCount} on file`,
     },
-    // "Actively" = the job is IN that stage right now; the YTD pair below
-    // keeps jobs for the whole lifecycle (completed ones included).
-    { label: 'Actively Contracted', amount: totals.contracted, view: 'contracted', tone: 2 },
-    { label: 'Actively Invoiced', amount: totals.invoiced, view: 'invoiced-active', tone: 5 },
     { label: 'Contracted YTD', amount: totals.contractedYtd, view: 'contracted-ytd', tone: 2 },
     { label: 'Invoiced YTD', amount: totals.invoicedYtd, view: 'invoiced-ytd', tone: 5 },
     { label: 'Paid in YTD', amount: totals.paid, view: 'paid', tone: 1 },
