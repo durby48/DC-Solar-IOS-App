@@ -179,9 +179,13 @@ const styles = StyleSheet.create({
     top: spacing.sm + 2,
     right: spacing.sm + 2,
   },
+  // Inside the tile, pinned to its bottom-right corner (the tile's own
+  // padding keeps the value clear of it).
   note: {
-    paddingTop: 2,
-    paddingHorizontal: spacing.xs,
+    position: 'absolute',
+    bottom: spacing.xs + 2,
+    right: spacing.sm,
+    fontSize: 10,
   },
   profitCard: {
     flexDirection: 'row',
