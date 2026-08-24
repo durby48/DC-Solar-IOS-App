@@ -114,7 +114,7 @@ function byDateDesc(a: LedgerEntry, b: LedgerEntry): number {
  */
 export async function fetchFinancials(): Promise<FinancialsData | null> {
   try {
-    const [{ data, error }, hoursResult] = await Promise.all([
+    const [{ data, error }, hoursResult, timeResult, employeesResult] = await Promise.all([
       supabase
         .from('finance_entries')
         .select(
@@ -125,8 +125,34 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       // can subtract them — the headline overstated profit by every wage
       // dollar ever paid without this.
       supabase.from('employee_hours').select('hours, rate').eq('company', COMPANY),
+      // Clock in/out hours are the OTHER half of labor — the Hours tab and the
+      // per-job view both count them, and until 2026-08-23 this headline did
+      // not, so Net overstated profit by every clocked (never hand-logged)
+      // hour. Priced at the roster pay_rate, same as fetchJobFinance.
+      supabase
+        .from('time_entries')
+        .select('employee, clock_in, clock_out')
+        .eq('company', COMPANY),
+      supabase.from('employees').select('email, pay_rate'),
     ]);
     if (error || !data) return null;
+    const rateByEmail = new Map<string, number>();
+    for (const row of (employeesResult.data ?? []) as { email: string; pay_rate: unknown }[]) {
+      if (row.email && row.pay_rate != null) rateByEmail.set(row.email.toLowerCase(), num(row.pay_rate));
+    }
+    let clockedWages = 0;
+    for (const row of (timeResult.data ?? []) as {
+      employee: string | null;
+      clock_in: string | null;
+      clock_out: string | null;
+    }[]) {
+      if (!row.clock_in || !row.clock_out) continue; // only completed entries
+      const ms = new Date(row.clock_out).getTime() - new Date(row.clock_in).getTime();
+      if (!Number.isFinite(ms) || ms <= 0) continue;
+      const rate = rateByEmail.get((row.employee ?? '').toLowerCase());
+      if (rate != null) clockedWages += (ms / 3_600_000) * rate;
+    }
+
     // Fully loaded: gross wages carry the employer payroll-tax burden.
     // The ledger's per-run "Employer payroll taxes" rows were removed
     // 2026-08-23 — this multiplier is where that cost lives now.
@@ -134,7 +160,7 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       (hoursResult.data ?? []).reduce(
         (sum, row) => sum + num(row.hours) * num(row.rate),
         0,
-      ),
+      ) + clockedWages,
     );
 
     const rows = (data as Record<string, unknown>[]).map((row) => ({
