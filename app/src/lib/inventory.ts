@@ -25,6 +25,8 @@ export interface InventoryJobOption {
   id: string;
   job_number: string | null;
   name: string;
+  address: string | null;
+  customerName: string | null;
   status: string;
 }
 
@@ -60,12 +62,25 @@ export async function fetchInventoryJobs(): Promise<InventoryJobOption[]> {
   try {
     const { data, error } = await supabase
       .from('jobs')
-      .select('id, job_number, name, status')
+      .select('id, job_number, name, address, status, customers(name)')
       .eq('company', COMPANY)
       .eq('status', 'active')
       .order('job_number', { ascending: true });
     if (error || !data) return [];
-    return data as InventoryJobOption[];
+    return (data as Record<string, unknown>[]).map((row) => {
+      const customer = row.customers as { name: string } | { name: string }[] | null;
+      const customerName = Array.isArray(customer)
+        ? (customer[0]?.name ?? null)
+        : (customer?.name ?? null);
+      return {
+        id: String(row.id ?? ''),
+        job_number: (row.job_number as string | null) ?? null,
+        name: (row.name as string) ?? '',
+        address: (row.address as string | null) ?? null,
+        customerName,
+        status: (row.status as string) ?? '',
+      };
+    });
   } catch {
     return [];
   }

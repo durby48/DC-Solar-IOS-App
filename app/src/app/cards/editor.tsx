@@ -187,6 +187,17 @@ export default function CardEditorScreen() {
 
   const [jobs, setJobs] = useState<CardJobOption[]>([]);
   const [jobPickerOpen, setJobPickerOpen] = useState(false);
+  const [jobSearch, setJobSearch] = useState('');
+
+  const filteredJobs = useMemo(() => {
+    const q = jobSearch.trim().toLowerCase();
+    if (!q) return jobs;
+    return jobs.filter((job) =>
+      [job.jobNumber, job.name, job.customerName, job.address].some((field) =>
+        field?.toLowerCase().includes(q),
+      ),
+    );
+  }, [jobs, jobSearch]);
 
   const set = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -608,6 +619,14 @@ export default function CardEditorScreen() {
             </AnimatedPressable>
             {jobPickerOpen ? (
               <View style={styles.pickerList}>
+                {jobs.length > 6 ? (
+                  <Field
+                    label="Search"
+                    value={jobSearch}
+                    onChangeText={setJobSearch}
+                    placeholder="Search job, customer or address"
+                  />
+                ) : null}
                 <Chip
                   label="Not linked"
                   tone="neutral"
@@ -618,7 +637,7 @@ export default function CardEditorScreen() {
                   }}
                 />
                 <ScrollView style={styles.pickerScroll} nestedScrollEnabled>
-                  {jobs.map((job) => (
+                  {filteredJobs.map((job) => (
                     <AnimatedPressable
                       key={job.id}
                       onPress={() => {
@@ -638,11 +657,20 @@ export default function CardEditorScreen() {
                           {job.name}
                         </AppText>
                       ) : null}
+                      {job.customerName || job.address ? (
+                        <AppText variant="caption" color={colors.textMuted} numberOfLines={1}>
+                          {[job.customerName, job.address].filter(Boolean).join(' · ')}
+                        </AppText>
+                      ) : null}
                     </AnimatedPressable>
                   ))}
                   {jobs.length === 0 ? (
                     <AppText variant="caption" color={colors.textMuted}>
                       No jobs to link to.
+                    </AppText>
+                  ) : filteredJobs.length === 0 ? (
+                    <AppText variant="caption" color={colors.textMuted}>
+                      No jobs match &quot;{jobSearch.trim()}&quot;.
                     </AppText>
                   ) : null}
                 </ScrollView>

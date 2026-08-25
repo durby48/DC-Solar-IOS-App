@@ -461,6 +461,8 @@ export interface CardJobOption {
   id: string;
   jobNumber: string | null;
   name: string | null;
+  address: string | null;
+  customerName: string | null;
 }
 
 /**
@@ -474,16 +476,24 @@ export async function fetchCardJobOptions(): Promise<CardJobOption[]> {
   try {
     const { data, error } = await supabase
       .from('jobs')
-      .select('id, job_number, name')
+      .select('id, job_number, name, address, customers(name)')
       .eq('company', COMPANY)
       .order('job_number', { ascending: false })
       .limit(300);
     if (error || !data) return [];
-    return (data as Record<string, unknown>[]).map((row) => ({
-      id: String(row.id ?? ''),
-      jobNumber: (row.job_number as string | null) ?? null,
-      name: (row.name as string | null) ?? null,
-    }));
+    return (data as Record<string, unknown>[]).map((row) => {
+      const customer = row.customers as { name: string } | { name: string }[] | null;
+      const customerName = Array.isArray(customer)
+        ? (customer[0]?.name ?? null)
+        : (customer?.name ?? null);
+      return {
+        id: String(row.id ?? ''),
+        jobNumber: (row.job_number as string | null) ?? null,
+        name: (row.name as string | null) ?? null,
+        address: (row.address as string | null) ?? null,
+        customerName,
+      };
+    });
   } catch {
     return [];
   }

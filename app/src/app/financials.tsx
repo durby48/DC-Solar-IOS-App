@@ -129,7 +129,12 @@ export default function FinancialsScreen() {
       setJobOptions(
         jobs
           .filter((j) => j.id !== container?.id)
-          .map((j) => ({ id: j.id, label: j.job_number ?? j.name })),
+          .map((j) => ({
+            id: j.id,
+            label: j.job_number ?? j.name,
+            customerName: j.customer?.name ?? null,
+            address: j.address,
+          })),
       );
       setJobLabels(new Map(jobs.map((j) => [j.id, j.job_number ?? j.name])));
     } else {

@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Platform, StyleSheet, TextInput, View } from 'react-native';
 
 import {
@@ -100,7 +100,18 @@ export default function InventoryScreen() {
   const [action, setAction] = useState<ActionKind | null>(null);
   const [qtyText, setQtyText] = useState('');
   const [actionJobId, setActionJobId] = useState<string | null>(null);
+  const [jobSearch, setJobSearch] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const filteredJobs = useMemo(() => {
+    const q = jobSearch.trim().toLowerCase();
+    if (!q) return jobs;
+    return jobs.filter((job) =>
+      [job.job_number, job.name, job.customerName, job.address].some((field) =>
+        field?.toLowerCase().includes(q),
+      ),
+    );
+  }, [jobs, jobSearch]);
 
   // Admin add-item form
   const [showAddForm, setShowAddForm] = useState(false);
@@ -136,6 +147,7 @@ export default function InventoryScreen() {
     setAction(null);
     setQtyText('');
     setActionJobId(null);
+    setJobSearch('');
     setSaving(false);
   };
 
@@ -256,6 +268,17 @@ export default function InventoryScreen() {
             <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
               Job (optional)
             </AppText>
+            {jobs.length > 6 ? (
+              <TextInput
+                value={jobSearch}
+                onChangeText={setJobSearch}
+                placeholder="Search job, customer or address"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={styles.input}
+              />
+            ) : null}
             <View style={styles.chipRow}>
               <Chip
                 label="None"
@@ -263,7 +286,7 @@ export default function InventoryScreen() {
                 selected={actionJobId === null}
                 onPress={() => setActionJobId(null)}
               />
-              {jobs.map((job) => (
+              {filteredJobs.map((job) => (
                 <Chip
                   key={job.id}
                   label={job.job_number ? `Job ${job.job_number}` : job.name}
@@ -272,6 +295,11 @@ export default function InventoryScreen() {
                   onPress={() => setActionJobId(job.id)}
                 />
               ))}
+              {filteredJobs.length === 0 ? (
+                <AppText variant="caption" color={colors.textMuted}>
+                  No jobs match &quot;{jobSearch.trim()}&quot;.
+                </AppText>
+              ) : null}
             </View>
           </>
         ) : null}

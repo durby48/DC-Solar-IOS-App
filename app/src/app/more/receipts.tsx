@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -118,6 +118,7 @@ export default function ReceiptsScreen() {
   const [category, setCategory] = useState<ReceiptCategory>('materials');
   const [method, setMethod] = useState('');
   const [jobId, setJobId] = useState<string | null>(null);
+  const [jobSearch, setJobSearch] = useState('');
   const [needsReimbursed, setNeedsReimbursed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -229,6 +230,7 @@ export default function ReceiptsScreen() {
     setCategory('materials');
     setMethod('');
     setJobId(null);
+    setJobSearch('');
     setNeedsReimbursed(false);
   };
 
@@ -321,6 +323,16 @@ export default function ReceiptsScreen() {
   };
 
   // -- Render helpers -------------------------------------------------------
+
+  const filteredJobs = useMemo(() => {
+    const q = jobSearch.trim().toLowerCase();
+    if (!q) return jobs;
+    return jobs.filter((job) =>
+      [job.job_number, job.name, job.customerName, job.address].some((field) =>
+        field?.toLowerCase().includes(q),
+      ),
+    );
+  }, [jobs, jobSearch]);
 
   const jobLabel = (id: string | null): string | null => {
     if (!id) return null;
@@ -559,6 +571,17 @@ export default function ReceiptsScreen() {
                     <AppText variant="section" color={colors.textMuted} style={styles.fieldLabel}>
                       Job (optional)
                     </AppText>
+                    {jobs.length > 6 ? (
+                      <TextInput
+                        value={jobSearch}
+                        onChangeText={setJobSearch}
+                        placeholder="Search job, customer or address"
+                        placeholderTextColor={colors.textMuted}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        style={styles.input}
+                      />
+                    ) : null}
                     <View style={styles.chipRow}>
                       <Chip
                         label="None"
@@ -566,7 +589,7 @@ export default function ReceiptsScreen() {
                         selected={jobId === null}
                         onPress={() => setJobId(null)}
                       />
-                      {jobs.map((job) => (
+                      {filteredJobs.map((job) => (
                         <Chip
                           key={job.id}
                           label={
@@ -581,6 +604,11 @@ export default function ReceiptsScreen() {
                           onPress={() => setJobId(job.id)}
                         />
                       ))}
+                      {filteredJobs.length === 0 ? (
+                        <AppText variant="caption" color={colors.textMuted}>
+                          No jobs match &quot;{jobSearch.trim()}&quot;.
+                        </AppText>
+                      ) : null}
                     </View>
                   </>
                 ) : null}

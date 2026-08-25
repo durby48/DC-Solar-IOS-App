@@ -462,7 +462,15 @@ export default function LedgerScreen() {
     () =>
       jobOrder
         .filter((jid) => jid !== companyJobId)
-        .map((jid) => ({ id: jid, label: jobs.get(jid)?.label ?? 'Job' })),
+        .map((jid) => {
+          const job = jobs.get(jid);
+          return {
+            id: jid,
+            label: job?.label ?? 'Job',
+            customerName: job?.customer ?? null,
+            address: job?.raw.address ?? null,
+          };
+        }),
     [jobOrder, jobs, companyJobId],
   );
 

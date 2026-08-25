@@ -53,6 +53,8 @@ export interface JobOption {
   id: string;
   job_number: string | null;
   name: string;
+  address: string | null;
+  customerName: string | null;
   status: string;
   /** True for the company overhead container ("DC Solar Company"). */
   is_internal?: boolean | null;
@@ -110,12 +112,24 @@ export async function fetchActiveJobs(): Promise<JobOption[]> {
   try {
     const { data, error } = await supabase
       .from('jobs')
-      .select('id, job_number, name, status, is_internal')
+      .select('id, job_number, name, address, status, is_internal, customers(name)')
       .eq('company', COMPANY)
       .or('status.eq.active,is_internal.eq.true')
       .order('job_number', { ascending: true });
     if (error || !data) return [];
-    const rows = data as (JobOption & { is_internal: boolean | null })[];
+    const rows = (data as Record<string, unknown>[]).map((row) => {
+      const customer = row.customers as { name: string } | { name: string }[] | null;
+      const customerName = Array.isArray(customer) ? (customer[0]?.name ?? null) : (customer?.name ?? null);
+      return {
+        id: String(row.id ?? ''),
+        job_number: (row.job_number as string | null) ?? null,
+        name: (row.name as string) ?? '',
+        address: (row.address as string | null) ?? null,
+        customerName,
+        status: (row.status as string) ?? '',
+        is_internal: (row.is_internal as boolean | null) ?? null,
+      };
+    });
     return rows.sort((a, b) => Number(b.is_internal ?? false) - Number(a.is_internal ?? false));
   } catch {
     return [];

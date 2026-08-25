@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 
 import {
@@ -20,7 +21,13 @@ import { formatMoney } from './format';
 export interface JobOption {
   id: string;
   label: string;
+  /** Extra fields the search box matches against, beyond `label`. */
+  customerName?: string | null;
+  address?: string | null;
 }
+
+/** Only worth a search box once scrubbing the chip row itself gets old. */
+const SEARCH_THRESHOLD = 6;
 
 /**
  * "Which job is this expense on?" — the Company container job first (that is
@@ -42,11 +49,32 @@ export function JobPicker({
   selected: string | null;
   onSelect: (id: string | null) => void;
 }) {
+  const [query, setQuery] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((option) =>
+      [option.label, option.customerName, option.address].some((field) =>
+        field?.toLowerCase().includes(q),
+      ),
+    );
+  }, [options, query]);
+
   return (
     <View style={styles.field}>
       <AppText variant="section" color={colors.textMuted}>
         {label}
       </AppText>
+      {options.length > SEARCH_THRESHOLD ? (
+        <Field
+          label="Search"
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search job, customer or address"
+          style={styles.searchField}
+        />
+      ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View style={styles.chipRow}>
           <Chip
@@ -55,7 +83,7 @@ export function JobPicker({
             selected={selected === companyJobId}
             onPress={() => onSelect(companyJobId)}
           />
-          {options.map((option) => (
+          {filtered.map((option) => (
             <Chip
               key={option.id}
               label={option.label}
@@ -64,6 +92,11 @@ export function JobPicker({
               onPress={() => onSelect(option.id)}
             />
           ))}
+          {filtered.length === 0 ? (
+            <AppText variant="caption" color={colors.textMuted} style={styles.noMatches}>
+              No jobs match &quot;{query.trim()}&quot;.
+            </AppText>
+          ) : null}
         </View>
       </ScrollView>
     </View>
@@ -426,8 +459,15 @@ const styles = StyleSheet.create({
   },
   chipRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.xs,
     paddingVertical: spacing.xs,
+  },
+  searchField: {
+    marginBottom: spacing.xs,
+  },
+  noMatches: {
+    paddingHorizontal: spacing.xs,
   },
   formCard: {
     marginBottom: spacing.md,
