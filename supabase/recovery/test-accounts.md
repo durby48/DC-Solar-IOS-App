@@ -1,7 +1,10 @@
 # Test accounts (for checking the app as a non-admin)
 
-**CREATED 2026-08-18** (Devon approved) via Option B below; credentials live in
-`secrets/test-accounts.txt` on Carson's PC (never in this repo). Verified by a
+**CREATED**: viewer `test-crew@dcsolarkc.com` 2026-08-18, operator
+`test-operator@dcsolarkc.com` 2026-08-25. Credentials live in
+`secrets/test-accounts.txt` on Carson's PC (never in this repo). The operator
+account is an ADMIN (`is_company_admin()` covers owner + operator) and therefore
+sees all money — that is what it is for. Verified by a
 real GoTrue sign-in + REST probes: finance_entries 0, employee_hours 0,
 time_entries 0, jobs 30, customers 19, employees = own row only. Purpose: a login
 that is a plain `viewer` so we can look at the app the way the crew sees it
@@ -65,9 +68,14 @@ commit;
 ## Removing it
 
 ```sql
-delete from auth.users where email = 'test-crew@dcsolarkc.com';   -- cascades identities
-delete from public.employees where email = 'test-crew@dcsolarkc.com';
+delete from auth.users where email in ('test-crew@dcsolarkc.com', 'test-operator@dcsolarkc.com');
+delete from public.employees where email in ('test-crew@dcsolarkc.com', 'test-operator@dcsolarkc.com');
 ```
+
+Both roster rows are named so they sort last in the app's people pickers
+("Test Crew (viewer)", "ZZ Test (operator)"). `employees` has no `active`
+column, so they DO appear in the hours picker, the Everyone chip and the
+Employee-of-the-Month picker until deleted.
 
 ## Test customer (portal), later
 
