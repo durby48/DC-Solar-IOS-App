@@ -22,6 +22,13 @@ import {
   type EnrollmentStart,
   type MfaFactor,
 } from '@/lib/mfa';
+import {
+  fetchMySessions,
+  formatLastSeen,
+  revokeOtherSessions,
+  revokeSession,
+  type DeviceSession,
+} from '@/lib/sessions';
 
 /**
  * Two-factor setup for staff (More → Security).
@@ -41,6 +48,15 @@ export default function SecurityScreen() {
     null,
   );
   const [copied, setCopied] = useState(false);
+  const [devices, setDevices] = useState<DeviceSession[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(true);
+  /** Session id currently being signed out, so only that row shows a spinner. */
+  const [revoking, setRevoking] = useState<string | null>(null);
+
+  const loadDevices = useCallback(async () => {
+    setDevices(await fetchMySessions());
+    setDevicesLoading(false);
+  }, []);
 
   const load = useCallback(async () => {
     setFactors(await listFactors());
@@ -49,9 +65,41 @@ export default function SecurityScreen() {
 
   useEffect(() => {
     load();
-  }, [load]);
+    void loadDevices();
+  }, [load, loadDevices]);
 
   const active = factors.find((f) => f.status === 'verified') ?? null;
+
+  const signOutDevice = async (session: DeviceSession) => {
+    setRevoking(session.id);
+    const ok = await revokeSession(session.id);
+    setRevoking(null);
+    if (ok) {
+      haptics.success();
+      setDevices((list) => list.filter((d) => d.id !== session.id));
+    } else {
+      setStatus({ kind: 'error', message: 'Could not sign that device out. Try again.' });
+    }
+  };
+
+  const signOutOthers = async () => {
+    setRevoking('others');
+    const removed = await revokeOtherSessions();
+    setRevoking(null);
+    if (removed === null) {
+      setStatus({ kind: 'error', message: 'Could not sign the other devices out.' });
+      return;
+    }
+    haptics.success();
+    setStatus({
+      kind: 'success',
+      message:
+        removed === 0
+          ? 'No other devices were signed in.'
+          : `Signed out ${removed} other device${removed === 1 ? '' : 's'}.`,
+    });
+    void loadDevices();
+  };
 
   const begin = async () => {
     setBusy(true);
@@ -232,6 +280,83 @@ export default function SecurityScreen() {
           Lost your authenticator? Devon can clear it from the office — you&apos;ll sign in with
           just your password and can set it up again.
         </AppText>
+
+        {/* ---- signed-in devices ---- */}
+        <AppText variant="title" style={styles.sectionTop}>
+          Signed-in devices
+        </AppText>
+        <AppText variant="body" color={colors.textSecondary}>
+          Everywhere your account is currently signed in. Only your own devices are listed —
+          nobody else&apos;s, and nobody can see yours.
+        </AppText>
+
+        {devicesLoading ? (
+          <SkeletonList count={2} height={64} />
+        ) : devices.length === 0 ? (
+          <Card style={styles.card}>
+            <AppText variant="body" color={colors.textMuted}>
+              No other sessions found. If this looks wrong, pull down to refresh or sign out and
+              back in.
+            </AppText>
+          </Card>
+        ) : (
+          <Card padded={false} style={styles.card}>
+            {devices.map((device, i) => (
+              <View
+                key={device.id}
+                style={[styles.deviceRow, i < devices.length - 1 && styles.deviceDivider]}>
+                <Ionicons
+                  name={device.icon}
+                  size={20}
+                  color={device.isCurrent ? colors.success : colors.textMuted}
+                />
+                <View style={styles.deviceText}>
+                  <View style={styles.deviceTitleRow}>
+                    <AppText variant="bodyStrong">{device.label}</AppText>
+                    {device.isCurrent ? (
+                      <View style={styles.thisDevice}>
+                        <AppText variant="caption" color={colors.success}>
+                          This device
+                        </AppText>
+                      </View>
+                    ) : null}
+                  </View>
+                  <AppText variant="caption" color={colors.textMuted}>
+                    {`Last used ${formatLastSeen(device.lastSeenAt)}`}
+                    {device.ip ? ` · ${device.ip}` : ''}
+                    {device.aal === 'aal2' ? ' · 2FA' : ''}
+                  </AppText>
+                </View>
+                {device.isCurrent ? null : (
+                  <Button
+                    label="Sign out"
+                    variant="ghost"
+                    size="sm"
+                    loading={revoking === device.id}
+                    haptic="warn"
+                    onPress={() => void signOutDevice(device)}
+                  />
+                )}
+              </View>
+            ))}
+          </Card>
+        )}
+
+        {devices.some((d) => !d.isCurrent) ? (
+          <Button
+            label="Sign out all other devices"
+            variant="danger"
+            fullWidth
+            loading={revoking === 'others'}
+            haptic="warn"
+            onPress={() => void signOutOthers()}
+          />
+        ) : null}
+
+        <AppText variant="caption" color={colors.textMuted} style={styles.footnote}>
+          Signing a device out kills its saved login straight away. It can keep working for up to
+          an hour on the token it already holds, then it&apos;s locked out.
+        </AppText>
       </Screen>
     </>
   );
@@ -304,5 +429,35 @@ const styles = StyleSheet.create({
   },
   footnote: {
     lineHeight: 18,
+  },
+  sectionTop: {
+    marginTop: spacing.lg,
+  },
+  deviceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+  },
+  deviceDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  deviceText: {
+    flex: 1,
+    gap: 2,
+  },
+  deviceTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    flexWrap: 'wrap',
+  },
+  thisDevice: {
+    backgroundColor: colors.surfaceSunk,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 1,
   },
 });

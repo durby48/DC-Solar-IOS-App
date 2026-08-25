@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -22,6 +23,11 @@ import { landingRoute } from '@/lib/account';
 import { clearBounceToLogin } from '@/lib/authGate';
 import { pendingChallenge, submitChallenge } from '@/lib/mfa';
 import { refuseStaff } from '@/lib/oauth';
+import {
+  loadRememberPreference,
+  loadRememberedEmail,
+  saveRememberedEmail,
+} from '@/lib/rememberedLogin';
 import { supabase } from '@/lib/supabase';
 import { verseOfTheDay } from '@/lib/verses';
 
@@ -50,6 +56,12 @@ export default function LoginScreen() {
   const fit = width / height > ART_ASPECT ? 'contain' : 'cover';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  /**
+   * Pre-fill this device's email next time the form is shown. Defaults ON and
+   * is read from storage on mount. It does NOT control staying signed in —
+   * that always happens; see `lib/rememberedLogin.ts`.
+   */
+  const [remember, setRemember] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Second step for staff with 2FA on: the session is signed in but only at
@@ -152,6 +164,23 @@ export default function LoginScreen() {
     [router],
   );
 
+  // Pre-fill the email this device signed in with last time. Runs only in the
+  // browser/app (never during the static web prerender, which has no storage).
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([loadRememberedEmail(), loadRememberPreference()]).then(
+      ([saved, prefers]) => {
+        if (cancelled) return;
+        setRemember(prefers);
+        // Never clobber something already typed.
+        if (saved) setEmail((current) => (current ? current : saved));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     mounted.current = true;
     // The tabs gate's bounce has ARRIVED — that is the only thing that proves
@@ -231,6 +260,9 @@ export default function LoginScreen() {
         setError(authError.message);
         return;
       }
+      // Record (or clear) the email now that we know it was a real one. Not
+      // awaited — a slow write must never delay getting into the app.
+      void saveRememberedEmail(email.trim(), remember);
       if (data.user?.user_metadata?.must_change_password) {
         router.replace('/set-password');
         return;
@@ -325,7 +357,11 @@ export default function LoginScreen() {
               placeholderTextColor={colors.inkSoft}
               autoCapitalize="none"
               autoComplete="email"
+              // Lets iOS/Android offer the saved login from the OS password
+              // manager — the right place for a password, unlike this app.
+              textContentType="username"
               keyboardType="email-address"
+              returnKeyType="next"
               value={email}
               onChangeText={setEmail}
             />
@@ -334,10 +370,34 @@ export default function LoginScreen() {
               placeholder="Password"
               placeholderTextColor={colors.inkSoft}
               secureTextEntry
+              autoComplete="current-password"
+              textContentType="password"
+              returnKeyType="go"
               value={password}
               onChangeText={setPassword}
               onSubmitEditing={signIn}
             />
+
+            <Pressable
+              onPress={() => setRemember((on) => !on)}
+              hitSlop={8}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: remember }}
+              style={styles.rememberRow}>
+              <Ionicons
+                name={remember ? 'checkbox' : 'square-outline'}
+                size={20}
+                color={remember ? colors.sun : colors.inkSoft}
+              />
+              <View style={styles.rememberTextWrap}>
+                <Text style={styles.rememberLabel}>Remember me on this device</Text>
+                <Text style={styles.rememberHint}>
+                  {remember
+                    ? 'Fills in your email next time. You stay signed in for 60 days either way.'
+                    : "Your email won't be filled in next time on this device."}
+                </Text>
+              </View>
+            </Pressable>
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -445,19 +505,51 @@ const styles = StyleSheet.create({
     letterSpacing: 8,
     textAlign: 'center',
   },
+  // White on a DARK halo, the inverse of the verse treatment above. The verse
+  // sits over the bright upper half of the artwork, where dark-on-cream reads
+  // well; this link sits low, over the navy, where the same treatment turned it
+  // into dark text on a dark background.
   signUpLink: {
-    color: '#12405E',
+    color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '800',
     textAlign: 'center',
-    textShadowColor: 'rgba(255,248,234,0.95)',
-    textShadowOffset: { width: 0, height: 0 },
+    textShadowColor: 'rgba(6,12,24,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 7,
   },
   error: {
     color: '#FFB4A8',
     fontSize: 14,
     textAlign: 'center',
+  },
+  // Sits on the dark artwork, so it carries the same cream text shadow the
+  // other over-art copy uses rather than a card of its own.
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  rememberTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  rememberLabel: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    textShadowColor: 'rgba(6,12,24,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
+  rememberHint: {
+    color: 'rgba(255,255,255,0.88)',
+    fontSize: 12,
+    lineHeight: 16,
+    textShadowColor: 'rgba(6,12,24,0.9)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
   },
   button: {
     backgroundColor: colors.sun,
