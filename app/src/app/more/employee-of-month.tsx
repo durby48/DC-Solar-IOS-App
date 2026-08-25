@@ -155,6 +155,7 @@ export default function EmployeeOfMonthScreen() {
     supabase
       .from('employees')
       .select('email, display_name')
+      .eq('is_test', false)
       .order('display_name', { ascending: true })
       .then(({ data, error }) => {
         if (cancelled || error || !data) return;

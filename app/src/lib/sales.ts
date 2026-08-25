@@ -133,7 +133,8 @@ export async function fetchSalesData(): Promise<SalesData | null> {
       supabase
         .from('employees')
         .select('email, display_name')
-        .eq('company', COMPANY),
+        .eq('company', COMPANY)
+        .eq('is_test', false),
     ]);
 
     if (jobsRes.error) return null;

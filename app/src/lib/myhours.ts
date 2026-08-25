@@ -66,6 +66,7 @@ export async function fetchEmployeeOptions(): Promise<EmployeeOption[]> {
     const { data, error } = await supabase
       .from('employees')
       .select('email, display_name')
+      .eq('is_test', false)
       .order('display_name', { ascending: true });
     if (error || !data) return [];
     return (data as { email: string | null; display_name: string | null }[])

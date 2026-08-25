@@ -120,6 +120,7 @@ export default function EmployeesScreen() {
         const { data, error } = await supabase
           .from('employees')
           .select('id, email, display_name, role, pay_rate')
+          .eq('is_test', false)
           .order('display_name', { ascending: true });
         if (cancelled) return;
         if (error || !data) {

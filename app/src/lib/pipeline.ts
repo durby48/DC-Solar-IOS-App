@@ -373,7 +373,7 @@ export async function fetchLaborHoursByJob(): Promise<Map<string, JobLaborHours>
         .from('time_entries')
         .select('job_id, employee, clock_in, clock_out')
         .eq('company', COMPANY),
-      supabase.from('employees').select('email, pay_rate'),
+      supabase.from('employees').select('email, pay_rate').eq('is_test', false),
     ]);
     if (hoursRes.error || timeRes.error || employeesRes.error) return null;
 

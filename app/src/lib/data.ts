@@ -625,7 +625,7 @@ export async function fetchJobFinance(jobId: string): Promise<JobFinanceSummary 
         .select('employee, clock_in, clock_out')
         .eq('company', COMPANY)
         .eq('job_id', jobId),
-      supabase.from('employees').select('email, display_name, pay_rate'),
+      supabase.from('employees').select('email, display_name, pay_rate').eq('is_test', false),
     ]);
 
     const byName = new Map<string, number>();

@@ -139,7 +139,10 @@ export async function reviewTimeOff(params: {
  */
 export async function fetchEmployeeNames(): Promise<Record<string, string>> {
   try {
-    const { data, error } = await supabase.from('employees').select('email, display_name');
+    const { data, error } = await supabase
+      .from('employees')
+      .select('email, display_name')
+      .eq('is_test', false);
     if (error || !data) return {};
     const names: Record<string, string> = {};
     for (const row of data) {

@@ -153,7 +153,7 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
         .from('time_entries')
         .select('employee, clock_in, clock_out')
         .eq('company', COMPANY),
-      supabase.from('employees').select('email, pay_rate'),
+      supabase.from('employees').select('email, pay_rate').eq('is_test', false),
       // Completed Gusto runs (admin-only). When present, labor for the covered
       // periods is the money that ACTUALLY left the bank, to the penny.
       supabase

@@ -40,6 +40,7 @@ export async function fetchEmployees(): Promise<EmployeeLite[]> {
     const { data, error } = await supabase
       .from('employees')
       .select('id, email, display_name')
+      .eq('is_test', false)
       .order('display_name', { ascending: true });
     if (error || !data) return [];
     return data as EmployeeLite[];

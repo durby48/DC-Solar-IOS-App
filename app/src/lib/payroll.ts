@@ -192,7 +192,7 @@ export async function fetchHoursData(): Promise<HoursData | null> {
         .from('time_entries')
         .select('employee, clock_in, clock_out, job_id')
         .eq('company', COMPANY),
-      supabase.from('employees').select('email, display_name, pay_rate'),
+      supabase.from('employees').select('email, display_name, pay_rate').eq('is_test', false),
       supabase.from('jobs').select('id, job_number, name').eq('company', COMPANY),
     ]);
     if (hoursRes.error || timeRes.error || employeesRes.error || jobsRes.error) return null;
