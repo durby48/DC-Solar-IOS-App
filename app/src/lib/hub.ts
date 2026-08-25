@@ -26,7 +26,7 @@ import type { TileTone } from '@/components/ui';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
-export type HubGroupKey = 'work' | 'money' | 'customers' | 'employee' | 'account';
+export type HubGroupKey = 'work' | 'money' | 'admin' | 'customers' | 'employee' | 'account';
 
 /** Who an entry is offered to. `admin` = owner or operator. */
 export type HubGate = 'all' | 'admin';
@@ -71,6 +71,7 @@ export const HUB_GROUPS: readonly HubGroup[] = [
   { key: 'money', title: 'Money', gate: 'admin' },
   { key: 'customers', title: 'Customers', gate: 'all' },
   { key: 'employee', title: 'Employee', gate: 'all' },
+  { key: 'admin', title: 'Admin', gate: 'admin' },
   { key: 'account', title: 'Account', gate: 'all' },
 ];
 
@@ -78,18 +79,20 @@ export const HUB_ITEMS: readonly HubItem[] = [
   // ---- Work ----
   { key: 'calendar', title: 'Calendar', icon: 'calendar', href: '/calendar', group: 'work', tone: 'olive', gate: 'all' },
   { key: 'pipeline', title: 'Pipeline', icon: 'layers', href: '/pipeline', group: 'work', tone: 0, gate: 'all' },
+  { key: 'email', title: 'Email', icon: 'mail', href: '/inbox', group: 'work', tone: 2, gate: 'admin' },
+  { key: 'receipts', title: 'Receipts', icon: 'receipt', href: '/more/receipts', group: 'work', tone: 4, gate: 'all' },
   { key: 'inventory', title: 'Inventory', icon: 'cube', href: '/more/inventory', group: 'work', tone: 1, gate: 'all' },
   { key: 'checklist', title: 'Vehicle Checklist', icon: 'clipboard', href: '/more/checklist', group: 'work', tone: 2, gate: 'all' },
-  { key: 'receipts', title: 'Receipts', icon: 'receipt', href: '/more/receipts', group: 'work', tone: 4, gate: 'all' },
-  { key: 'monitoring', title: 'Monitoring Logins', icon: 'pulse', href: '/more/monitoring', group: 'work', tone: 3, gate: 'all' },
-  { key: 'marketing-photos', title: 'Marketing Photos', icon: 'images', href: '/marketing-photos', group: 'work', tone: 6, gate: 'all' },
-  { key: 'email', title: 'Email', icon: 'mail', href: '/inbox', group: 'work', tone: 2, gate: 'admin' },
 
   // ---- Money (admin) ----
   { key: 'financials', title: 'Financials', icon: 'wallet', href: '/financials', group: 'money', tone: 'olive', gate: 'admin' },
   { key: 'sales', title: 'Sales', icon: 'trending-up', href: '/sales', group: 'money', tone: 5, gate: 'admin' },
   // href cast until the dev server regenerates typed routes for /leads.
   { key: 'leads', title: 'Leads', icon: 'person-add', href: '/leads' as never, group: 'money', tone: 3, gate: 'admin' },
+
+  // ---- Admin ----
+  { key: 'monitoring', title: 'Monitoring Logins', icon: 'pulse', href: '/more/monitoring', group: 'admin', tone: 3, gate: 'admin' },
+  { key: 'marketing-photos', title: 'Marketing Photos', icon: 'images', href: '/marketing-photos', group: 'admin', tone: 6, gate: 'admin' },
 
   // ---- Customers ----
   { key: 'customers', title: 'Customers', icon: 'people', href: '/customers', group: 'customers', tone: 0, gate: 'all', badge: 'unread' },
