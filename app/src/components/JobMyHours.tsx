@@ -17,6 +17,7 @@ import { formatShortDate, todayISO } from '@/lib/dates';
 import { haptics } from '@/lib/haptics';
 import {
   addMyHours,
+  addMyHoursForMany,
   deleteMyHours,
   fetchEmployeeOptions,
   fetchMyHourEntries,
@@ -69,8 +70,21 @@ export function JobMyHours({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   // Admin: who the new entry is for (defaults to the admin themself).
+  //
+  // A LIST, not one email: the crew works a job together, so "everyone did 8
+  // hours" was six trips through this form. Editing stays single — an existing
+  // row belongs to one person and reassigning it is not what the pencil means.
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
-  const [targetEmail, setTargetEmail] = useState(email);
+  const [targetEmails, setTargetEmails] = useState<string[]>([email]);
+
+  const toggleTarget = (candidate: string) =>
+    setTargetEmails((current) =>
+      current.some((e) => e.toLowerCase() === candidate.toLowerCase())
+        ? current.filter((e) => e.toLowerCase() !== candidate.toLowerCase())
+        : [...current, candidate],
+    );
+
+  const allSelected = employees.length > 0 && targetEmails.length === employees.length;
 
   const load = useCallback(async () => {
     const result = await fetchMyHourEntries({ jobId, email, allEmployees: isAdmin });
@@ -100,7 +114,7 @@ export function JobMyHours({
     setHoursText('');
     setDateText(todayISO());
     setNoteText('');
-    setTargetEmail(email);
+    setTargetEmails([email]);
     setFormOpen(true);
   };
 
@@ -125,18 +139,21 @@ export function JobMyHours({
       setStatus({ kind: 'error', message: 'Enter the date as YYYY-MM-DD (e.g. 2026-07-27).' });
       return;
     }
+    if (isAdmin && !editingId && targetEmails.length === 0) {
+      setStatus({ kind: 'error', message: 'Pick at least one person.' });
+      return;
+    }
     setSaving(true);
     setStatus(null);
     const note = noteText.trim() || null;
+    // Admins log for a list (one insert, all-or-nothing); crew log for
+    // themselves; editing always touches exactly the one row being edited.
+    const people = isAdmin ? targetEmails.length : 1;
     const result = editingId
       ? await updateMyHours(editingId, { hours, occurred_on: day, description: note })
-      : await addMyHours({
-          jobId,
-          email: isAdmin ? targetEmail : email,
-          hours,
-          occurredOn: day,
-          note,
-        });
+      : isAdmin
+        ? await addMyHoursForMany({ jobId, emails: targetEmails, hours, occurredOn: day, note })
+        : await addMyHours({ jobId, email, hours, occurredOn: day, note });
     setSaving(false);
     if (result.ok) {
       setFormOpen(false);
@@ -144,7 +161,9 @@ export function JobMyHours({
       haptics.success();
       setStatus({
         kind: 'success',
-        message: editingId ? 'Hours updated.' : `${formatHours(hours)} logged.`,
+        message: editingId
+          ? 'Hours updated.'
+          : `${formatHours(hours)} logged${people > 1 ? ` for ${people} people` : ''}.`,
       });
       await load();
       onChanged?.();
@@ -279,17 +298,29 @@ export function JobMyHours({
                 {isAdmin && !editingId && employees.length > 0 ? (
                   <>
                     <AppText variant="section" color={colors.textMuted}>
-                      For
+                      {targetEmails.length > 1
+                        ? `For — ${targetEmails.length} selected`
+                        : 'For — tap more than one to log the same hours for each'}
                     </AppText>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                       <View style={styles.pickRow}>
+                        <Chip
+                          label={allSelected ? 'Clear' : 'Everyone'}
+                          tone="sun"
+                          selected={allSelected}
+                          onPress={() =>
+                            setTargetEmails(allSelected ? [] : employees.map((o) => o.email))
+                          }
+                        />
                         {employees.map((option) => (
                           <Chip
                             key={option.email}
                             label={option.name}
                             tone="olive"
-                            selected={targetEmail === option.email}
-                            onPress={() => setTargetEmail(option.email)}
+                            selected={targetEmails.some(
+                              (e) => e.toLowerCase() === option.email.toLowerCase(),
+                            )}
+                            onPress={() => toggleTarget(option.email)}
                           />
                         ))}
                       </View>

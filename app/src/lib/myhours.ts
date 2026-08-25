@@ -146,3 +146,65 @@ export async function deleteMyHours(id: string): Promise<MutateHoursResult> {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not delete the entry.' };
   }
 }
+
+/**
+ * Log the SAME hours against a job for several people at once.
+ *
+ * The crew works the job together, so the common case is "everybody did 8
+ * hours today" — which used to mean opening the form, picking a person and
+ * saving, once per head. This inserts one row per email in a SINGLE request:
+ * PostgREST takes an array, so six installers is one round trip and either
+ * all six rows land or none do, instead of four saves and a dropped signal
+ * leaving the last two missing.
+ *
+ * Emails are de-duplicated case-insensitively while keeping the roster's own
+ * spelling — the rate-stamping trigger matches on the roster row, so passing
+ * a differently-cased duplicate would have written two entries for one person.
+ */
+export async function addMyHoursForMany(params: {
+  jobId: string;
+  emails: string[];
+  hours: number;
+  occurredOn: string; // YYYY-MM-DD
+  note: string | null;
+}): Promise<MutateHoursResult & { inserted: number }> {
+  const seen = new Set<string>();
+  const emails: string[] = [];
+  for (const raw of params.emails) {
+    const email = raw.trim();
+    if (!email) continue;
+    const key = email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    emails.push(email);
+  }
+  if (emails.length === 0) {
+    return { ok: false, message: 'Pick at least one person.', inserted: 0 };
+  }
+  try {
+    const { error } = await supabase.from('employee_hours').insert(
+      emails.map((email) => ({
+        company: COMPANY,
+        job_id: params.jobId,
+        email,
+        hours: params.hours,
+        occurred_on: params.occurredOn,
+        description: params.note,
+      })),
+    );
+    if (error) {
+      return {
+        ok: false,
+        message: friendly(error.message, 'Could not save the hours.'),
+        inserted: 0,
+      };
+    }
+    return { ok: true, inserted: emails.length };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : 'Could not save the hours.',
+      inserted: 0,
+    };
+  }
+}
