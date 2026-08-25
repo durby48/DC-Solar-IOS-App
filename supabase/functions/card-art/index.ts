@@ -73,11 +73,15 @@ const RARITY_COLOR: Record<string, string> = {
 function burstNote(rarity: string | null): string {
   const color = RARITY_COLOR[rarity ?? ''] ?? 'radiant multicolor';
   return (
-    ` Dynamic ${color} energy effects burst and dash through the artwork like the interior ` +
-    `artwork of a modern Pokemon ex trading card: glowing diagonal slashes, radiant burst rays, speed lines, ` +
+    ` Dynamic ${color} energy effects dash through the artwork like the interior ` +
+    `artwork of a modern Pokemon ex trading card: glowing diagonal slashes, speed lines, ` +
     `crackling arcs and sparkling particle trails in ${color} tones sweeping across and ` +
-    'around the subject, explosive kinetic composition, the energy clearly interacting ' +
-    'with the scene. Render ONLY the full-bleed artwork itself — never draw the trading card ' +
+    'around the subject, kinetic composition, the energy clearly interacting ' +
+    'with the scene. The energy must read as DIRECTIONAL streaks — never as a radial ' +
+    'burst: no sunburst or starburst graphic, no radiating ray fan, no glowing orb, ' +
+    'medallion or lens-flare star tucked into a corner or behind the subject. ' +
+    '(Real sunlight in the sky is fine; a decorative sun-shaped graphic is not.) ' +
+    'Render ONLY the full-bleed artwork itself — never draw the trading card ' +
     'as a physical object: no card borders, rounded card corners, tables, or backgrounds ' +
     'behind a card.'
   );
