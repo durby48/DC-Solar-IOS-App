@@ -215,21 +215,27 @@ export default function HomeScreen() {
             <View key={group.key} style={styles.section}>
               <SectionHeader title={group.title} subtitle={group.subtitle} />
               <View style={styles.grid}>
-                {visibleItems(isAdmin, group.key).map((item, i) => (
-                  <FadeInUp
-                    key={item.key}
-                    index={groupIndex + i}
-                    style={[styles.cell, { width: `${100 / columns}%` }]}>
-                    <Tile
-                      title={item.title}
-                      icon={item.icon}
-                      href={item.href}
-                      tone={item.tone}
-                      badge={item.badge === 'unread' ? unread : undefined}
-                      style={styles.tile}
-                    />
-                  </FadeInUp>
-                ))}
+                {visibleItems(isAdmin, group.key)
+                  // Calendar and Pipeline stay in the Menu tab; on Home
+                  // they're redundant with the "Today" card above (which
+                  // already opens the calendar) and Devon asked for the
+                  // grid trimmed.
+                  .filter((item) => item.key !== 'calendar' && item.key !== 'pipeline')
+                  .map((item, i) => (
+                    <FadeInUp
+                      key={item.key}
+                      index={groupIndex + i}
+                      style={[styles.cell, { width: `${100 / columns}%` }]}>
+                      <Tile
+                        title={item.title}
+                        icon={item.icon}
+                        href={item.href}
+                        tone={item.tone}
+                        badge={item.badge === 'unread' ? unread : undefined}
+                        style={styles.tile}
+                      />
+                    </FadeInUp>
+                  ))}
               </View>
             </View>
           ))

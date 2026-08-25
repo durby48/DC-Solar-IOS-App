@@ -243,13 +243,12 @@ function Avatar({
   const body = (
     <View style={styles.avatarWrap}>
       {inner}
+      {/* No camera badge: the avatar is small and the badge sat on top of the
+          face. Tapping it still opens the photo panel — the accessibility
+          label on the Pressable below is what announces that. */}
       {busy ? (
         <View style={[styles.avatar, styles.avatarBusy]}>
           <ActivityIndicator color={colors.textOnDark} size="small" />
-        </View>
-      ) : onPress ? (
-        <View style={styles.avatarBadge}>
-          <Ionicons name="camera" size={11} color={colors.olive} />
         </View>
       ) : null}
     </View>
@@ -405,17 +404,6 @@ const styles = StyleSheet.create({
     width: AVATAR,
     height: AVATAR,
     backgroundColor: 'rgba(58,70,31,0.55)',
-  },
-  avatarBadge: {
-    position: 'absolute',
-    right: -2,
-    bottom: -2,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.cream,
   },
   pressed: { opacity: 0.7 },
 
