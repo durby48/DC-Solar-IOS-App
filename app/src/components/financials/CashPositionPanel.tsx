@@ -49,7 +49,7 @@ export function CashPositionPanel({
   capitalEntries?: CashDetailEntry[];
   /** The ledger entries behind "Less owed for out-of-pocket". */
   owedEntries?: CashDetailEntry[];
-  /** Chase transactions recorded since the balance anchor, already applied. */
+  /** Bank transactions recorded since the balance anchor, already applied. */
   adjustment?: { total: number; count: number };
 }) {
   // Which reconciliation row is expanded to show its ledger entries.
@@ -75,7 +75,7 @@ export function CashPositionPanel({
       amount: bankBalance,
       note:
         asOf && adjustment?.count
-          ? `as of ${formatShortDate(asOf)} ${adjustment.total < 0 ? '−' : '+'} ${adjustment.count} Chase ${
+          ? `as of ${formatShortDate(asOf)} ${adjustment.total < 0 ? '−' : '+'} ${adjustment.count} bank ${
               adjustment.count === 1 ? 'transaction' : 'transactions'
             } since`
           : asOf

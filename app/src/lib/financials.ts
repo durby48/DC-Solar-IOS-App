@@ -58,6 +58,9 @@ export interface LedgerEntry {
   job_id: string | null;
   document_number: string | null;
   document_path: string | null;
+  /** True if this money moved through the bank account. Expenses paid out of
+   *  pocket (pending reimbursement) or in cash are false. */
+  paid_from_bank: boolean;
   /** 1 = as first created; the document NUMBER never changes, this does. */
   revision?: number | null;
   /**
@@ -138,7 +141,7 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       supabase
         .from('finance_entries')
         .select(
-          'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path, revision, document_meta',
+          'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path, paid_from_bank, revision, document_meta',
         )
         .eq('company', COMPANY),
       // Wages live here, not in finance_entries. Fetched alongside so `net`
@@ -344,6 +347,8 @@ export async function recordExpense(params: {
   counterparty: string | null;
   occurredOn: string; // YYYY-MM-DD
   jobId: string | null;
+  /** False if paid out of pocket / in cash rather than from the bank account. */
+  paidFromBank: boolean;
 }): Promise<RecordExpenseResult> {
   try {
     const { error } = await supabase.from('finance_entries').insert({
@@ -357,6 +362,7 @@ export async function recordExpense(params: {
       occurred_on: params.occurredOn,
       status: 'recorded',
       job_id: params.jobId,
+      paid_from_bank: params.paidFromBank,
     });
     if (error) return { ok: false, message: error.message };
     return { ok: true };

@@ -103,6 +103,36 @@ export function JobPicker({
   );
 }
 
+/**
+ * "Did this leave the bank account?" — the toggle that feeds Cash Position's
+ * reconciliation. Bank-side expenses adjust the displayed balance; anything
+ * else (cash, a personal card) is tracked as owed for out-of-pocket instead.
+ */
+export function PaidFromToggle({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <View style={styles.field}>
+      <AppText variant="section" color={colors.textMuted}>
+        Paid from
+      </AppText>
+      <View style={styles.chipRow}>
+        <Chip label="Bank account" tone="olive" selected={value} onPress={() => onChange(true)} />
+        <Chip
+          label="Out of pocket"
+          tone="ocean"
+          selected={!value}
+          onPress={() => onChange(false)}
+        />
+      </View>
+    </View>
+  );
+}
+
 /** The collapsible "+ Add expense" form. */
 export function ExpenseForm({
   amount,
@@ -113,6 +143,8 @@ export function ExpenseForm({
   onPaidTo,
   date,
   onDate,
+  paidFromBank,
+  onPaidFromBank,
   jobId,
   onJobId,
   jobOptions,
@@ -128,6 +160,9 @@ export function ExpenseForm({
   onPaidTo: (text: string) => void;
   date: string;
   onDate: (text: string) => void;
+  /** False if paid out of pocket / in cash rather than from the bank account. */
+  paidFromBank: boolean;
+  onPaidFromBank: (value: boolean) => void;
   jobId: string | null;
   onJobId: (id: string | null) => void;
   jobOptions: JobOption[];
@@ -164,6 +199,7 @@ export function ExpenseForm({
         autoCapitalize="none"
         autoCorrect={false}
       />
+      <PaidFromToggle value={paidFromBank} onChange={onPaidFromBank} />
       {jobOptions.length > 0 ? (
         <JobPicker
           label="Job (optional)"
@@ -297,6 +333,8 @@ export function ExpenseRow({
   onEditDate,
   editDescription,
   onEditDescription,
+  editPaidFromBank,
+  onEditPaidFromBank,
   editJobId,
   onEditJobId,
   jobOptions,
@@ -321,6 +359,8 @@ export function ExpenseRow({
   onEditDate: (text: string) => void;
   editDescription: string;
   onEditDescription: (text: string) => void;
+  editPaidFromBank: boolean;
+  onEditPaidFromBank: (value: boolean) => void;
   editJobId: string | null;
   onEditJobId: (id: string | null) => void;
   jobOptions: JobOption[];
@@ -420,6 +460,7 @@ export function ExpenseRow({
               onChangeText={onEditDescription}
               placeholder="Description"
             />
+            <PaidFromToggle value={editPaidFromBank} onChange={onEditPaidFromBank} />
             {jobOptions.length > 0 ? (
               <JobPicker
                 label="Job"

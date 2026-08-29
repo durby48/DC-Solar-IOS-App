@@ -236,6 +236,8 @@ export interface FinanceEntryEdit {
   document_path?: string | null;
   /** null = company-level (no job). */
   job_id?: string | null;
+  /** False if paid out of pocket / in cash rather than from the bank account. */
+  paid_from_bank?: boolean;
 }
 
 /**

@@ -95,6 +95,7 @@ export default function FinancialsScreen() {
   const [paidTo, setPaidTo] = useState('');
   const [date, setDate] = useState(todayISO());
   const [jobId, setJobId] = useState<string | null>(null);
+  const [paidFromBank, setPaidFromBank] = useState(true);
   const [saving, setSaving] = useState(false);
 
   // Inline row editing + two-tap delete (same behavior as JobInvoices).
@@ -102,6 +103,7 @@ export default function FinancialsScreen() {
   const [editAmount, setEditAmount] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editPaidFromBank, setEditPaidFromBank] = useState(true);
   const [editJobId, setEditJobId] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -191,12 +193,14 @@ export default function FinancialsScreen() {
 
   /** One selected month's headline figures, from data already fetched. */
   /**
-   * Auto-adjustment of the anchored bank balance: every CHASE transaction
-   * recorded after the anchor was saved moves the displayed balance without
-   * anyone retyping it. Chase-marked only, on purpose — an expense paid from
-   * someone's own pocket (the ladder rack on Isaiah's card) never touched
-   * the account, and it is already handled by "owed for out-of-pocket".
-   * Re-anchoring the balance resets the adjustment to zero.
+   * Auto-adjustment of the anchored bank balance: every transaction recorded
+   * after the anchor was saved that actually moved bank money adjusts the
+   * displayed balance without anyone retyping it. That's either a Chase-synced
+   * row (Plaid) or a manually-recorded expense explicitly toggled "Bank
+   * account" (`paid_from_bank`, default true — see the expense form). An
+   * expense toggled "Out of pocket" never touched the account, and is already
+   * handled by "owed for out-of-pocket". Re-anchoring the balance resets the
+   * adjustment to zero.
    */
   const bankAdjustment = useMemo(() => {
     const anchorAt = settings?.anchorAt;
@@ -204,11 +208,12 @@ export default function FinancialsScreen() {
     const isChase = (e: LedgerEntry) =>
       (e.counterparty ?? '').trim().toLowerCase() === 'chase' ||
       /account ending in/i.test(e.description ?? '');
+    const isBankExpense = (e: LedgerEntry) => e.type === 'expense' && e.paid_from_bank;
     let total = 0;
     let count = 0;
     for (const e of data.allEntries) {
       if (!e.created_at || e.created_at <= anchorAt) continue;
-      if (!isChase(e)) continue;
+      if (!isChase(e) && !isBankExpense(e)) continue;
       const inflow = e.type === 'payment' || (e.type === 'investment' && e.direction !== 'out');
       const outflow = e.type === 'expense' || (e.type === 'investment' && e.direction === 'out');
       if (!inflow && !outflow) continue;
@@ -439,9 +444,7 @@ export default function FinancialsScreen() {
    */
   const owedOutOfPocket = useMemo(() => {
     if (!data) return { total: 0, entries: [] as CashDetailEntry[] };
-    const rows = data.expenseEntries.filter((e) =>
-      /NOT yet reimbursed|not yet cleared/i.test(e.description ?? ''),
-    );
+    const rows = data.expenseEntries.filter((e) => !e.paid_from_bank);
     return {
       total: rows.reduce((sum, e) => sum + e.amount, 0),
       entries: rows.map((e) => ({
@@ -534,6 +537,7 @@ export default function FinancialsScreen() {
     setPaidTo('');
     setDate(todayISO());
     setJobId(null);
+    setPaidFromBank(true);
   };
 
   const saveExpense = async () => {
@@ -561,6 +565,7 @@ export default function FinancialsScreen() {
       counterparty: counterparty === '' ? null : counterparty,
       occurredOn: day,
       jobId,
+      paidFromBank,
     });
     setSaving(false);
     if (result.ok) {
@@ -581,6 +586,7 @@ export default function FinancialsScreen() {
     setEditAmount(entry.amount > 0 ? String(entry.amount) : '');
     setEditDate(entry.occurred_on ?? '');
     setEditDescription(entry.description ?? '');
+    setEditPaidFromBank(entry.paid_from_bank);
     setEditJobId(entry.job_id);
   };
 
@@ -603,6 +609,7 @@ export default function FinancialsScreen() {
       occurred_on: day === '' ? null : day,
       description: desc === '' ? null : desc,
       job_id: editJobId,
+      paid_from_bank: editPaidFromBank,
     });
     setSavingEdit(false);
     if (result.ok) {
@@ -673,6 +680,8 @@ export default function FinancialsScreen() {
         onEditDate={setEditDate}
         editDescription={editDescription}
         onEditDescription={setEditDescription}
+        editPaidFromBank={editPaidFromBank}
+        onEditPaidFromBank={setEditPaidFromBank}
         editJobId={editJobId}
         onEditJobId={setEditJobId}
         jobOptions={jobOptions}
@@ -769,6 +778,8 @@ export default function FinancialsScreen() {
           onPaidTo={setPaidTo}
           date={date}
           onDate={setDate}
+          paidFromBank={paidFromBank}
+          onPaidFromBank={setPaidFromBank}
           jobId={jobId}
           onJobId={setJobId}
           jobOptions={jobOptions}
