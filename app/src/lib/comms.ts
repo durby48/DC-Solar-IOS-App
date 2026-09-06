@@ -1141,6 +1141,29 @@ export async function createContact(input: ContactInput): Promise<CommsResult> {
   }
 }
 
+/** One supplier / vendor, for the thread header. Null when missing or unreadable. */
+export async function fetchContactById(
+  id: string,
+): Promise<{ id: string; name: string; org: string | null; phoneE164: string | null } | null> {
+  try {
+    const { data, error } = await supabase
+      .from('contacts')
+      .select('id, name, org, phone_e164')
+      .eq('id', id)
+      .maybeSingle();
+    if (error || !data) return null;
+    const row = data as Record<string, unknown>;
+    return {
+      id: String(row.id),
+      name: (row.name as string) ?? 'Contact',
+      org: (row.org as string | null) ?? null,
+      phoneE164: (row.phone_e164 as string | null) ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Admin: hide a supplier from the directory without losing their thread. */
 export async function archiveContact(id: string): Promise<CommsResult> {
   try {

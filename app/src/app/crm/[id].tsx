@@ -1,14 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as DocumentPicker from 'expo-document-picker';
-import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
-  KeyboardAvoidingView,
   Linking,
   Platform,
   Pressable,
@@ -20,29 +17,21 @@ import {
   View,
 } from 'react-native';
 
+import { Conversation } from '@/components/comms/Conversation';
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { PhoneActionSheet } from '@/components/PhoneActionSheet';
 import { StatusPill } from '@/components/StatusPill';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { fetchEnrolledCustomerIds, inviteCustomer } from '@/lib/account';
 import {
-  MMS_MAX_ATTACHMENTS,
   NOT_CONFIGURED_SMS,
   NOT_CONFIGURED_VOICE,
   buildTemplateVars,
   fetchCommsSettings,
   fetchMyStaffProfile,
   fetchTemplates,
-  fetchThread,
-  formatDuration,
   formatPhone,
-  markThreadRead,
   placeBridgeCall,
-  renderTemplate,
-  sendSms,
-  uploadMmsAttachment,
-  useCommsRealtime,
-  type CommsMessage,
   type CommsSettings,
   type MessageTemplate,
   type StaffProfile,
@@ -130,24 +119,6 @@ function relativeTime(iso: string): string {
   const days = Math.round(hours / 24);
   if (days < 7) return days === 1 ? 'yesterday' : `${days} days ago`;
   return formatShortDate(iso.slice(0, 10));
-}
-
-/** "9:04 AM" today, "Tue 9:04 AM" this week, "12 Aug 9:04 AM" before that. */
-function messageTime(iso: string): string {
-  const date = new Date(iso);
-  if (!Number.isFinite(date.getTime())) return '';
-  const now = new Date();
-  const sameDay =
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate();
-  const clock = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  if (sameDay) return clock;
-  const withinWeek = now.getTime() - date.getTime() < 6 * 24 * 3600 * 1000;
-  if (withinWeek) {
-    return `${date.toLocaleDateString('en-US', { weekday: 'short' })} ${clock}`;
-  }
-  return `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${clock}`;
 }
 
 /** "devonsd311@gmail.com" → "Devonsd311". Good enough to attribute a note. */
@@ -272,21 +243,15 @@ export default function CustomerDetailScreen() {
   const [confirmDeleteDocId, setConfirmDeleteDocId] = useState<string | null>(null);
   const [uploadingInsurance, setUploadingInsurance] = useState(false);
 
-  // Comms
-  const [thread, setThread] = useState<CommsMessage[]>([]);
+  // Comms. The thread itself — messages, composer, pictures, saved texts —
+  // lives in components/comms/Conversation.tsx, the same component the
+  // Phone section's thread screen renders. This screen only owns the header
+  // above it (the business number and the Call button).
   const [commsSettings, setCommsSettings] = useState<CommsSettings | null>(null);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [staffProfile, setStaffProfile] = useState<StaffProfile | null>(null);
-  const [composer, setComposer] = useState('');
-  // Pictures waiting to go with the next text. `path` is the storage path
-  // the server signs; `uri` is the local file, for the thumbnail only.
-  const [attachments, setAttachments] = useState<{ path: string; uri: string }[]>([]);
-  const [attaching, setAttaching] = useState(false);
-  const [sending, setSending] = useState(false);
   const [callBusy, setCallBusy] = useState(false);
   const [callNote, setCallNote] = useState<string | null>(null);
-  const [showTemplates, setShowTemplates] = useState(false);
-  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
 
   // Notes
   const [noteDraft, setNoteDraft] = useState('');
@@ -401,22 +366,17 @@ export default function CustomerDetailScreen() {
   );
 
   /**
-   * The conversation and everything the composer needs to send one.
-   *
-   * Separate from `load()` because it runs on a different clock: the thread is
-   * also refetched by the realtime subscription below, and pulling the jobs,
-   * money and paperwork again every time a delivery receipt lands would be
-   * four wasted queries per text.
+   * What the Comms header and the saved texts need. The thread itself is
+   * loaded (and kept live) by `Conversation`, so nothing here refetches on
+   * every delivery receipt.
    */
   const loadComms = useCallback(async () => {
     if (!customerId) return;
-    const [messages, settingsRow, templateRows, profileRow] = await Promise.all([
-      fetchThread(customerId),
+    const [settingsRow, templateRows, profileRow] = await Promise.all([
       fetchCommsSettings(),
       fetchTemplates(),
       fetchMyStaffProfile(),
     ]);
-    setThread(messages);
     setCommsSettings(settingsRow);
     setTemplates(templateRows);
     setStaffProfile(profileRow);
@@ -438,21 +398,10 @@ export default function CustomerDetailScreen() {
     };
   }, [authState]);
 
-  // Opening the thread is what marks it read — that is the moment a human
-  // actually saw it, and the moment the badge should stop nagging.
   useEffect(() => {
     if (segment !== 'comms' || authState !== 'in' || !customerId) return;
-    void loadComms().then(() => markThreadRead(customerId));
+    void loadComms();
   }, [segment, authState, customerId, loadComms]);
-
-  // Live updates for THIS customer only. The focus refetch above remains the
-  // source of truth; this just means a reply appears while you are reading.
-  useCommsRealtime(
-    useCallback(() => {
-      if (authState === 'in') void loadComms();
-    }, [authState, loadComms]),
-    customerId || null,
-  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -557,75 +506,6 @@ export default function CustomerDetailScreen() {
       );
     } else {
       notify(setStatus, 'error', 'Invite failed', result.message);
-    }
-  };
-
-  /**
-   * Send the composer's text. The row is optimistically cleared only AFTER the
-   * server says yes — `twilio-send-sms` writes the `messages` row before it
-   * calls Twilio, so a successful return means the message is genuinely
-   * logged, and a failure means nothing was sent and the draft is still worth
-   * keeping in the box.
-   */
-  const sendText = async () => {
-    if (!customer) return;
-    const body = composer.trim();
-    if (!body && attachments.length === 0) return;
-    setStatus(null);
-    setSending(true);
-    const result = await sendSms({
-      customerId: customer.id,
-      body,
-      jobId: jobs[0]?.id,
-      mediaPaths: attachments.map((a) => a.path),
-    });
-    setSending(false);
-    if (result.ok) {
-      setComposer('');
-      setAttachments([]);
-      await loadComms();
-    } else {
-      notify(setStatus, 'error', 'Not sent', result.message);
-    }
-  };
-
-  /**
-   * Pick pictures for the next text. Each one is compressed and uploaded to
-   * storage NOW, so by the time Send is pressed the server only has paths to
-   * sign — a slow upload happens while the person is still typing, not while
-   * they are waiting on a spinner. Twilio's cap is ten per message.
-   */
-  const pickAttachments = async () => {
-    if (!customer) return;
-    const room = MMS_MAX_ATTACHMENTS - attachments.length;
-    if (room <= 0) {
-      notify(setStatus, 'error', 'Too many pictures', `A text can carry up to ${MMS_MAX_ATTACHMENTS}.`);
-      return;
-    }
-    setStatus(null);
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsMultipleSelection: true,
-        selectionLimit: room,
-        quality: 0.8,
-      });
-      if (result.canceled || !result.assets?.length) return;
-      setAttaching(true);
-      let firstError: string | null = null;
-      for (const asset of result.assets.slice(0, room)) {
-        const upload = await uploadMmsAttachment({ uri: asset.uri, contentType: asset.mimeType });
-        if (upload.ok) {
-          setAttachments((prev) => [...prev, { path: upload.path, uri: asset.uri }]);
-        } else if (!firstError) {
-          firstError = upload.message;
-        }
-      }
-      setAttaching(false);
-      if (firstError) notify(setStatus, 'error', 'Picture not attached', firstError);
-    } catch {
-      setAttaching(false);
-      notify(setStatus, 'error', 'Picture not attached', 'Something went wrong. Please try again.');
     }
   };
 
@@ -1544,237 +1424,32 @@ export default function CustomerDetailScreen() {
   });
 
   /**
-   * One message. Three shapes share this timeline on purpose: an outbound
-   * text, an inbound text, and a call. Seeing "called them at 9:04, texted at
-   * 9:12, they replied at 9:20" in one column is the entire point of putting
-   * calls in the `messages` table rather than a log of their own.
+   * With texting switched off there is no composer to show, so the phone
+   * sheet (call from your own cell, copy the number) stands in for it under
+   * the thread. Rendered by Conversation as its banner.
    */
-  const renderMessage = ({ item }: { item: CommsMessage }) => {
-    if (item.channel === 'call') {
-      const failed =
-        item.status === 'failed' ||
-        item.status === 'busy' ||
-        item.status === 'no-answer' ||
-        item.status === 'canceled';
-      const who = item.sent_by ? authorName(item.sent_by) : null;
-      return (
-        <View style={styles.callPillWrap}>
-          <Text style={styles.callPill}>
-            {failed
-              ? `Call failed · ${item.error ?? item.status}`
-              : [
-                  'Called',
-                  item.duration_seconds ? formatDuration(item.duration_seconds) : item.status,
-                  who,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-          </Text>
-        </View>
-      );
-    }
-
-    const outbound = item.direction === 'out';
-    const expanded = expandedMessageId === item.id;
-    const failed = item.status === 'failed' || item.status === 'undelivered';
-    const deliveryLabel = outbound
-      ? failed
-        ? `${item.status === 'undelivered' ? 'Undelivered' : 'Failed'}${item.error ? ' — tap' : ''}`
-        : item.status === 'delivered'
-          ? 'Delivered'
-          : item.status === 'sent'
-            ? 'Sent'
-            : 'Queued'
-      : null;
-
-    return (
-      <Pressable
-        onPress={() => setExpandedMessageId(expanded ? null : item.id)}
-        style={[styles.bubbleRow, outbound ? styles.bubbleRowOut : styles.bubbleRowIn]}>
-        <View style={[styles.bubble, outbound ? styles.bubbleOut : styles.bubbleIn]}>
-          {item.media_urls.map((url) => (
-            <Image
-              key={url}
-              source={{ uri: url }}
-              style={styles.bubbleImage}
-              contentFit="cover"
-              transition={120}
-            />
-          ))}
-          {item.body ? <Text style={styles.bubbleText}>{item.body}</Text> : null}
-          <Text style={styles.bubbleMeta}>
-            {messageTime(item.created_at)}
-            {deliveryLabel ? ` · ${deliveryLabel}` : ''}
-          </Text>
-          {expanded && failed && item.error ? (
-            <Text style={styles.bubbleError}>
-              {item.error}
-              {item.error_code ? ` (${item.error_code})` : ''}
-            </Text>
-          ) : null}
-        </View>
-      </Pressable>
-    );
-  };
-
-  const templateSheet = showTemplates ? (
-    <View style={styles.templateSheet}>
-      <View style={styles.templateSheetHead}>
-        <Text style={styles.templateSheetTitle}>Saved texts</Text>
-        <Pressable
-          onPress={() => setShowTemplates(false)}
-          hitSlop={8}
-          style={({ pressed }) => pressed && styles.pressed}>
-          <Ionicons name="close" size={18} color={colors.inkSoft} />
-        </Pressable>
-      </View>
-      <ScrollView style={styles.templateSheetList} keyboardShouldPersistTaps="handled">
-        {templates.length === 0 ? (
-          <Text style={styles.emptyText}>
-            No saved texts yet — add some in Messaging settings.
-          </Text>
+  const commsFallback =
+    !optedOut && !smsReady ? (
+      <View style={styles.fallbackArea}>
+        {customer.phone ? (
+          <PhoneActionSheet
+            phone={customer.phone}
+            phoneE164={customer.phone_e164 ?? null}
+            name={customer.name}
+            customerId={customer.id}
+            jobId={jobs[0]?.id ?? null}
+            isAdmin={isAdmin}
+            optedOut={optedOut}
+            smsReady={smsReady}
+            voiceReady={commsSettings?.voiceEnabled === true}
+            hasStaffNumber={Boolean(staffProfile?.cellPhoneE164)}
+            onText={() => setSegment('comms')}
+          />
         ) : (
-          templates.map((template) => {
-            const merged = renderTemplate(template.body, templateVars);
-            return (
-              <Pressable
-                key={template.id}
-                // Fills the box; NEVER sends. Somebody has to read what is
-                // about to go out under the company's name.
-                onPress={() => {
-                  setComposer(merged);
-                  setShowTemplates(false);
-                }}
-                style={({ pressed }) => [styles.templateOption, pressed && styles.rowPressed]}>
-                <Text style={styles.templateOptionTitle}>{template.title}</Text>
-                <Text style={styles.templateOptionBody}>{merged}</Text>
-              </Pressable>
-            );
-          })
+          <Text style={styles.hint}>No phone number on file — add one on Overview.</Text>
         )}
-      </ScrollView>
-      <Text style={styles.hint}>Tapping one fills the box — nothing sends until you press Send.</Text>
-    </View>
-  ) : null;
-
-  const commsComposer = optedOut ? (
-    <View style={styles.optOutBanner}>
-      <Ionicons name="hand-left" size={16} color={colors.coralDeep} />
-      <Text style={styles.optOutText}>
-        They replied STOP{customer.sms_opt_out_at
-          ? ` on ${formatShortDate(customer.sms_opt_out_at.slice(0, 10))}`
-          : ''}
-        . You can still call.
-      </Text>
-    </View>
-  ) : !smsReady ? (
-    <View style={styles.fallbackArea}>
-      <View style={styles.noticeCard}>
-        <Ionicons name="construct" size={16} color={colors.slateDeep} />
-        <Text style={styles.noticeText}>{NOT_CONFIGURED_SMS}</Text>
       </View>
-      {customer.phone ? (
-        <PhoneActionSheet
-          phone={customer.phone}
-          phoneE164={customer.phone_e164 ?? null}
-          name={customer.name}
-          customerId={customer.id}
-          jobId={jobs[0]?.id ?? null}
-          isAdmin={isAdmin}
-          optedOut={optedOut}
-          smsReady={smsReady}
-          voiceReady={commsSettings?.voiceEnabled === true}
-          hasStaffNumber={Boolean(staffProfile?.cellPhoneE164)}
-          onText={() => setSegment('comms')}
-        />
-      ) : (
-        <Text style={styles.hint}>No phone number on file — add one on Overview.</Text>
-      )}
-    </View>
-  ) : (
-    <View style={styles.composerWrap}>
-      {attachments.length > 0 || attaching ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.attachStrip}>
-          {attachments.map((attachment) => (
-            <View key={attachment.path} style={styles.attachThumb}>
-              <Image
-                source={{ uri: attachment.uri }}
-                style={styles.attachThumbImage}
-                contentFit="cover"
-              />
-              <Pressable
-                onPress={() =>
-                  setAttachments((prev) => prev.filter((a) => a.path !== attachment.path))
-                }
-                hitSlop={6}
-                accessibilityLabel="Remove picture"
-                style={({ pressed }) => [styles.attachRemove, pressed && styles.pressed]}>
-                <Ionicons name="close" size={12} color={colors.white} />
-              </Pressable>
-            </View>
-          ))}
-          {attaching ? (
-            <View style={[styles.attachThumb, styles.attachThumbBusy]}>
-              <ActivityIndicator color={colors.ocean} size="small" />
-            </View>
-          ) : null}
-        </ScrollView>
-      ) : null}
-      <View style={styles.composer}>
-        <Pressable
-          onPress={() => void pickAttachments()}
-          disabled={attaching || sending}
-          accessibilityLabel="Attach a picture"
-          style={({ pressed }) => [styles.attachButton, (pressed || attaching) && styles.pressed]}>
-          <Ionicons name="image" size={16} color={colors.ocean} />
-          {attachments.length > 0 ? (
-            <Text style={styles.attachCount}>{attachments.length}</Text>
-          ) : null}
-        </Pressable>
-        <Pressable
-          onPress={() => setShowTemplates((v) => !v)}
-          style={({ pressed }) => [styles.templateChip, pressed && styles.pressed]}>
-          <Ionicons name="albums" size={14} color={colors.ocean} />
-          <Text style={styles.templateChipText}>Templates</Text>
-        </Pressable>
-        <TextInput
-          value={composer}
-          onChangeText={setComposer}
-          placeholder={
-            attachments.length > 0
-              ? 'Add a note (optional)'
-              : `Text ${customer.name.split(' ')[0] ?? customer.name}`
-          }
-          placeholderTextColor={colors.inkSoft}
-          multiline
-          style={styles.composerInput}
-        />
-        <Pressable
-          onPress={() => void sendText()}
-          disabled={
-            sending || attaching || (composer.trim().length === 0 && attachments.length === 0)
-          }
-          style={({ pressed }) => [
-            styles.sendButton,
-            (pressed ||
-              sending ||
-              attaching ||
-              (composer.trim().length === 0 && attachments.length === 0)) &&
-              styles.pressed,
-          ]}>
-          {sending ? (
-            <ActivityIndicator color={colors.ink} size="small" />
-          ) : (
-            <Ionicons name="send" size={16} color={colors.ink} />
-          )}
-        </Pressable>
-      </View>
-    </View>
-  );
+    ) : null;
 
   const commsHeader = (
     <View style={styles.commsHeader}>
@@ -2008,58 +1683,35 @@ export default function CustomerDetailScreen() {
   ) : null;
 
   /**
-   * Comms gets its own root instead of living inside the page's ScrollView.
-   *
-   * A chat needs an INVERTED list — newest pinned to the bottom, older loading
-   * upward — and a composer anchored above the keyboard. Nesting a
-   * VirtualizedList inside a ScrollView of the same orientation breaks both
-   * (React Native warns about it, and the inverted list loses its scroll
-   * anchoring). The data is reversed for the same reason: `fetchThread`
-   * returns oldest-first, which is the order a conversation reads in, and
-   * `inverted` flips the rendering, not the array.
+   * Comms gets its own root instead of living inside the page's ScrollView:
+   * a chat needs an inverted list and a composer anchored above the keyboard,
+   * and a VirtualizedList inside a ScrollView of the same orientation breaks
+   * both. The chat itself is `Conversation` — the same component the Phone
+   * section's thread screen renders — with this screen's segment bar and
+   * Call header passed in above it.
    */
   if (segment === 'comms') {
     return (
       <>
         <Stack.Screen options={{ title: customer.name }} />
-        <KeyboardAvoidingView
-          style={styles.screen}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 92 : 0}>
-          <View style={styles.commsTop}>
-            {segmentBar}
-            {commsHeader}
-          </View>
-          <FlatList
-            style={styles.commsList}
-            contentContainerStyle={styles.commsListContent}
-            data={[...thread].reverse()}
-            keyExtractor={(item) => item.id}
-            renderItem={renderMessage}
-            inverted
-            keyboardShouldPersistTaps="handled"
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={onRefresh}
-                tintColor={colors.ocean}
-              />
-            }
-            ListEmptyComponent={
-              <View style={styles.emptyThread}>
-                <Ionicons name="chatbubbles-outline" size={22} color={colors.inkSoft} />
-                <Text style={styles.emptyText}>
-                  {smsReady
-                    ? 'Nothing yet. Say hello.'
-                    : 'No conversation yet — texting from the DC Solar number is still being set up.'}
-                </Text>
-              </View>
-            }
-          />
-          {statusLine}
-          {templateSheet}
-          {commsComposer}
-        </KeyboardAvoidingView>
+        <Conversation
+          target={{ customerId: customer.id, phone: customer.phone_e164 ?? null }}
+          name={customer.name}
+          smsReady={smsReady}
+          optedOut={optedOut}
+          optedOutAt={customer.sms_opt_out_at ?? null}
+          jobId={jobs[0]?.id ?? null}
+          templates={templates}
+          templateVars={templateVars}
+          banner={
+            <View style={styles.commsTop}>
+              {segmentBar}
+              {commsHeader}
+              {statusLine}
+              {commsFallback}
+            </View>
+          }
+        />
       </>
     );
   }

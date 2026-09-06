@@ -139,6 +139,11 @@ export default function RootLayout() {
           {/* The phone app: a nested Tabs navigator. This header (title +
               back arrow) is the only one it shows; the tabs hide theirs. */}
           <Stack.Screen name="phone" options={{ title: 'Phone' }} />
+          {/* One conversation / the recipient picker, pushed over the tabs
+              the way a phone's Messages app does it. Titles are set by the
+              screens (the person's name). */}
+          <Stack.Screen name="messages/thread" options={{ title: 'Conversation' }} />
+          <Stack.Screen name="messages/compose" options={{ title: 'New Message' }} />
           <Stack.Screen name="leads/index" options={{ title: 'Sales Pipeline' }} />
           <Stack.Screen name="leads/[id]" options={{ title: 'Lead' }} />
           <Stack.Screen name="document-builder" options={{ title: 'New document' }} />

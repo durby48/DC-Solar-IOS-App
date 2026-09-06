@@ -3,7 +3,6 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { QuickCompose } from '@/components/comms/QuickCompose';
 import { Dialpad } from '@/components/phone/Dialpad';
 import { colors, radii, spacing } from '@/constants/theme';
 import {
@@ -60,7 +59,6 @@ export default function KeypadScreen() {
   const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
   const [calling, setCalling] = useState(false);
   const [note, setNote] = useState<{ kind: 'ok' | 'error' | 'info'; text: string } | null>(null);
-  const [composing, setComposing] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -183,7 +181,6 @@ export default function KeypadScreen() {
         onChange={(next) => {
           setValue(next);
           if (note) setNote(null);
-          if (composing) setComposing(false);
         }}
         onCall={() => void call()}
         callDisabled={!canCall}
@@ -202,32 +199,23 @@ export default function KeypadScreen() {
 
       {e164 ? (
         <View style={styles.textArea}>
-          {composing ? (
-            <QuickCompose
-              target={
-                primary?.source === 'customer'
-                  ? { customerId: primary.id }
-                  : primary?.source === 'lead'
-                    ? { leadId: primary.id }
-                    : primary?.source === 'contact'
-                      ? { contactId: primary.id }
-                      : { to: e164 }
-              }
-              name={primary?.displayName ?? null}
-              smsReady={settings?.smsEnabled === true}
-              autoFocus
-              onSent={() => setComposing(false)}
-            />
-          ) : (
-            <Pressable
-              onPress={() => setComposing(true)}
-              style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}>
-              <Ionicons name="chatbubble" size={15} color={colors.ocean} />
-              <Text style={styles.textButtonLabel}>
-                Text {primary ? primary.displayName.split(' ')[0] : formatPhone(e164)} instead
-              </Text>
-            </Pressable>
-          )}
+          <Pressable
+            onPress={() => {
+              const params: Record<string, string> = {
+                phone: e164,
+                name: primary?.displayName ?? formatPhone(e164),
+              };
+              if (primary?.source === 'customer') params.customerId = primary.id;
+              else if (primary?.source === 'contact') params.contactId = primary.id;
+              else if (primary?.source === 'lead') params.leadId = primary.id;
+              router.push({ pathname: '/messages/thread', params } as never);
+            }}
+            style={({ pressed }) => [styles.textButton, pressed && styles.pressed]}>
+            <Ionicons name="chatbubble" size={15} color={colors.ocean} />
+            <Text style={styles.textButtonLabel}>
+              Text {primary ? primary.displayName.split(' ')[0] : formatPhone(e164)} instead
+            </Text>
+          </Pressable>
         </View>
       ) : null}
     </ScrollView>

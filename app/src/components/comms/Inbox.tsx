@@ -11,18 +11,13 @@ import {
   View,
 } from 'react-native';
 
-import { QuickCompose } from '@/components/comms/QuickCompose';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import {
   NOT_CONFIGURED_SMS,
   fetchCommsSettings,
-  fetchThread,
   fetchThreads,
-  formatDuration,
   formatPhone,
-  markThreadRead,
   useCommsRealtime,
-  type CommsMessage,
   type CommsSettings,
   type CommsThread,
 } from '@/lib/comms';
@@ -30,7 +25,9 @@ import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
 /**
- * The shared inbox — every conversation on the DC Solar business number.
+ * The shared inbox — every conversation on the DC Solar business number, the
+ * way a phone lists them: one row per person, newest first, tap to open the
+ * conversation, a compose button bottom-right for a brand-new one.
  *
  * THERE IS EXACTLY ONE OF THESE. `/crm/inbox` renders it under its own Stack
  * header, and the Phone section's Messages tab renders it inside the nested
@@ -39,18 +36,11 @@ import { supabase } from '@/lib/supabase';
  * the two routes are a header and an import each. Deleting this file must
  * break both.
  *
- * ONE LIST, NEWEST FIRST. That ordering is the whole point: the reason this
- * screen exists is that a customer's reply used to land on whichever personal
- * cell happened to make the call and sat unread while that person was on a
- * roof. Here the newest thing anyone said is always the top row, and an unread
- * count follows it until somebody opens it.
- *
- * A KNOWN CUSTOMER opens the customer record's Comms segment, so the thread
- * sits next to their jobs, money and paperwork rather than in a separate silo.
- * A SUPPLIER (2026-09-06, `contacts`) and an UNKNOWN NUMBER expand in place —
- * a supplier has no record screen worth leaving the inbox for, and forcing
- * "create a customer" before you can even read what a stranger said is how a
- * lead gets lost. Both get a reply box right there.
+ * EVERY ROW OPENS THE SAME SCREEN — `/messages/thread`, the conversation view
+ * (`components/comms/Conversation.tsx`) — whether the far end is a customer,
+ * a supplier, or a number nobody has saved. The customer record's Comms
+ * segment still exists for reading the thread next to jobs and money; this
+ * is the texting flow.
  *
  * ADMIN ONLY, cosmetically. `messages` is admin-only on all four RLS verbs, so
  * a viewer's queries return nothing at all; the gate below just replaces an
@@ -71,46 +61,13 @@ function relativeTime(iso: string): string {
   return new Date(then).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function timeOfDay(iso: string): string {
-  const date = new Date(iso);
-  if (!Number.isFinite(date.getTime())) return '';
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
-
-/** One message inside an expanded (supplier / unknown-number) thread. */
-function InlineMessage({ message }: { message: CommsMessage }) {
-  if (message.channel === 'call') {
-    return (
-      <Text style={styles.inlineCall}>
-        {message.duration_seconds
-          ? `Call · ${formatDuration(message.duration_seconds)}`
-          : message.error
-            ? `Call failed · ${message.error}`
-            : 'Call'}
-      </Text>
-    );
-  }
-  const outbound = message.direction === 'out';
-  return (
-    <View style={[styles.inlineBubble, outbound ? styles.inlineOut : styles.inlineIn]}>
-      <Text style={styles.inlineBody}>
-        {message.body ||
-          (message.media_urls.length > 0
-            ? message.media_urls.length === 1
-              ? '(photo)'
-              : `(${message.media_urls.length} photos)`
-            : '')}
-      </Text>
-      <Text style={styles.inlineMeta}>
-        {outbound ? 'Sent' : 'Received'} · {timeOfDay(message.created_at)}
-      </Text>
-    </View>
-  );
+/** The params `/messages/thread` needs to load and name this conversation. */
+export function threadParams(thread: CommsThread): Record<string, string> {
+  const params: Record<string, string> = { name: thread.displayName };
+  if (thread.customerId) params.customerId = thread.customerId;
+  else if (thread.contactId) params.contactId = thread.contactId;
+  if (thread.phone) params.phone = thread.phone;
+  return params;
 }
 
 export function Inbox({
@@ -132,11 +89,6 @@ export function Inbox({
   const [refreshing, setRefreshing] = useState(false);
   const [threads, setThreads] = useState<CommsThread[]>([]);
   const [settings, setSettings] = useState<CommsSettings | null>(null);
-
-  // Suppliers and unknown numbers read inline rather than forcing a record.
-  const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  const [expandedMessages, setExpandedMessages] = useState<CommsMessage[]>([]);
-  const [expandedBusy, setExpandedBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,33 +124,12 @@ export function Inbox({
     }, [authState, load]),
   );
 
-  /**
-   * Re-read whichever thread is open, so a reply shows up in place. Keyed on
-   * the thread rather than the messages so the realtime callback below does
-   * not have to know what is expanded.
-   */
-  const reloadExpanded = useCallback(
-    async (thread: CommsThread) => {
-      const rows = thread.contactId
-        ? await fetchThread(thread.contactId, { byContact: true })
-        : thread.phone
-          ? await fetchThread(thread.phone, { byPhone: true })
-          : [];
-      setExpandedMessages(rows);
-    },
-    [],
-  );
-
   // Live inbound texts. The focus refetch above stays the source of truth —
   // this only saves a pull-to-refresh while the screen is already open.
   useCommsRealtime(
     useCallback(() => {
-      if (authState !== 'in') return;
-      void load().then(() => {
-        const open = threads.find((t) => t.key === expandedKey);
-        if (open) void reloadExpanded(open);
-      });
-    }, [authState, load, threads, expandedKey, reloadExpanded]),
+      if (authState === 'in') void load();
+    }, [authState, load]),
   );
 
   const onRefresh = useCallback(async () => {
@@ -207,142 +138,59 @@ export function Inbox({
     setRefreshing(false);
   }, [load]);
 
-  const openThread = async (thread: CommsThread) => {
-    if (thread.customerId) {
-      // Stamp read here as well as on the detail screen: the tap is the moment
-      // the badge should go, not whenever the next screen finishes loading.
-      void markThreadRead(thread.customerId).then(() => load());
-      router.push({
-        pathname: '/crm/[id]',
-        params: { id: thread.customerId, segment: 'comms' },
-      });
-      return;
-    }
-    if (expandedKey === thread.key) {
-      setExpandedKey(null);
-      setExpandedMessages([]);
-      return;
-    }
-    setExpandedKey(thread.key);
-    setExpandedMessages([]);
-    if (!thread.phone && !thread.contactId) return;
-    setExpandedBusy(true);
-    await reloadExpanded(thread);
-    setExpandedBusy(false);
-    if (thread.unread > 0 && thread.phone) {
-      await markThreadRead(null, thread.phone);
-      await load();
-    }
+  const openThread = (thread: CommsThread) => {
+    router.push({ pathname: '/messages/thread', params: threadParams(thread) } as never);
   };
 
   const renderThread = ({ item }: { item: CommsThread }) => {
-    const expanded = expandedKey === item.key;
     const unread = item.unread > 0;
     const supplier = Boolean(item.contactId);
     return (
-      <View>
-        <Pressable
-          onPress={() => void openThread(item)}
-          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
-          <View style={[styles.iconWrap, item.unknown && styles.iconWrapUnknown]}>
-            <Ionicons
-              name={
-                item.unknown
-                  ? 'help'
-                  : supplier
-                    ? 'storefront'
-                    : item.lastMessage.channel === 'call'
-                      ? 'call'
-                      : 'chatbubble'
-              }
-              size={16}
-              color={item.unknown ? colors.slateDeep : colors.ocean}
-            />
-          </View>
-          <View style={styles.rowBody}>
-            <View style={styles.rowTitleLine}>
-              <Text style={[styles.rowName, unread && styles.rowNameUnread]} numberOfLines={1}>
-                {item.displayName}
-              </Text>
-              {item.optedOut ? (
-                <View style={styles.stopChip}>
-                  <Text style={styles.stopChipText}>STOP</Text>
-                </View>
-              ) : null}
-              <Text style={styles.rowTime}>{relativeTime(item.lastAt)}</Text>
-            </View>
-            <Text
-              style={[styles.rowPreview, unread && styles.rowPreviewUnread]}
-              numberOfLines={expanded ? undefined : 2}>
-              {item.preview || '—'}
+      <Pressable
+        onPress={() => openThread(item)}
+        style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
+        <View style={[styles.iconWrap, item.unknown && styles.iconWrapUnknown]}>
+          <Ionicons
+            name={
+              item.unknown
+                ? 'help'
+                : supplier
+                  ? 'storefront'
+                  : item.lastMessage.channel === 'call'
+                    ? 'call'
+                    : 'chatbubble'
+            }
+            size={16}
+            color={item.unknown ? colors.slateDeep : colors.ocean}
+          />
+        </View>
+        <View style={styles.rowBody}>
+          <View style={styles.rowTitleLine}>
+            <Text style={[styles.rowName, unread && styles.rowNameUnread]} numberOfLines={1}>
+              {item.displayName}
             </Text>
-            {(item.unknown || supplier) && item.phone ? (
-              <Text style={styles.rowNumber}>{formatPhone(item.phone)}</Text>
+            {item.optedOut ? (
+              <View style={styles.stopChip}>
+                <Text style={styles.stopChipText}>STOP</Text>
+              </View>
             ) : null}
+            <Text style={styles.rowTime}>{relativeTime(item.lastAt)}</Text>
           </View>
-          {unread ? (
-            <View style={styles.unreadPill}>
-              <Text style={styles.unreadPillText}>{item.unread}</Text>
-            </View>
-          ) : (
-            <Ionicons
-              name={
-                item.customerId ? 'chevron-forward' : expanded ? 'chevron-up' : 'chevron-down'
-              }
-              size={16}
-              color={colors.inkSoft}
-            />
-          )}
-        </Pressable>
-
-        {expanded ? (
-          <View style={styles.expanded}>
-            {expandedBusy ? (
-              <ActivityIndicator color={colors.ocean} />
-            ) : expandedMessages.length === 0 ? (
-              <Text style={styles.hint}>Nothing else in this conversation.</Text>
-            ) : (
-              expandedMessages.map((message) => (
-                <InlineMessage key={message.id} message={message} />
-              ))
-            )}
-
-            {isAdmin ? (
-              <QuickCompose
-                target={
-                  item.contactId
-                    ? { contactId: item.contactId }
-                    : { to: item.phone ?? undefined }
-                }
-                name={supplier ? item.displayName : null}
-                smsReady={settings?.smsEnabled === true && Boolean(item.phone || item.contactId)}
-                onSent={() => void reloadExpanded(item).then(() => load())}
-              />
-            ) : null}
-
-            {item.unknown ? (
-              <>
-                <Pressable
-                  onPress={() => router.push('/customers')}
-                  style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}>
-                  <Ionicons name="person-add" size={15} color={colors.ocean} />
-                  <Text style={styles.addButtonText}>Add as customer</Text>
-                </Pressable>
-                <Text style={styles.hint}>
-                  Add them on the Customers screen with{' '}
-                  {item.phone ? formatPhone(item.phone) : 'this number'} as their phone — the
-                  whole thread attaches to the new record. A supplier belongs in Phone →
-                  Contacts instead.
-                </Text>
-              </>
-            ) : supplier ? (
-              <Text style={styles.hint}>
-                A supplier thread. Their replies land here and in Phone → Contacts.
-              </Text>
-            ) : null}
+          <Text style={[styles.rowPreview, unread && styles.rowPreviewUnread]} numberOfLines={2}>
+            {item.preview || '—'}
+          </Text>
+          {(item.unknown || supplier) && item.phone ? (
+            <Text style={styles.rowNumber}>{formatPhone(item.phone)}</Text>
+          ) : null}
+        </View>
+        {unread ? (
+          <View style={styles.unreadPill}>
+            <Text style={styles.unreadPillText}>{item.unread}</Text>
           </View>
-        ) : null}
-      </View>
+        ) : (
+          <Ionicons name="chevron-forward" size={16} color={colors.inkSoft} />
+        )}
+      </Pressable>
     );
   };
 
@@ -416,30 +264,38 @@ export function Inbox({
   );
 
   return (
-    <FlatList
-      style={styles.screen}
-      contentContainerStyle={styles.container}
-      data={threads}
-      keyExtractor={(item) => item.key}
-      renderItem={renderThread}
-      ListHeaderComponent={header}
-      ItemSeparatorComponent={() => <View style={styles.separator} />}
-      keyboardShouldPersistTaps="handled"
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.ocean} />
-      }
-      ListEmptyComponent={
-        <View style={styles.centerCard}>
-          <Ionicons name="chatbubbles-outline" size={22} color={colors.inkSoft} />
-          <Text style={styles.promptTitle}>No messages yet</Text>
-          <Text style={styles.promptText}>
-            {configured
-              ? 'Texts to and from the DC Solar number show up here.'
-              : 'Once the business number is live, every text lands here.'}
-          </Text>
-        </View>
-      }
-    />
+    <View style={styles.screen}>
+      <FlatList
+        style={styles.screen}
+        contentContainerStyle={styles.container}
+        data={threads}
+        keyExtractor={(item) => item.key}
+        renderItem={renderThread}
+        ListHeaderComponent={header}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.ocean} />
+        }
+        ListEmptyComponent={
+          <View style={styles.centerCard}>
+            <Ionicons name="chatbubbles-outline" size={22} color={colors.inkSoft} />
+            <Text style={styles.promptTitle}>No messages yet</Text>
+            <Text style={styles.promptText}>
+              {configured
+                ? 'Texts to and from the DC Solar number show up here. Tap the pencil to start one.'
+                : 'Once the business number is live, every text lands here.'}
+            </Text>
+          </View>
+        }
+      />
+      {/* New message. Bottom-right, like every phone's Messages app. */}
+      <Pressable
+        onPress={() => router.push('/messages/compose' as never)}
+        accessibilityLabel="New message"
+        style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}>
+        <Ionicons name="create" size={24} color={colors.ink} />
+      </Pressable>
+    </View>
   );
 }
 
@@ -447,7 +303,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.cream },
   centerScreen: { alignItems: 'center', justifyContent: 'center' },
   padded: { padding: spacing.lg },
-  container: { padding: spacing.lg, gap: 0, paddingBottom: spacing.xxl },
+  container: { padding: spacing.lg, gap: 0, paddingBottom: spacing.xxl * 2 },
   headerArea: { paddingBottom: spacing.md },
 
   noticeCard: {
@@ -525,32 +381,18 @@ const styles = StyleSheet.create({
   },
   stopChipText: { color: colors.coralDeep, fontSize: 10, fontWeight: '800' },
 
-  expanded: {
-    backgroundColor: colors.canvas,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    marginTop: spacing.xs,
-    padding: spacing.sm,
-    gap: spacing.sm,
-  },
-  inlineBubble: { borderRadius: radii.sm, padding: spacing.sm, maxWidth: '90%' },
-  inlineIn: { backgroundColor: colors.white, alignSelf: 'flex-start' },
-  inlineOut: { backgroundColor: colors.skySoft, alignSelf: 'flex-end' },
-  inlineBody: { color: colors.ink, fontSize: 14, fontWeight: '500' },
-  inlineMeta: { color: colors.inkSoft, fontSize: 11, fontWeight: '600', marginTop: 2 },
-  inlineCall: { color: colors.inkSoft, fontSize: 12, fontWeight: '700', textAlign: 'center' },
-  addButton: {
-    flexDirection: 'row',
+  fab: {
+    position: 'absolute',
+    right: spacing.lg,
+    bottom: spacing.lg,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.sun,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.white,
-    borderRadius: radii.pill,
-    paddingVertical: spacing.sm,
-    marginTop: spacing.xs,
+    ...shadows.raised,
   },
-  addButtonText: { color: colors.ocean, fontSize: 13, fontWeight: '800' },
-  hint: { color: colors.inkSoft, fontSize: 12, fontWeight: '600' },
+  fabPressed: { opacity: 0.8 },
   pressed: { opacity: 0.6 },
 });

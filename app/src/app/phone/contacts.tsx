@@ -12,7 +12,6 @@ import {
   View,
 } from 'react-native';
 
-import { QuickCompose } from '@/components/comms/QuickCompose';
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { Chip } from '@/components/ui';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
@@ -83,7 +82,6 @@ export default function ContactsScreen() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [composing, setComposing] = useState(false);
   const [callingKey, setCallingKey] = useState<string | null>(null);
   const [note, setNote] = useState<{ kind: 'ok' | 'error' | 'info'; text: string } | null>(null);
 
@@ -181,6 +179,16 @@ export default function ContactsScreen() {
     }
   };
 
+  /** The conversation screen, like tapping "message" on a phone contact. */
+  const openThread = (entry: DirectoryEntry) => {
+    if (!entry.phoneE164) return;
+    const params: Record<string, string> = { phone: entry.phoneE164, name: entry.displayName };
+    if (entry.source === 'customer') params.customerId = entry.id;
+    else if (entry.source === 'contact') params.contactId = entry.id;
+    else if (entry.source === 'lead') params.leadId = entry.id;
+    router.push({ pathname: '/messages/thread', params } as never);
+  };
+
   const saveContact = async () => {
     setFormError(null);
     if (!form.name.trim()) {
@@ -226,7 +234,6 @@ export default function ContactsScreen() {
         <Pressable
           onPress={() => {
             setOpenKey(open ? null : key);
-            setComposing(false);
             setNote(null);
           }}
           style={({ pressed }) => [styles.row, !dialable && styles.rowMuted, pressed && styles.rowPressed]}>
@@ -269,7 +276,7 @@ export default function ContactsScreen() {
                 <Text style={styles.actionLabel}>Call</Text>
               </Pressable>
               <Pressable
-                onPress={() => setComposing((v) => !v)}
+                onPress={() => openThread(item)}
                 disabled={!dialable}
                 style={({ pressed }) => [
                   styles.action,
@@ -297,22 +304,6 @@ export default function ContactsScreen() {
                     ? 'Fix the phone number on their record and it will dial from here.'
                     : 'Edit the number on this contact to make it dialable.'}
               </Text>
-            ) : composing ? (
-              <QuickCompose
-                target={
-                  item.source === 'customer'
-                    ? { customerId: item.id }
-                    : item.source === 'lead'
-                      ? { leadId: item.id }
-                      : item.source === 'contact'
-                        ? { contactId: item.id }
-                        : { to: item.phoneE164 ?? undefined }
-                }
-                name={item.displayName}
-                smsReady={settings?.smsEnabled === true}
-                autoFocus
-                onSent={() => setComposing(false)}
-              />
             ) : null}
             {item.source === 'contact' ? (
               <Pressable
