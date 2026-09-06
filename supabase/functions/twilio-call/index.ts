@@ -70,6 +70,8 @@ function toE164(raw: string): string | null {
 
 interface Payload {
   customerId?: string;
+  /** A supplier / vendor from `contacts` (2026-09-06). */
+  contactId?: string;
   to?: string;
   jobId?: string;
 }
@@ -182,8 +184,34 @@ Deno.serve(async (req) => {
     let to: string | null = null;
     let who = 'the customer';
     let customerId: string | null = payload.customerId ?? null;
+    let contactId: string | null = null;
 
-    if (payload.customerId) {
+    if (payload.contactId) {
+      const { data: contactRow } = await admin
+        .from('contacts')
+        .select('id, name, phone, phone_e164')
+        .eq('id', payload.contactId)
+        .maybeSingle();
+      const contact = contactRow as {
+        id: string;
+        name: string | null;
+        phone: string | null;
+        phone_e164: string | null;
+      } | null;
+      if (!contact) return fail(404, 'not_found', 'Contact not found.');
+      contactId = contact.id;
+      who = contact.name ?? 'the contact';
+      to = payload.to ? toE164(payload.to) : contact.phone_e164;
+      if (!to) {
+        return fail(
+          400,
+          'no_number',
+          contact.phone
+            ? `${who} has "${contact.phone}" on file, which is not a valid US number. Fix the phone number on the contact.`
+            : `${who} has no phone number on file. Add one to the contact first.`,
+        );
+      }
+    } else if (payload.customerId) {
       const { data: custRow } = await admin
         .from('customers')
         .select('id, name, phone, phone_e164')
@@ -232,9 +260,25 @@ Deno.serve(async (req) => {
         // compliance. twilio-send-sms is where that flag decides anything.
         customerId = customerId ?? matches[0].id;
         who = matches[0].name ?? who;
+      } else {
+        // Not a customer — maybe the supply house, dialled from the keypad.
+        // Filing it under the contact is what makes Recents show a name.
+        const { data: contactRows } = await admin
+          .from('contacts')
+          .select('id, name')
+          .eq('company', COMPANY)
+          .eq('phone_e164', to)
+          .is('archived_at', null)
+          .order('created_at', { ascending: true })
+          .limit(1);
+        const contact = (contactRows as { id: string; name: string | null }[] | null)?.[0];
+        if (contact) {
+          contactId = contact.id;
+          who = contact.name ?? who;
+        }
       }
     } else {
-      return fail(400, 'bad_request', 'Pass customerId or to.');
+      return fail(400, 'bad_request', 'Pass customerId, contactId or to.');
     }
 
     // --- the bridge ----------------------------------------------------------
@@ -288,6 +332,7 @@ Deno.serve(async (req) => {
         await admin.from('messages').insert({
           company: COMPANY,
           customer_id: customerId,
+          contact_id: contactId,
           job_id: payload.jobId ?? null,
           channel: 'call',
           direction: 'out',
@@ -313,6 +358,7 @@ Deno.serve(async (req) => {
       .insert({
         company: COMPANY,
         customer_id: customerId,
+        contact_id: contactId,
         job_id: payload.jobId ?? null,
         channel: 'call',
         direction: 'out',

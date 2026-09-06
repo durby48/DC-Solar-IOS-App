@@ -21,7 +21,8 @@
  *
  * WHAT IT DOES, IN ORDER
  *   • normalise From to E.164 and match it against customers.phone_e164, then
- *     leads.phone_e164 (unknown numbers still get a row — the inbox offers
+ *     leads.phone_e164, then contacts.phone_e164 — suppliers and vendors,
+ *     added 2026-09-06 (unknown numbers still get a row — the inbox offers
  *     "Add as customer");
  *   • STOP / STOPALL / UNSUBSCRIBE / CANCEL / END / QUIT → stamp
  *     customers.sms_opt_out_at. START / UNSTOP / YES → clear it. Twilio's
@@ -227,6 +228,7 @@ Deno.serve(async (req) => {
     // --- who is this? --------------------------------------------------------
     let customerId: string | null = null;
     let leadId: string | null = null;
+    let contactId: string | null = null;
     let who = prettyNumber(from);
 
     // EVERY row holding this number, customers AND leads. A number is commonly
@@ -259,6 +261,24 @@ Deno.serve(async (req) => {
     } else if (leads.length > 0) {
       leadId = leads[0].id;
       who = leads[0].name ?? who;
+    } else {
+      // Third slot (2026-09-06): suppliers, vendors, inspectors. Looked up
+      // LAST so a supplier who is also somehow a customer files under the
+      // customer. No consent handling here — `contacts` has no opt-out
+      // column, and a supply house texting us is not A2P traffic.
+      const { data: contactRows } = await admin
+        .from('contacts')
+        .select('id, name')
+        .eq('company', COMPANY)
+        .eq('phone_e164', from)
+        .is('archived_at', null)
+        .order('created_at', { ascending: true })
+        .limit(1);
+      const contact = (contactRows as { id: string; name: string | null }[] | null)?.[0];
+      if (contact) {
+        contactId = contact.id;
+        who = contact.name ?? who;
+      }
     }
 
     // --- consent -------------------------------------------------------------
@@ -303,6 +323,7 @@ Deno.serve(async (req) => {
       company: COMPANY,
       customer_id: customerId,
       lead_id: leadId,
+      contact_id: contactId,
       channel: 'sms',
       direction: 'in',
       from_number: from,
@@ -373,6 +394,7 @@ Deno.serve(async (req) => {
       company: COMPANY,
       customer_id: customerId,
       lead_id: leadId,
+      contact_id: contactId,
       channel: 'sms',
       direction: 'out',
       from_number: to,

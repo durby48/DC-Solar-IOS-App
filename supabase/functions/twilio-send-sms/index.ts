@@ -36,8 +36,20 @@
  *   TWILIO_WEBHOOK_SECRET         (the ?k= guard on the callback URLs)
  *   TWILIO_PUBLIC_BASE            (https://<ref>.supabase.co/functions/v1)
  *
- * POST { customerId?, leadId?, to?, body, jobId?, templateKey? }
+ * PICTURES (2026-09-06). Twilio fetches MMS media by URL; it does not accept
+ * an upload. The client uploads to the private `job-photos` bucket under
+ * `mms/` and passes STORAGE PATHS, never URLs. This function signs each path
+ * with the service role (24 h, Twilio fetches once at send time) and sets
+ * the `MediaUrl` params itself. If the client could pass a raw MediaUrl, any
+ * admin session could make the company number send arbitrary internet
+ * content to a customer — so a path that is not under `mms/` is refused.
+ * The row keeps the paths in `media_urls`; the app signs them again at read
+ * time, the way lib/artwork.ts does for pipeline cards.
+ *
+ * POST { customerId?, leadId?, contactId?, to?, body?, jobId?, templateKey?,
+ *        mediaPaths?: string[] }
  *   → { ok: true, messageId, twilioSid, status }
+ *   `body` may be empty when `mediaPaths` is not.
  */
 
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
@@ -52,6 +64,17 @@ const COMPANY = 'dc-solar';
 /** Twilio's hard ceiling for one API request is 1600 characters. */
 const MAX_BODY = 1600;
 const E164_RE = /^\+[1-9]\d{7,14}$/;
+
+/** Twilio's ceiling per message. */
+const MAX_MEDIA = 10;
+const MEDIA_BUCKET = 'job-photos';
+/**
+ * Only this prefix, only these characters, no `..`. The client chose the
+ * path; the prefix is what stops it choosing somebody's insurance PDF.
+ */
+const MEDIA_PATH_RE = /^mms\/[A-Za-z0-9_\-]+(?:\/[A-Za-z0-9_\-]+)*\.(?:jpg|jpeg|png|gif|webp)$/i;
+/** 24 hours. Twilio fetches at send time; the app re-signs for display. */
+const MEDIA_SIGN_TTL = 86400;
 
 function ok(payload: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify({ ok: true, ...payload }), {
@@ -80,10 +103,13 @@ function toE164(raw: string): string | null {
 interface Payload {
   customerId?: string;
   leadId?: string;
+  contactId?: string;
   to?: string;
   body?: string;
   jobId?: string;
   templateKey?: string;
+  /** Storage paths under `mms/` in the job-photos bucket. Never URLs. */
+  mediaPaths?: string[];
 }
 
 interface NumberMatch {
@@ -185,7 +211,22 @@ Deno.serve(async (req) => {
       body = tplBody;
     }
 
-    if (!body) return fail(400, 'bad_request', 'body is required.');
+    // --- pictures: shape-checked BEFORE any row is written -------------------
+    const mediaPaths = Array.isArray(payload.mediaPaths)
+      ? payload.mediaPaths.filter((p): p is string => typeof p === 'string' && p.length > 0)
+      : [];
+    if (mediaPaths.length > MAX_MEDIA) {
+      return fail(400, 'bad_request', `That is ${mediaPaths.length} pictures; the limit is ${MAX_MEDIA}.`);
+    }
+    for (const path of mediaPaths) {
+      if (path.includes('..') || !MEDIA_PATH_RE.test(path)) {
+        return fail(400, 'bad_request', 'Pictures have to be uploaded through the app first.');
+      }
+    }
+
+    if (!body && mediaPaths.length === 0) {
+      return fail(400, 'bad_request', 'body is required.');
+    }
     if (body.length > MAX_BODY) {
       return fail(400, 'bad_request', `That text is ${body.length} characters; the limit is ${MAX_BODY}.`);
     }
@@ -235,6 +276,7 @@ Deno.serve(async (req) => {
     let who = 'that contact';
     let customerId: string | null = payload.customerId ?? null;
     let leadId: string | null = payload.leadId ?? null;
+    let contactId: string | null = null;
 
     if (payload.customerId) {
       const { data: custRow } = await admin
@@ -298,12 +340,39 @@ Deno.serve(async (req) => {
             : `${who} has no phone number on file. Add one on the lead first.`,
         );
       }
+    } else if (payload.contactId) {
+      // Suppliers / vendors (2026-09-06). No opt-out column: this is not A2P
+      // traffic to a consumer, it is us texting the supply house.
+      const { data: contactRow } = await admin
+        .from('contacts')
+        .select('id, name, phone, phone_e164')
+        .eq('id', payload.contactId)
+        .maybeSingle();
+      const contact = contactRow as {
+        id: string;
+        name: string | null;
+        phone: string | null;
+        phone_e164: string | null;
+      } | null;
+      if (!contact) return fail(404, 'not_found', 'Contact not found.');
+      who = contact.name ?? 'that contact';
+      contactId = contact.id;
+      to = payload.to ? toE164(payload.to) : contact.phone_e164;
+      if (!to) {
+        return fail(
+          400,
+          'no_number',
+          contact.phone
+            ? `${who} has "${contact.phone}" on file, which is not a textable US number. Fix the phone number on the contact.`
+            : `${who} has no phone number on file. Add one to the contact first.`,
+        );
+      }
     } else if (payload.to) {
       to = toE164(payload.to);
       if (!to) return fail(400, 'no_number', `"${payload.to}" is not a textable US number.`);
       who = to;
     } else {
-      return fail(400, 'bad_request', 'Pass customerId, leadId or to.');
+      return fail(400, 'bad_request', 'Pass customerId, leadId, contactId or to.');
     }
 
     // --- consent on the NUMBER, whichever branch produced it -----------------
@@ -331,6 +400,7 @@ Deno.serve(async (req) => {
         company: COMPANY,
         customer_id: customerId,
         lead_id: leadId,
+        contact_id: contactId,
         job_id: payload.jobId ?? null,
         channel: 'sms',
         direction: 'out',
@@ -339,6 +409,8 @@ Deno.serve(async (req) => {
         body,
         status: 'queued',
         sent_by: callerEmail,
+        // Storage PATHS, not URLs — signed URLs expire, paths do not.
+        media_urls: mediaPaths.length > 0 ? mediaPaths : null,
       })
       .select('id')
       .single();
@@ -347,12 +419,34 @@ Deno.serve(async (req) => {
     }
     const messageId = (insertedRow as { id: string }).id;
 
+    // --- sign the pictures for Twilio ------------------------------------------
+    // After the row exists, so a signing failure is a logged "failed" send
+    // rather than a message nobody can find later.
+    const mediaUrls: string[] = [];
+    for (const path of mediaPaths) {
+      const { data: signed, error: signErr } = await admin.storage
+        .from(MEDIA_BUCKET)
+        .createSignedUrl(path, MEDIA_SIGN_TTL);
+      if (signErr || !signed?.signedUrl) {
+        const message = `Could not prepare a picture for sending: ${signErr?.message ?? 'no signed URL'}`;
+        await admin
+          .from('messages')
+          .update({ status: 'failed', error_code: 'media', error: message })
+          .eq('id', messageId);
+        return fail(502, 'media_error', message);
+      }
+      mediaUrls.push(signed.signedUrl);
+    }
+
     // --- Twilio -------------------------------------------------------------
     const form = new URLSearchParams();
     if (messagingServiceSid) form.set('MessagingServiceSid', messagingServiceSid);
     else form.set('From', fromNumber!);
     form.set('To', to);
-    form.set('Body', body);
+    // Twilio wants Body OR MediaUrl; an empty Body alongside pictures is fine
+    // to omit and wrong to send as "".
+    if (body) form.set('Body', body);
+    for (const url of mediaUrls) form.append('MediaUrl', url);
     if (publicBase && webhookSecret) {
       form.set(
         'StatusCallback',
