@@ -132,16 +132,17 @@ export default function RecentsScreen() {
   const canCall = voiceReady && hasStaffNumber;
 
   const redial = async (call: RecentCall) => {
-    if (!canCall || redialId) {
+    if (redialId) return;
+    if (!call.customerId && !call.contactId && !call.phone) return;
+    if (!canCall) {
       setNote({
         kind: 'error',
         text: !voiceReady
           ? NOT_CONFIGURED_VOICE
-          : 'Add your cell number in Messages settings — that is the phone we ring first.',
+          : 'Twilio rings your cell first — tap Call on the Keypad once to save it, or add it in Messages settings.',
       });
       return;
     }
-    if (!call.customerId && !call.contactId && !call.phone) return;
     setRedialId(call.id);
     setNote({ kind: 'info', text: `Ringing your cell, then ${call.displayName}…` });
     const result = await placeBridgeCall({

@@ -148,11 +148,13 @@ export default function ContactsScreen() {
   const call = async (entry: DirectoryEntry) => {
     if (!entry.phoneE164 || callingKey) return;
     if (!canCall) {
+      // Every call goes through Twilio, and Twilio rings your cell first. No
+      // cell saved → the keypad asks for it once; send them there.
       setNote({
         kind: 'error',
         text: !voiceReady
           ? NOT_CONFIGURED_VOICE
-          : 'Add your cell number in Messages settings — that is the phone we ring first.',
+          : 'Twilio rings your cell first — tap Call on the Keypad once to save it, or add it in Messages settings.',
       });
       return;
     }
@@ -265,7 +267,7 @@ export default function ContactsScreen() {
                 disabled={!dialable || callingKey !== null}
                 style={({ pressed }) => [
                   styles.action,
-                  (!dialable || !canCall) && styles.actionMuted,
+                  !dialable && styles.actionMuted,
                   pressed && styles.pressed,
                 ]}>
                 {callingKey === key ? (

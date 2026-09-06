@@ -1,7 +1,15 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { Dialpad } from '@/components/phone/Dialpad';
 import { colors, radii, spacing } from '@/constants/theme';
@@ -13,6 +21,7 @@ import {
   formatPhone,
   matchDirectory,
   placeBridgeCall,
+  saveMyCellPhone,
   type CommsSettings,
   type DirectoryEntry,
   type StaffProfile,
@@ -29,10 +38,13 @@ import {
  * number, the first is used and the rest are listed so the mistake is
  * visible rather than silent.
  *
- * WHY THE CALL BUTTON CAN BE OFF. A bridge call rings YOUR cell first, so it
- * needs `comms_settings.voice_enabled` AND your own number in Messages
- * settings. Both gates are read on focus and explained in place; the button
- * greys out rather than failing on tap.
+ * EVERY CALL GOES THROUGH TWILIO. A bridge call rings YOUR cell first, then
+ * dials the customer with the DC Solar number as caller ID — so Twilio has
+ * to know which phone to ring. If this account has not saved one yet, the
+ * first tap on Call asks for it right here (one field, saved to
+ * staff_profiles, same as Messages settings), and then places the call. The
+ * button never greys out for that: a dead button next to "not in the
+ * directory" read as "you can't dial strangers", which was never true.
  */
 
 function toE164(dialed: string): string | null {
@@ -59,6 +71,10 @@ export default function KeypadScreen() {
   const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
   const [calling, setCalling] = useState(false);
   const [note, setNote] = useState<{ kind: 'ok' | 'error' | 'info'; text: string } | null>(null);
+  // One-time setup, shown on the first Call when no cell number is saved.
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [cellDraft, setCellDraft] = useState('');
+  const [savingCell, setSavingCell] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -88,21 +104,17 @@ export default function KeypadScreen() {
   const gateNote = !voiceReady
     ? NOT_CONFIGURED_VOICE
     : !hasStaffNumber
-      ? 'Add your cell number in Messages settings — that is the phone we ring first.'
+      ? 'Calls go out on the DC Solar number. Twilio rings your cell first, then connects them — tap Call and it will ask for your cell once.'
       : null;
 
-  const call = async () => {
-    if (!canCall || calling) return;
-    if (!e164) {
-      setNote({ kind: 'error', text: `"${value}" is not a number we can dial.` });
-      return;
-    }
+  /** The Twilio bridge: rings your cell, then dials them as DC Solar. */
+  const placeCall = async (to: string) => {
     setCalling(true);
     setNote({ kind: 'info', text: 'Ringing your cell…' });
     const result = await placeBridgeCall({
       customerId: primary?.source === 'customer' ? primary.id : undefined,
       contactId: primary?.source === 'contact' ? primary.id : undefined,
-      to: primary?.source === 'customer' || primary?.source === 'contact' ? undefined : e164,
+      to: primary?.source === 'customer' || primary?.source === 'contact' ? undefined : to,
     });
     setCalling(false);
     setNote(
@@ -110,6 +122,53 @@ export default function KeypadScreen() {
         ? { kind: 'ok', text: 'Pick up your phone — we are dialling them next.' }
         : { kind: 'error', text: result.message },
     );
+  };
+
+  const call = async () => {
+    if (calling || savingCell) return;
+    if (!e164) {
+      setNote({ kind: 'error', text: `"${value}" is not a number we can dial.` });
+      return;
+    }
+    if (!voiceReady) {
+      setNote({ kind: 'error', text: NOT_CONFIGURED_VOICE });
+      return;
+    }
+    if (!hasStaffNumber) {
+      setSetupOpen(true);
+      setNote(null);
+      return;
+    }
+    await placeCall(e164);
+  };
+
+  /**
+   * Save the cell Twilio should ring, then place the call that was tapped.
+   * Writes `staff_profiles` — the same row Messages settings edits — so it is
+   * asked exactly once.
+   */
+  const saveCellAndCall = async () => {
+    const digits = cellDraft.replace(/[^0-9]/g, '');
+    if (!(digits.length === 10 || (digits.length === 11 && digits.startsWith('1')))) {
+      setNote({ kind: 'error', text: 'Enter a 10-digit US cell number.' });
+      return;
+    }
+    setSavingCell(true);
+    const saved = await saveMyCellPhone(cellDraft.trim());
+    if (!saved.ok) {
+      setSavingCell(false);
+      setNote({ kind: 'error', text: saved.message });
+      return;
+    }
+    const fresh = await fetchMyStaffProfile();
+    setProfile(fresh);
+    setSavingCell(false);
+    if (!fresh?.cellPhoneE164) {
+      setNote({ kind: 'error', text: 'That number did not save as a US cell. Check it and try again.' });
+      return;
+    }
+    setSetupOpen(false);
+    if (e164) await placeCall(e164);
   };
 
   const openRecord = (entry: DirectoryEntry) => {
@@ -183,9 +242,45 @@ export default function KeypadScreen() {
           if (note) setNote(null);
         }}
         onCall={() => void call()}
-        callDisabled={!canCall}
-        callBusy={calling}
+        callBusy={calling || savingCell}
       />
+
+      {setupOpen && !canCall ? (
+        <View style={styles.setup}>
+          <Text style={styles.setupTitle}>Which phone should Twilio ring?</Text>
+          <Text style={styles.setupBody}>
+            Calls go out on the DC Solar number. Twilio rings your cell first, then connects{' '}
+            {primary?.displayName ?? (e164 ? formatPhone(e164) : 'them')} — they see (816)
+            744-6473, never your number. Asked once; change it any time in Messages settings.
+          </Text>
+          <TextInput
+            value={cellDraft}
+            onChangeText={setCellDraft}
+            placeholder="Your cell, e.g. (816) 555-0100"
+            placeholderTextColor={colors.inkSoft}
+            keyboardType="phone-pad"
+            autoFocus
+            style={styles.setupInput}
+          />
+          <View style={styles.setupButtons}>
+            <Pressable
+              onPress={() => setSetupOpen(false)}
+              style={({ pressed }) => [styles.setupCancel, pressed && styles.pressed]}>
+              <Text style={styles.setupCancelText}>Not now</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => void saveCellAndCall()}
+              disabled={savingCell}
+              style={({ pressed }) => [styles.setupSave, (pressed || savingCell) && styles.pressed]}>
+              {savingCell ? (
+                <ActivityIndicator color={colors.ink} size="small" />
+              ) : (
+                <Text style={styles.setupSaveText}>Save & call</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
 
       {note ? (
         <Text
@@ -265,5 +360,38 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   textButtonLabel: { color: colors.ocean, fontSize: 13, fontWeight: '800' },
+  setup: {
+    backgroundColor: colors.white,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  setupTitle: { color: colors.ink, fontSize: 15, fontWeight: '800' },
+  setupBody: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', lineHeight: 18 },
+  setupInput: {
+    backgroundColor: colors.canvas,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  setupButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
+  setupCancel: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radii.pill },
+  setupCancelText: { color: colors.inkSoft, fontSize: 14, fontWeight: '700' },
+  setupSave: {
+    backgroundColor: colors.sun,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.pill,
+    minWidth: 110,
+    alignItems: 'center',
+  },
+  setupSaveText: { color: colors.ink, fontSize: 14, fontWeight: '800' },
   pressed: { opacity: 0.6 },
 });

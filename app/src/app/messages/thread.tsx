@@ -98,13 +98,16 @@ export default function ThreadScreen() {
   const stranger = !customerId && !contactId && !leadId;
 
   const startCall = async () => {
-    if (!canCall || callBusy) {
+    if (callBusy) return;
+    if (!phone) {
+      setCallNote('No number to dial.');
+      return;
+    }
+    if (!canCall) {
       setCallNote(
         !voiceReady
           ? NOT_CONFIGURED_VOICE
-          : !hasStaffNumber
-            ? 'Add your cell number in Messages settings — that is the phone we ring first.'
-            : 'No number to dial.',
+          : 'Twilio rings your cell first — tap Call on the Keypad once to save it, or add it in Messages settings.',
       );
       return;
     }
@@ -149,15 +152,15 @@ export default function ThreadScreen() {
           disabled={callBusy}
           style={({ pressed }) => [
             styles.callButton,
-            !canCall && styles.callButtonMuted,
+            !phone && styles.callButtonMuted,
             (pressed || callBusy) && styles.pressed,
           ]}>
           {callBusy ? (
             <ActivityIndicator color={colors.ink} size="small" />
           ) : (
             <>
-              <Ionicons name="call" size={14} color={canCall ? colors.ink : colors.inkSoft} />
-              <Text style={[styles.callButtonText, !canCall && styles.callButtonTextMuted]}>Call</Text>
+              <Ionicons name="call" size={14} color={phone ? colors.ink : colors.inkSoft} />
+              <Text style={[styles.callButtonText, !phone && styles.callButtonTextMuted]}>Call</Text>
             </>
           )}
         </Pressable>
