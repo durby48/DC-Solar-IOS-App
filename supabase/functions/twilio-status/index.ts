@@ -200,6 +200,20 @@ Deno.serve(async (req) => {
       await new Promise((resolve) => setTimeout(resolve, 800));
       row = await findRow();
     }
+    // In-app calls (twilio-voice-outbound) are logged on the PARENT CallSid —
+    // the client leg — while the <Number> leg's statusCallback reports its
+    // own child SID. ParentCallSid is how the outcome finds the row.
+    if (!row) {
+      const parentSid = form.get('ParentCallSid');
+      if (parentSid) {
+        const { data } = await admin
+          .from('messages')
+          .select('id, status')
+          .eq('twilio_sid', parentSid)
+          .maybeSingle();
+        row = (data as { id: string; status: string | null } | null) ?? null;
+      }
+    }
     if (row) {
       const finalPatch = { ...patch };
       if (typeof finalPatch.status === 'string' && row.status) {

@@ -26,6 +26,7 @@ import {
   type RecentCall,
   type StaffProfile,
 } from '@/lib/comms';
+import { inAppCallingSupported } from '@/lib/voice';
 
 /**
  * Phone → Recents. The call log, newest first, folded like iOS.
@@ -134,6 +135,13 @@ export default function RecentsScreen() {
   const redial = async (call: RecentCall) => {
     if (redialId) return;
     if (!call.customerId && !call.contactId && !call.phone) return;
+    if (voiceReady && inAppCallingSupported() && call.phone) {
+      const callParams: Record<string, string> = { to: call.phone, name: call.displayName };
+      if (call.customerId) callParams.customerId = call.customerId;
+      else if (call.contactId) callParams.contactId = call.contactId;
+      router.push({ pathname: '/call', params: callParams } as never);
+      return;
+    }
     if (!canCall) {
       setNote({
         kind: 'error',

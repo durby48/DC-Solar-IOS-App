@@ -26,6 +26,7 @@ import {
   type DirectoryEntry,
   type StaffProfile,
 } from '@/lib/comms';
+import { inAppCallingSupported } from '@/lib/voice';
 
 /**
  * Phone → Keypad. The default tab.
@@ -103,12 +104,23 @@ export default function KeypadScreen() {
 
   const gateNote = !voiceReady
     ? NOT_CONFIGURED_VOICE
-    : !hasStaffNumber
+    : !hasStaffNumber && !inAppCallingSupported()
       ? 'Calls go out on the DC Solar number. Twilio rings your cell first, then connects them — tap Call and it will ask for your cell once.'
       : null;
 
-  /** The Twilio bridge: rings your cell, then dials them as DC Solar. */
+  /**
+   * Place the call. On the web the app calls them itself (the active-call
+   * screen); on the phone, until Phase 4, the Twilio bridge rings your cell
+   * first and then dials them as DC Solar.
+   */
   const placeCall = async (to: string) => {
+    if (inAppCallingSupported()) {
+      const callParams: Record<string, string> = { to, name: primary?.displayName ?? formatPhone(to) };
+      if (primary?.source === 'customer') callParams.customerId = primary.id;
+      else if (primary?.source === 'contact') callParams.contactId = primary.id;
+      router.push({ pathname: '/call', params: callParams } as never);
+      return;
+    }
     setCalling(true);
     setNote({ kind: 'info', text: 'Ringing your cell…' });
     const result = await placeBridgeCall({
@@ -134,7 +146,8 @@ export default function KeypadScreen() {
       setNote({ kind: 'error', text: NOT_CONFIGURED_VOICE });
       return;
     }
-    if (!hasStaffNumber) {
+    // The bridge needs a cell to ring first; the in-app call does not.
+    if (!hasStaffNumber && !inAppCallingSupported()) {
       setSetupOpen(true);
       setNote(null);
       return;

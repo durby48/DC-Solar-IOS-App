@@ -233,6 +233,35 @@ once, in **CRM → Settings → My cell number**. That writes `staff_profiles`;
 `twilio-call` refuses with *"Add your cell number in CRM settings first"* until
 it exists, because there is no safe number to guess.
 
+## 7. In-app calling from the browser — API key + TwiML App (Devon, ~10 min)
+
+Added 2026-09-06. On app.dcsolarkc.com the app places calls ITSELF (Twilio
+Voice JS SDK, audio through the computer, the DC Solar number as caller ID,
+an active-call screen with Mute / Keypad / End) — no bridge leg. Until the
+three secrets below exist, `twilio-voice-token` answers 503 `not_configured`
+and the call screen offers the bridge instead. The phone app keeps the bridge
+until Phase 4 (native SDK = new App Store build).
+
+1. **API Key.** Console → **Account → API keys & tokens → Create API key**.
+   Friendly name `dc-solar-app-voice`, type **Standard**. Copy the **SID**
+   (`SK…`) → `TWILIO_API_KEY_SID`, and the **Secret** → `TWILIO_API_KEY_SECRET`
+   — the secret is shown ONCE. Access tokens are signed with this secret, not
+   the auth token.
+2. **TwiML App.** Console → **Voice → TwiML Apps → Create new TwiML App**.
+   Friendly name `DC Solar KC app`. **Voice Configuration → Request URL**,
+   method **POST**:
+   ```
+   https://kjamxfezsathrsbztiln.supabase.co/functions/v1/twilio-voice-outbound?k=<TWILIO_WEBHOOK_SECRET>
+   ```
+   (same `?k=` string as the inbound webhook, exactly). Leave Messaging
+   blank. Copy the **SID** (`AP…`) → `TWILIO_TWIML_APP_SID`.
+3. Set the three secrets — the secret itself in the Supabase dashboard
+   (Project Settings → Edge Functions → Secrets), never in chat or git; the
+   two SIDs can go through the same `POST …/secrets` call as step 5.
+4. Test: Phone → Keypad on the web, dial your own cell, tap Call. The browser
+   asks for the microphone once; your cell rings showing (816) 744-6473;
+   the call screen shows the timer; Recents shows the call afterwards.
+
 ---
 
 ## The four edge functions

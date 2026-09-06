@@ -29,6 +29,7 @@ import {
   type DirectorySource,
   type StaffProfile,
 } from '@/lib/comms';
+import { inAppCallingSupported } from '@/lib/voice';
 
 /**
  * Phone → Contacts. Everybody the crew dials, A–Z, from `phone_directory()`.
@@ -147,6 +148,13 @@ export default function ContactsScreen() {
 
   const call = async (entry: DirectoryEntry) => {
     if (!entry.phoneE164 || callingKey) return;
+    if (voiceReady && inAppCallingSupported()) {
+      const callParams: Record<string, string> = { to: entry.phoneE164, name: entry.displayName };
+      if (entry.source === 'customer') callParams.customerId = entry.id;
+      else if (entry.source === 'contact') callParams.contactId = entry.id;
+      router.push({ pathname: '/call', params: callParams } as never);
+      return;
+    }
     if (!canCall) {
       // Every call goes through Twilio, and Twilio rings your cell first. No
       // cell saved → the keypad asks for it once; send them there.

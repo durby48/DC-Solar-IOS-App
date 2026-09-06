@@ -21,6 +21,7 @@ import {
 import { fetchCustomerById } from '@/lib/crm';
 import { useRole } from '@/lib/role';
 import { type Customer } from '@/lib/types';
+import { inAppCallingSupported } from '@/lib/voice';
 
 /**
  * `/messages/thread` — one conversation, pushed over everything like a
@@ -101,6 +102,13 @@ export default function ThreadScreen() {
     if (callBusy) return;
     if (!phone) {
       setCallNote('No number to dial.');
+      return;
+    }
+    if (voiceReady && inAppCallingSupported()) {
+      const callParams: Record<string, string> = { to: phone, name };
+      if (customerId) callParams.customerId = customerId;
+      else if (contactId) callParams.contactId = contactId;
+      router.push({ pathname: '/call', params: callParams } as never);
       return;
     }
     if (!canCall) {

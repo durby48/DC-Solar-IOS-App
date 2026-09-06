@@ -144,6 +144,12 @@ export default function RootLayout() {
               screens (the person's name). */}
           <Stack.Screen name="messages/thread" options={{ title: 'Conversation' }} />
           <Stack.Screen name="messages/compose" options={{ title: 'New Message' }} />
+          {/* The active-call screen. Full-bleed olive, no header; End is the
+              only way out while a call is live. */}
+          <Stack.Screen
+            name="call"
+            options={{ headerShown: false, presentation: 'modal', gestureEnabled: false }}
+          />
           <Stack.Screen name="leads/index" options={{ title: 'Sales Pipeline' }} />
           <Stack.Screen name="leads/[id]" options={{ title: 'Lead' }} />
           <Stack.Screen name="document-builder" options={{ title: 'New document' }} />
