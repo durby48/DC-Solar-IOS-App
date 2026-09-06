@@ -26,6 +26,7 @@ import { StatusPill } from '@/components/StatusPill';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { fetchEnrolledCustomerIds, inviteCustomer } from '@/lib/account';
 import {
+  MMS_MAX_ATTACHMENTS,
   NOT_CONFIGURED_SMS,
   NOT_CONFIGURED_VOICE,
   buildTemplateVars,
@@ -39,6 +40,7 @@ import {
   placeBridgeCall,
   renderTemplate,
   sendSms,
+  uploadMmsAttachment,
   useCommsRealtime,
   type CommsMessage,
   type CommsSettings,
@@ -276,6 +278,10 @@ export default function CustomerDetailScreen() {
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [staffProfile, setStaffProfile] = useState<StaffProfile | null>(null);
   const [composer, setComposer] = useState('');
+  // Pictures waiting to go with the next text. `path` is the storage path
+  // the server signs; `uri` is the local file, for the thumbnail only.
+  const [attachments, setAttachments] = useState<{ path: string; uri: string }[]>([]);
+  const [attaching, setAttaching] = useState(false);
   const [sending, setSending] = useState(false);
   const [callBusy, setCallBusy] = useState(false);
   const [callNote, setCallNote] = useState<string | null>(null);
@@ -564,20 +570,62 @@ export default function CustomerDetailScreen() {
   const sendText = async () => {
     if (!customer) return;
     const body = composer.trim();
-    if (!body) return;
+    if (!body && attachments.length === 0) return;
     setStatus(null);
     setSending(true);
     const result = await sendSms({
       customerId: customer.id,
       body,
       jobId: jobs[0]?.id,
+      mediaPaths: attachments.map((a) => a.path),
     });
     setSending(false);
     if (result.ok) {
       setComposer('');
+      setAttachments([]);
       await loadComms();
     } else {
       notify(setStatus, 'error', 'Not sent', result.message);
+    }
+  };
+
+  /**
+   * Pick pictures for the next text. Each one is compressed and uploaded to
+   * storage NOW, so by the time Send is pressed the server only has paths to
+   * sign — a slow upload happens while the person is still typing, not while
+   * they are waiting on a spinner. Twilio's cap is ten per message.
+   */
+  const pickAttachments = async () => {
+    if (!customer) return;
+    const room = MMS_MAX_ATTACHMENTS - attachments.length;
+    if (room <= 0) {
+      notify(setStatus, 'error', 'Too many pictures', `A text can carry up to ${MMS_MAX_ATTACHMENTS}.`);
+      return;
+    }
+    setStatus(null);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: room,
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      setAttaching(true);
+      let firstError: string | null = null;
+      for (const asset of result.assets.slice(0, room)) {
+        const upload = await uploadMmsAttachment({ uri: asset.uri, contentType: asset.mimeType });
+        if (upload.ok) {
+          setAttachments((prev) => [...prev, { path: upload.path, uri: asset.uri }]);
+        } else if (!firstError) {
+          firstError = upload.message;
+        }
+      }
+      setAttaching(false);
+      if (firstError) notify(setStatus, 'error', 'Picture not attached', firstError);
+    } catch {
+      setAttaching(false);
+      notify(setStatus, 'error', 'Picture not attached', 'Something went wrong. Please try again.');
     }
   };
 
@@ -1644,34 +1692,87 @@ export default function CustomerDetailScreen() {
       )}
     </View>
   ) : (
-    <View style={styles.composer}>
-      <Pressable
-        onPress={() => setShowTemplates((v) => !v)}
-        style={({ pressed }) => [styles.templateChip, pressed && styles.pressed]}>
-        <Ionicons name="albums" size={14} color={colors.ocean} />
-        <Text style={styles.templateChipText}>Templates</Text>
-      </Pressable>
-      <TextInput
-        value={composer}
-        onChangeText={setComposer}
-        placeholder={`Text ${customer.name.split(' ')[0] ?? customer.name}`}
-        placeholderTextColor={colors.inkSoft}
-        multiline
-        style={styles.composerInput}
-      />
-      <Pressable
-        onPress={() => void sendText()}
-        disabled={sending || composer.trim().length === 0}
-        style={({ pressed }) => [
-          styles.sendButton,
-          (pressed || sending || composer.trim().length === 0) && styles.pressed,
-        ]}>
-        {sending ? (
-          <ActivityIndicator color={colors.ink} size="small" />
-        ) : (
-          <Ionicons name="send" size={16} color={colors.ink} />
-        )}
-      </Pressable>
+    <View style={styles.composerWrap}>
+      {attachments.length > 0 || attaching ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.attachStrip}>
+          {attachments.map((attachment) => (
+            <View key={attachment.path} style={styles.attachThumb}>
+              <Image
+                source={{ uri: attachment.uri }}
+                style={styles.attachThumbImage}
+                contentFit="cover"
+              />
+              <Pressable
+                onPress={() =>
+                  setAttachments((prev) => prev.filter((a) => a.path !== attachment.path))
+                }
+                hitSlop={6}
+                accessibilityLabel="Remove picture"
+                style={({ pressed }) => [styles.attachRemove, pressed && styles.pressed]}>
+                <Ionicons name="close" size={12} color={colors.white} />
+              </Pressable>
+            </View>
+          ))}
+          {attaching ? (
+            <View style={[styles.attachThumb, styles.attachThumbBusy]}>
+              <ActivityIndicator color={colors.ocean} size="small" />
+            </View>
+          ) : null}
+        </ScrollView>
+      ) : null}
+      <View style={styles.composer}>
+        <Pressable
+          onPress={() => void pickAttachments()}
+          disabled={attaching || sending}
+          accessibilityLabel="Attach a picture"
+          style={({ pressed }) => [styles.attachButton, (pressed || attaching) && styles.pressed]}>
+          <Ionicons name="image" size={16} color={colors.ocean} />
+          {attachments.length > 0 ? (
+            <Text style={styles.attachCount}>{attachments.length}</Text>
+          ) : null}
+        </Pressable>
+        <Pressable
+          onPress={() => setShowTemplates((v) => !v)}
+          style={({ pressed }) => [styles.templateChip, pressed && styles.pressed]}>
+          <Ionicons name="albums" size={14} color={colors.ocean} />
+          <Text style={styles.templateChipText}>Templates</Text>
+        </Pressable>
+        <TextInput
+          value={composer}
+          onChangeText={setComposer}
+          placeholder={
+            attachments.length > 0
+              ? 'Add a note (optional)'
+              : `Text ${customer.name.split(' ')[0] ?? customer.name}`
+          }
+          placeholderTextColor={colors.inkSoft}
+          multiline
+          style={styles.composerInput}
+        />
+        <Pressable
+          onPress={() => void sendText()}
+          disabled={
+            sending || attaching || (composer.trim().length === 0 && attachments.length === 0)
+          }
+          style={({ pressed }) => [
+            styles.sendButton,
+            (pressed ||
+              sending ||
+              attaching ||
+              (composer.trim().length === 0 && attachments.length === 0)) &&
+              styles.pressed,
+          ]}>
+          {sending ? (
+            <ActivityIndicator color={colors.ink} size="small" />
+          ) : (
+            <Ionicons name="send" size={16} color={colors.ink} />
+          )}
+        </Pressable>
+      </View>
     </View>
   );
 
@@ -2302,14 +2403,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 
+  // The hairline moved up to `composerWrap` so it sits above the picture
+  // strip when there is one, not between the strip and the box.
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: spacing.sm,
     padding: spacing.md,
     backgroundColor: colors.white,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
   },
   composerInput: {
     flex: 1,
@@ -2341,6 +2442,61 @@ const styles = StyleSheet.create({
     backgroundColor: colors.sun,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  composerWrap: {
+    backgroundColor: colors.white,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.tan,
+  },
+  attachStrip: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+  },
+  attachThumb: {
+    width: 64,
+    height: 64,
+    borderRadius: radii.sm,
+    backgroundColor: colors.slateSoft,
+    overflow: 'hidden',
+  },
+  attachThumbBusy: { alignItems: 'center', justifyContent: 'center' },
+  attachThumbImage: { width: '100%', height: '100%' },
+  attachRemove: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(61,53,46,0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachButton: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.pill,
+    backgroundColor: colors.skySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachCount: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.ocean,
+    color: colors.white,
+    fontSize: 10,
+    fontWeight: '800',
+    textAlign: 'center',
+    lineHeight: 16,
+    paddingHorizontal: 3,
+    overflow: 'hidden',
   },
 
   templateSheet: {
