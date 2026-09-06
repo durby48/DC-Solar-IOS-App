@@ -101,6 +101,9 @@ export default function PhoneLayout() {
         tabBarLabelStyle: { fontFamily: fonts.bold, fontSize: 11 },
         sceneStyle: { backgroundColor: colors.cream },
       }}>
+      {/* `/phone` → keypad. Exists so a hard load of the bare path has a
+          page to serve; hidden from the bar so it is not a fifth tab. */}
+      <Tabs.Screen name="index" options={{ href: null }} />
       <Tabs.Screen
         name="contacts"
         options={{
