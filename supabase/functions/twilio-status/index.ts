@@ -28,6 +28,28 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+/**
+ * How far along each Twilio status is, message and call lifecycles sharing
+ * one scale. Used only to refuse a status update that would move a row
+ * BACKWARD — see the comment at the update site for why that is a real,
+ * observed failure mode and not theoretical.
+ */
+const STATUS_RANK: Record<string, number> = {
+  accepted: 0,
+  queued: 1,
+  sending: 2,
+  ringing: 1,
+  'in-progress': 2,
+  sent: 3,
+  completed: 3,
+  busy: 3,
+  'no-answer': 3,
+  canceled: 3,
+  delivered: 4,
+  undelivered: 4,
+  failed: 4,
+};
+
 function noContent(): Response {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
@@ -144,10 +166,57 @@ Deno.serve(async (req) => {
 
     if (Object.keys(patch).length === 0) return noContent();
 
-    // No .single() and no error check on purpose: a SID we have never seen
-    // (a call placed from the Twilio console, a message from another app on
-    // the same account) updates zero rows and that is a success.
-    await admin.from('messages').update(patch).eq('twilio_sid', sid);
+    // Twilio fires this webhook once per state transition and does NOT
+    // guarantee delivery order — proven live on 2026-09-06: for one message,
+    // "sent" and "delivered" both arrived and landed correctly, then "queued"
+    // (the FIRST real state) arrived last over the network and silently
+    // overwrote "delivered" back down, because the naive version of this
+    // function just wrote whatever status showed up most recently. A rank
+    // guard below stops a late, stale callback from undoing a more advanced
+    // one it raced past.
+    //
+    // No .single() / no "not found" error on purpose: a SID we have never
+    // seen (a call placed from the Twilio console, a message from another app
+    // on the same account) is a no-op, not a bug.
+    //
+    // ONE RETRY ON A MISS, because there is a SEPARATE real race: twilio-
+    // send-sms inserts the row, calls Twilio, THEN stamps twilio_sid onto
+    // it — and a fast callback (observed arriving well under a second after
+    // the send) can reach here before that second write lands. One short
+    // wait closes the window; Twilio tolerates several seconds before it
+    // considers the webhook itself failed, so this does not risk a retry
+    // storm.
+    const findRow = async (): Promise<{ id: string; status: string | null } | null> => {
+      const { data } = await admin
+        .from('messages')
+        .select('id, status')
+        .eq('twilio_sid', sid)
+        .maybeSingle();
+      return (data as { id: string; status: string | null } | null) ?? null;
+    };
+
+    let row = await findRow();
+    if (!row) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      row = await findRow();
+    }
+    if (row) {
+      const finalPatch = { ...patch };
+      if (typeof finalPatch.status === 'string' && row.status) {
+        const incoming = STATUS_RANK[finalPatch.status];
+        const existing = STATUS_RANK[row.status];
+        // Only compare when BOTH statuses are ones we recognize. An unranked
+        // status is a Twilio value we have not accounted for — apply it
+        // rather than silently drop it, same philosophy as the column having
+        // no CHECK constraint at all.
+        if (incoming !== undefined && existing !== undefined && incoming < existing) {
+          delete finalPatch.status;
+        }
+      }
+      if (Object.keys(finalPatch).length > 0) {
+        await admin.from('messages').update(finalPatch).eq('id', row.id);
+      }
+    }
 
     return noContent();
   } catch (e) {
