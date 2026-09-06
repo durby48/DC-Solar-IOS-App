@@ -96,7 +96,13 @@ export const HUB_ITEMS: readonly HubItem[] = [
 
   // ---- Customers ----
   { key: 'customers', title: 'Customers', icon: 'people', href: '/customers', group: 'customers', tone: 0, gate: 'all', badge: 'unread' },
-  { key: 'messages', title: 'Messages', icon: 'chatbubbles', href: '/crm/inbox', group: 'customers', tone: 7, gate: 'all', badge: 'unread' },
+  // Phone replaced the Messages tile on 2026-09-06: the inbox is now a tab
+  // inside it (Contacts · Keypad · Recents · Messages), and two tiles into
+  // the same inbox would be clutter. Keeps Messages' tone so the Home grid's
+  // colour rhythm does not shift. Admin-gated by Devon's decision; RLS is
+  // what actually stops a crew member, this only stops the tile appearing.
+  // href cast until the dev server regenerates typed routes for /phone.
+  { key: 'phone', title: 'Phone', icon: 'call', href: '/phone' as never, group: 'customers', tone: 7, gate: 'admin', badge: 'unread' },
 
   // ---- Employee ----
   { key: 'hours', title: 'Hours', icon: 'time', href: '/hours', group: 'employee', tone: 1, gate: 'admin' },

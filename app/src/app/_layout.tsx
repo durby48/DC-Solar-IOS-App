@@ -136,6 +136,9 @@ export default function RootLayout() {
           <Stack.Screen name="customer" options={{ headerShown: false, gestureEnabled: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="job/[id]" options={{ title: 'Job' }} />
+          {/* The phone app: a nested Tabs navigator. This header (title +
+              back arrow) is the only one it shows; the tabs hide theirs. */}
+          <Stack.Screen name="phone" options={{ title: 'Phone' }} />
           <Stack.Screen name="leads/index" options={{ title: 'Sales Pipeline' }} />
           <Stack.Screen name="leads/[id]" options={{ title: 'Lead' }} />
           <Stack.Screen name="document-builder" options={{ title: 'New document' }} />

@@ -26,19 +26,42 @@
  *   `useFocusEffect` refetch: a socket that silently died must cost a stale
  *   screen for a few seconds, not a lost message.
  *
- * TWILIO IS NOT CONNECTED YET. Every send and every call returns HTTP 503 with
- * `code: 'not_configured'` today. That is the expected answer, not a bug, and
- * it is mapped to NOT_CONFIGURED_SMS / NOT_CONFIGURED_VOICE below so the UI
- * says one honest sentence instead of leaking an edge-function stack trace.
+ * TWILIO WENT LIVE ON 2026-09-06 (A2P campaign verified, texts proven both
+ * ways). The 503 `not_configured` path still exists and still matters: it is
+ * what every screen shows if `comms_settings.sms_enabled` is ever switched
+ * off again, and NOT_CONFIGURED_SMS / NOT_CONFIGURED_VOICE below are the one
+ * honest sentence for that state rather than an edge-function stack trace.
+ *
+ * THE PHONE SECTION (2026-09-06) reads three more things from here: the
+ * directory (`fetchDirectory`, one server-side union of customers, leads,
+ * crew and suppliers), the call log (`fetchRecents`, folded like iOS), and
+ * the third thread slot — `messages.contact_id`, for suppliers/vendors in
+ * the new `contacts` table.
+ *
+ * PICTURES GO OUT AS STORAGE PATHS, NEVER URLS. `uploadMmsAttachment` puts
+ * the compressed file in the private job-photos bucket under `mms/` and
+ * hands back the path; `twilio-send-sms` signs it server-side. Rows keep the
+ * paths in `media_urls`, and `fetchThread` signs them again for display —
+ * one batched call per thread, the way lib/artwork.ts signs pipeline cards.
  */
 
 import { useEffect, useRef } from 'react';
 
 import { readFunctionError } from '@/lib/artwork';
 import { COMPANY_PHONE } from '@/lib/company';
+import { compressForUpload } from '@/lib/images';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
+
+/** Where outbound MMS pictures live. No new bucket, no new storage policies. */
+const MEDIA_BUCKET = 'job-photos';
+/** Display signing for thread bubbles. The thread refetches on focus anyway. */
+const MEDIA_DISPLAY_TTL = 3600;
+/** Twilio's per-message ceiling. */
+export const MMS_MAX_ATTACHMENTS = 10;
+/** Twilio's per-picture ceiling is 5 MB; we compress well under it first. */
+export const MMS_MAX_BYTES = 5 * 1024 * 1024;
 
 /**
  * How much history one inbox pull walks. The thread list only needs the newest
@@ -58,7 +81,7 @@ export const NOT_CONFIGURED_VOICE =
   "Calling from the DC Solar number isn't set up yet — see docs/TWILIO_SETUP.md";
 
 const MESSAGE_COLUMNS =
-  'id, created_at, company, customer_id, lead_id, job_id, channel, direction, from_number, ' +
+  'id, created_at, company, customer_id, lead_id, contact_id, job_id, channel, direction, from_number, ' +
   'to_number, body, status, twilio_sid, error_code, error, sent_by, num_segments, media_urls, ' +
   'duration_seconds, read_at, read_by';
 
@@ -85,6 +108,8 @@ export interface CommsMessage {
   company: string;
   customer_id: string | null;
   lead_id: string | null;
+  /** A supplier / vendor from `contacts` — the third thread slot (2026-09-06). */
+  contact_id: string | null;
   job_id: string | null;
   channel: MessageChannel;
   direction: MessageDirection;
@@ -97,7 +122,12 @@ export interface CommsMessage {
   error: string | null;
   sent_by: string | null;
   num_segments: number | null;
-  /** MMS attachments. `media_urls` is jsonb in the database; always an array here. */
+  /**
+   * MMS attachments, ready to display. `media_urls` is jsonb in the database
+   * and holds Twilio's own URLs for inbound pictures and STORAGE PATHS for
+   * outbound ones; `fetchThread` signs the paths so this is always an array
+   * of loadable URLs by the time a screen sees it.
+   */
   media_urls: string[];
   duration_seconds: number | null;
   read_at: string | null;
@@ -106,9 +136,14 @@ export interface CommsMessage {
 
 /** One row in the inbox: everything said to and by one person. */
 export interface CommsThread {
-  /** Stable list key: the customer id, or `num:+18165550123` for a stranger. */
+  /**
+   * Stable list key: the customer id, `contact:<id>` for a supplier, or
+   * `num:+18165550123` for a stranger.
+   */
   key: string;
   customerId: string | null;
+  /** Set when the far end is a supplier / vendor rather than a customer. */
+  contactId: string | null;
   /** The customer's name, or the E.164 number when nobody has claimed it. */
   displayName: string;
   /** The far end of the conversation, E.164 where we could work it out. */
@@ -202,6 +237,7 @@ function toMessage(row: Record<string, unknown>): CommsMessage {
     company: (row.company as string) ?? COMPANY,
     customer_id: (row.customer_id as string | null) ?? null,
     lead_id: (row.lead_id as string | null) ?? null,
+    contact_id: (row.contact_id as string | null) ?? null,
     job_id: (row.job_id as string | null) ?? null,
     channel: (row.channel as MessageChannel) ?? 'sms',
     direction: (row.direction as MessageDirection) ?? 'out',
@@ -530,6 +566,7 @@ export async function fetchThreads(): Promise<CommsThread[]> {
     interface Draft {
       key: string;
       customerId: string | null;
+      contactId: string | null;
       phone: string | null;
       last: CommsMessage;
       unread: number;
@@ -538,7 +575,13 @@ export async function fetchThreads(): Promise<CommsThread[]> {
 
     for (const message of messages) {
       const phone = counterpartNumber(message);
-      const key = message.customer_id ? message.customer_id : phone ? `num:${phone}` : 'num:unknown';
+      const key = message.customer_id
+        ? message.customer_id
+        : message.contact_id
+          ? `contact:${message.contact_id}`
+          : phone
+            ? `num:${phone}`
+            : 'num:unknown';
       const existing = drafts.get(key);
       if (existing) {
         // The scan is newest-first, so the first row wins as `last`.
@@ -548,6 +591,7 @@ export async function fetchThreads(): Promise<CommsThread[]> {
         drafts.set(key, {
           key,
           customerId: message.customer_id,
+          contactId: message.customer_id ? null : message.contact_id,
           phone,
           last: message,
           unread: message.direction === 'in' && !message.read_at ? 1 : 0,
@@ -555,36 +599,62 @@ export async function fetchThreads(): Promise<CommsThread[]> {
       }
     }
 
-    // One name lookup for every customer that appears in the scan.
+    // One name lookup for every customer that appears in the scan, and one
+    // for every supplier. Still two queries, never N+1.
     const customerIds = [...drafts.values()]
       .map((d) => d.customerId)
       .filter((id): id is string => typeof id === 'string');
+    const contactIds = [...drafts.values()]
+      .map((d) => d.contactId)
+      .filter((id): id is string => typeof id === 'string');
     const names = new Map<string, { name: string; optedOut: boolean; phone: string | null }>();
-    if (customerIds.length > 0) {
-      const { data: rows } = await supabase
-        .from('customers')
-        .select('id, name, phone_e164, sms_opt_out_at')
-        .in('id', customerIds);
-      for (const row of (rows ?? []) as Record<string, unknown>[]) {
-        names.set(String(row.id), {
-          name: (row.name as string) ?? 'Customer',
-          optedOut: row.sms_opt_out_at != null,
-          phone: (row.phone_e164 as string | null) ?? null,
-        });
-      }
-    }
+    const contactNames = new Map<string, { name: string; phone: string | null }>();
+    await Promise.all([
+      (async () => {
+        if (customerIds.length === 0) return;
+        const { data: rows } = await supabase
+          .from('customers')
+          .select('id, name, phone_e164, sms_opt_out_at')
+          .in('id', customerIds);
+        for (const row of (rows ?? []) as Record<string, unknown>[]) {
+          names.set(String(row.id), {
+            name: (row.name as string) ?? 'Customer',
+            optedOut: row.sms_opt_out_at != null,
+            phone: (row.phone_e164 as string | null) ?? null,
+          });
+        }
+      })(),
+      (async () => {
+        if (contactIds.length === 0) return;
+        const { data: rows } = await supabase
+          .from('contacts')
+          .select('id, name, org, phone_e164')
+          .in('id', contactIds);
+        for (const row of (rows ?? []) as Record<string, unknown>[]) {
+          const org = (row.org as string | null) ?? null;
+          const name = (row.name as string) ?? 'Contact';
+          contactNames.set(String(row.id), {
+            name: org && org !== name ? `${name} · ${org}` : name,
+            phone: (row.phone_e164 as string | null) ?? null,
+          });
+        }
+      })(),
+    ]);
 
     const threads: CommsThread[] = [...drafts.values()].map((draft) => {
       const record = draft.customerId ? names.get(draft.customerId) : undefined;
-      const phone = draft.phone ?? record?.phone ?? null;
+      const contact = draft.contactId ? contactNames.get(draft.contactId) : undefined;
+      const phone = draft.phone ?? record?.phone ?? contact?.phone ?? null;
       return {
         key: draft.key,
         customerId: draft.customerId,
-        displayName: record?.name ?? (phone ? formatPhone(phone) : 'Unknown number'),
+        contactId: contact ? draft.contactId : null,
+        displayName:
+          record?.name ?? contact?.name ?? (phone ? formatPhone(phone) : 'Unknown number'),
         phone,
         // A row can carry a customer_id whose customer has since been merged
         // away; if we could not read a name it behaves like a stranger.
-        unknown: !record,
+        unknown: !record && !contact,
         lastMessage: draft.last,
         lastAt: draft.last.created_at,
         preview: previewFor(draft.last),
@@ -626,21 +696,27 @@ export function formatDuration(seconds: number): string {
 /**
  * One conversation, oldest first — the order a chat reads in.
  *
- * `customerId` may be a customer id or, for a stranger, their E.164 number;
- * pass `byPhone` to say which. The unknown-number case matches on both ends of
- * the row because an outbound text to a stranger stores them in `to_number`
- * while their reply stores them in `from_number`.
+ * `customerId` may be a customer id, a contact id (`byContact`), or, for a
+ * stranger, their E.164 number (`byPhone`). The unknown-number case matches
+ * on both ends of the row because an outbound text to a stranger stores them
+ * in `to_number` while their reply stores them in `from_number`.
+ *
+ * Outbound pictures come back as storage paths and are signed here, in one
+ * batched call, so every screen that renders a thread gets loadable URLs.
  */
 export async function fetchThread(
   customerId: string,
-  options?: { byPhone?: boolean },
+  options?: { byPhone?: boolean; byContact?: boolean },
 ): Promise<CommsMessage[]> {
   try {
     let query = supabase.from('messages').select(MESSAGE_COLUMNS).eq('company', COMPANY);
     if (options?.byPhone) {
       query = query
         .is('customer_id', null)
+        .is('contact_id', null)
         .or(`from_number.eq.${customerId},to_number.eq.${customerId}`);
+    } else if (options?.byContact) {
+      query = query.eq('contact_id', customerId);
     } else {
       query = query.eq('customer_id', customerId);
     }
@@ -648,10 +724,55 @@ export async function fetchThread(
       .order('created_at', { ascending: true })
       .limit(THREAD_LIMIT);
     if (error || !data) return [];
-    return (data as unknown as Record<string, unknown>[]).map(toMessage);
+    return signMediaPaths((data as unknown as Record<string, unknown>[]).map(toMessage));
   } catch {
     return [];
   }
+}
+
+/**
+ * Storage paths in `media_urls` → signed display URLs.
+ *
+ * Inbound MMS carries Twilio's own https URLs and passes through untouched;
+ * outbound rows hold `mms/…` paths in the job-photos bucket, because a signed
+ * URL expires and a path does not. ONE `createSignedUrls` call for the whole
+ * thread — signing per bubble is a storage request per picture on a screen
+ * that has to feel like a chat. A path that fails to sign is dropped rather
+ * than rendered as a broken image.
+ */
+export async function signMediaPaths(messages: CommsMessage[]): Promise<CommsMessage[]> {
+  const paths = new Set<string>();
+  for (const message of messages) {
+    for (const entry of message.media_urls) {
+      if (!/^https?:\/\//i.test(entry)) paths.add(entry);
+    }
+  }
+  if (paths.size === 0) return messages;
+
+  const list = [...paths];
+  const signed = new Map<string, string>();
+  try {
+    const { data } = await supabase.storage
+      .from(MEDIA_BUCKET)
+      .createSignedUrls(list, MEDIA_DISPLAY_TTL);
+    (data ?? []).forEach((entry, index) => {
+      const url = (entry as { signedUrl?: string | null }).signedUrl;
+      const path = list[index];
+      if (url && path) signed.set(path, url);
+    });
+  } catch {
+    // Everything below falls back to "no picture" for the unsigned paths.
+  }
+
+  return messages.map((message) => {
+    if (!message.media_urls.some((entry) => paths.has(entry))) return message;
+    return {
+      ...message,
+      media_urls: message.media_urls
+        .map((entry) => (paths.has(entry) ? (signed.get(entry) ?? null) : entry))
+        .filter((entry): entry is string => typeof entry === 'string'),
+    };
+  });
 }
 
 /**
@@ -715,11 +836,20 @@ export async function fetchUnreadCount(): Promise<number> {
 export interface SendSmsInput {
   customerId?: string;
   leadId?: string;
+  /** A supplier / vendor from `contacts`. */
+  contactId?: string;
   /** A bare number, for a stranger or a test to yourself. */
   to?: string;
+  /** May be empty when `mediaPaths` is not. */
   body: string;
   jobId?: string;
   templateKey?: string;
+  /**
+   * Storage PATHS from `uploadMmsAttachment` — never URLs. The server signs
+   * them; a client that could pass a URL could make the company number send
+   * anything on the internet to a customer.
+   */
+  mediaPaths?: string[];
 }
 
 /**
@@ -737,10 +867,12 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
       body: {
         customerId: input.customerId,
         leadId: input.leadId,
+        contactId: input.contactId,
         to: input.to,
         body: input.body,
         jobId: input.jobId,
         templateKey: input.templateKey,
+        mediaPaths: input.mediaPaths && input.mediaPaths.length > 0 ? input.mediaPaths : undefined,
       },
     });
     if (error) {
@@ -776,6 +908,8 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
 
 export interface PlaceCallInput {
   customerId?: string;
+  /** A supplier / vendor from `contacts`. */
+  contactId?: string;
   to?: string;
   jobId?: string;
 }
@@ -791,7 +925,12 @@ export interface PlaceCallInput {
 export async function placeBridgeCall(input: PlaceCallInput): Promise<CallResult> {
   try {
     const { data, error } = await supabase.functions.invoke('twilio-call', {
-      body: { customerId: input.customerId, to: input.to, jobId: input.jobId },
+      body: {
+        customerId: input.customerId,
+        contactId: input.contactId,
+        to: input.to,
+        jobId: input.jobId,
+      },
     });
     if (error) {
       const payload = await readFunctionPayload(error);
@@ -821,6 +960,324 @@ export async function placeBridgeCall(input: PlaceCallInput): Promise<CallResult
     };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'The call could not be placed.' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pictures (outbound MMS)
+// ---------------------------------------------------------------------------
+
+export type MmsUploadResult =
+  | { ok: true; path: string; bytes: number }
+  | { ok: false; message: string };
+
+/**
+ * Put one picked image where `twilio-send-sms` can sign it, and hand back
+ * the storage PATH to pass as `mediaPaths`.
+ *
+ * Compressed first with the same `compressForUpload` every other upload in
+ * the app uses — a 6 MB camera JPEG is over Twilio's per-picture limit and
+ * would be refused at send time, after the customer's thread already showed
+ * it as sending. Lives under `mms/` in the private job-photos bucket so no
+ * new bucket and no new storage policy is needed; the `mms/` prefix is also
+ * exactly what the edge function will accept and nothing else.
+ */
+export async function uploadMmsAttachment(input: {
+  uri: string;
+  contentType?: string | null;
+}): Promise<MmsUploadResult> {
+  try {
+    const compressed = await compressForUpload(input.uri);
+    const response = await fetch(compressed.uri);
+    const body = await response.arrayBuffer();
+    if (body.byteLength > MMS_MAX_BYTES) {
+      return {
+        ok: false,
+        message: `That picture is ${(body.byteLength / (1024 * 1024)).toFixed(1)} MB; texts can carry up to 5 MB each.`,
+      };
+    }
+    // Always JPEG after compression; only when compression was skipped does
+    // the picker's own type survive, and it still has to be an image.
+    const contentType = compressed.compressed
+      ? 'image/jpeg'
+      : (input.contentType ?? 'image/jpeg');
+    const ext = contentType === 'image/png' ? 'png' : contentType === 'image/gif' ? 'gif' : contentType === 'image/webp' ? 'webp' : 'jpg';
+    const stamp = new Date().toISOString().slice(0, 7).replace('-', '/');
+    const id =
+      typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const path = `mms/${stamp}/${id}.${ext}`;
+
+    const { error } = await supabase.storage
+      .from(MEDIA_BUCKET)
+      .upload(path, body, { contentType, upsert: false });
+    if (error) return { ok: false, message: error.message || 'Could not upload the picture.' };
+    return { ok: true, path, bytes: body.byteLength };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not upload the picture.' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Directory (Phone → Contacts, and the keypad's live match)
+// ---------------------------------------------------------------------------
+
+export type DirectorySource = 'customer' | 'lead' | 'crew' | 'contact';
+
+/** One row of `phone_directory()`. */
+export interface DirectoryEntry {
+  source: DirectorySource;
+  id: string;
+  displayName: string;
+  /** Address for a customer, status for a lead, role for crew, org for a contact. */
+  subtitle: string | null;
+  /** Null when the record has no usable US number — shown greyed, not hidden. */
+  phoneE164: string | null;
+  sortKey: string;
+  archived: boolean;
+}
+
+/**
+ * Everybody the Phone section can dial, A–Z, de-duplicated by handset.
+ *
+ * One SECURITY DEFINER function rather than four queries: the sort and the
+ * de-dup happen once, server-side, and the function re-checks
+ * `is_company_admin()` itself — so a crew member's cell number never
+ * reaches a non-admin client. Empty for viewers, for the signed-out, and
+ * for a database without the migration; every caller treats empty as "no
+ * directory", which is honest in all three cases.
+ */
+export async function fetchDirectory(): Promise<DirectoryEntry[]> {
+  try {
+    const { data, error } = await supabase.rpc('phone_directory');
+    if (error || !data) return [];
+    return (data as Record<string, unknown>[])
+      .map((row) => ({
+        source: (row.source as DirectorySource) ?? 'customer',
+        id: String(row.id ?? ''),
+        displayName: (row.display_name as string | null)?.trim() || 'Unnamed',
+        subtitle: (row.subtitle as string | null) ?? null,
+        phoneE164: (row.phone_e164 as string | null) ?? null,
+        sortKey: (row.sort_key as string | null) ?? '',
+        archived: row.archived === true,
+      }))
+      .filter((entry) => entry.id.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Who a partly-typed number already is, for the keypad.
+ *
+ * Suffix match on digits once there are enough of them to mean something:
+ * typing 7446473 finds +18167446473, and so does typing the whole thing with
+ * or without the leading 1. Fewer than four digits matches nobody — every
+ * 816 number in Kansas City would light up otherwise.
+ */
+export function matchDirectory(
+  entries: DirectoryEntry[],
+  typed: string,
+  limit = 3,
+): DirectoryEntry[] {
+  const digits = typed.replace(/[^0-9]/g, '');
+  if (digits.length < 4) return [];
+  const needle = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+  const out: DirectoryEntry[] = [];
+  for (const entry of entries) {
+    if (!entry.phoneE164 || entry.archived) continue;
+    const have = entry.phoneE164.replace(/[^0-9]/g, '');
+    const local = have.length === 11 && have.startsWith('1') ? have.slice(1) : have;
+    if (local.endsWith(needle) || local === needle) {
+      out.push(entry);
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
+}
+
+export interface ContactInput {
+  name: string;
+  org?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  /** supplier | vendor | inspector | other. Free text server-side. */
+  kind?: string;
+  notes?: string | null;
+}
+
+/**
+ * Admin: add a supplier / vendor. Phase 1 built the table; only Devon knows
+ * what belongs in it, so this is how it gets filled from the phone.
+ */
+export async function createContact(input: ContactInput): Promise<CommsResult> {
+  try {
+    const name = input.name.trim();
+    if (!name) return { ok: false, message: 'Give the contact a name.' };
+    const email = await currentEmail();
+    const { error } = await supabase.from('contacts').insert({
+      company: COMPANY,
+      kind: (input.kind ?? 'supplier').trim().toLowerCase() || 'supplier',
+      name,
+      org: input.org?.trim() || null,
+      phone: input.phone?.trim() || null,
+      email: input.email?.trim() || null,
+      notes: input.notes?.trim() || null,
+      created_by: email,
+    });
+    if (error) {
+      return {
+        ok: false,
+        message:
+          error.code === '42501' || /row-level security|policy/i.test(error.message ?? '')
+            ? 'Only owners and operators can add contacts.'
+            : error.message || 'Could not save the contact.',
+      };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not save the contact.' };
+  }
+}
+
+/** Admin: hide a supplier from the directory without losing their thread. */
+export async function archiveContact(id: string): Promise<CommsResult> {
+  try {
+    const { data, error } = await supabase
+      .from('contacts')
+      .update({ archived_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('id');
+    if (error) return { ok: false, message: error.message || 'Could not archive the contact.' };
+    if (!data || data.length === 0) {
+      return { ok: false, message: 'Only owners and operators can archive contacts.' };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not archive the contact.' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Recents (Phone → Recents)
+// ---------------------------------------------------------------------------
+
+/** One row of the call log: one call, or a run of calls to the same party. */
+export interface RecentCall {
+  /** The most recent `messages` row in the run. */
+  id: string;
+  customerId: string | null;
+  contactId: string | null;
+  /** The far end, E.164 where we know it. */
+  phone: string | null;
+  /** Name when the row is filed under someone, else the formatted number. */
+  displayName: string;
+  direction: MessageDirection;
+  status: string;
+  /**
+   * Did not connect. Until in-app calling ships there are no inbound calls
+   * at all, so this is an OUTBOUND bridge call that ended failed / busy /
+   * no-answer / canceled — the Recents screen says so on the segment.
+   */
+  missed: boolean;
+  durationSeconds: number | null;
+  at: string;
+  /** How many consecutive calls to the same party this row stands for. */
+  count: number;
+  sentBy: string | null;
+}
+
+const CALL_MISSED = new Set(['failed', 'busy', 'no-answer', 'canceled']);
+
+/**
+ * The call log, newest first, folded the way iOS folds it: consecutive calls
+ * to the same person collapse into one row with a count. No new tables —
+ * every row is a `messages` row with `channel = 'call'` that twilio-call
+ * already writes.
+ */
+export async function fetchRecents(limit = 300): Promise<RecentCall[]> {
+  try {
+    const { data, error } = await supabase
+      .from('messages')
+      .select(MESSAGE_COLUMNS)
+      .eq('company', COMPANY)
+      .eq('channel', 'call')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error || !data) return [];
+    const calls = (data as unknown as Record<string, unknown>[]).map(toMessage);
+    if (calls.length === 0) return [];
+
+    const customerIds = new Set<string>();
+    const contactIds = new Set<string>();
+    for (const call of calls) {
+      if (call.customer_id) customerIds.add(call.customer_id);
+      else if (call.contact_id) contactIds.add(call.contact_id);
+    }
+    const customerNames = new Map<string, string>();
+    const contactNames = new Map<string, string>();
+    await Promise.all([
+      (async () => {
+        if (customerIds.size === 0) return;
+        const { data: rows } = await supabase
+          .from('customers')
+          .select('id, name')
+          .in('id', [...customerIds]);
+        for (const row of (rows ?? []) as Record<string, unknown>[]) {
+          customerNames.set(String(row.id), (row.name as string) ?? 'Customer');
+        }
+      })(),
+      (async () => {
+        if (contactIds.size === 0) return;
+        const { data: rows } = await supabase
+          .from('contacts')
+          .select('id, name')
+          .in('id', [...contactIds]);
+        for (const row of (rows ?? []) as Record<string, unknown>[]) {
+          contactNames.set(String(row.id), (row.name as string) ?? 'Contact');
+        }
+      })(),
+    ]);
+
+    const rows: RecentCall[] = [];
+    for (const call of calls) {
+      const phone = counterpartNumber(call);
+      const partyKey = call.customer_id ?? call.contact_id ?? phone ?? call.id;
+      const previous = rows[rows.length - 1];
+      const missed = CALL_MISSED.has(call.status);
+      // Fold onto the row above only when it is the same party AND the same
+      // outcome — three missed calls read as "missed ×3", but a missed call
+      // followed by one that connected are two different facts.
+      if (
+        previous &&
+        (previous.customerId ?? previous.contactId ?? previous.phone ?? previous.id) === partyKey &&
+        previous.missed === missed
+      ) {
+        previous.count += 1;
+        continue;
+      }
+      rows.push({
+        id: call.id,
+        customerId: call.customer_id,
+        contactId: call.customer_id ? null : call.contact_id,
+        phone,
+        displayName:
+          (call.customer_id ? customerNames.get(call.customer_id) : undefined) ??
+          (call.contact_id ? contactNames.get(call.contact_id) : undefined) ??
+          (phone ? formatPhone(phone) : 'Unknown number'),
+        direction: call.direction,
+        status: call.status,
+        missed,
+        durationSeconds: call.duration_seconds,
+        at: call.created_at,
+        count: 1,
+        sentBy: call.sent_by,
+      });
+    }
+    return rows;
+  } catch {
+    return [];
   }
 }
 
