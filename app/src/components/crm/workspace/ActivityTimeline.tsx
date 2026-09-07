@@ -28,6 +28,8 @@ const ICONS: Record<ActivityKind, { name: keyof typeof Ionicons.glyphMap; fg: st
   task_added: { name: 'checkbox-outline', fg: colors.indigoDeep, bg: colors.indigoSoft },
   task_done: { name: 'checkbox', fg: colors.mintDeep, bg: colors.mintSoft },
   appointment: { name: 'calendar-outline', fg: colors.violetDeep, bg: colors.violetSoft },
+  email_in: { name: 'mail', fg: colors.indigoDeep, bg: colors.indigoSoft },
+  email_out: { name: 'mail-open-outline', fg: colors.indigoDeep, bg: colors.indigoSoft },
   estimate: { name: 'receipt', fg: colors.indigoDeep, bg: colors.indigoSoft },
   contract: { name: 'create', fg: colors.violetDeep, bg: colors.violetSoft },
   invoice: { name: 'cash', fg: colors.coralDeep, bg: colors.coralSoft },
@@ -44,9 +46,12 @@ function clock(iso: string): string {
 export function ActivityTimeline({
   events,
   emptyText,
+  onOpenEmail,
 }: {
   events: ActivityEvent[];
   emptyText?: string;
+  /** Email rows open their Gmail thread in the Email pane. */
+  onOpenEmail?: (threadId: string) => void;
 }) {
   const router = useRouter();
   const sections = groupByDay(events);
@@ -82,6 +87,14 @@ export function ActivityTimeline({
             </View>
           </>
         );
+        if (item.emailThreadId && onOpenEmail) {
+          const threadId = item.emailThreadId;
+          return (
+            <Pressable onPress={() => onOpenEmail(threadId)} style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
+              {body}
+            </Pressable>
+          );
+        }
         if (item.jobId && (item.kind.startsWith('job_') || item.kind === 'estimate' || item.kind === 'invoice' || item.kind === 'contract' || item.kind === 'payment')) {
           return (
             <Pressable

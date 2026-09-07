@@ -30,12 +30,17 @@ import { readFunctionError } from '@/lib/artwork';
 import { supabase } from '@/lib/supabase';
 
 const FUNCTION = 'gmail-inbox';
+/** Sending is a separate function with a separate, send-only scope — see its header. */
+const SEND_FUNCTION = 'gmail-send';
 
 export const NO_MAILBOX_MESSAGE = 'No mailbox is linked to your account';
 export const NOT_CONFIGURED_MESSAGE =
   "Email isn't set up yet — see docs/GMAIL_INBOX_SETUP.md";
+export const SEND_NOT_ENABLED_MESSAGE =
+  'Sending from the app is not switched on yet: the Google Workspace admin has to add the gmail.send scope (docs/GMAIL_INBOX_SETUP.md, “Sending”).';
 
-export type InboxLabel = 'INBOX' | 'UNREAD' | 'STARRED';
+/** `ALL` = no label filter: Sent and archived included (the CRM's "everything with this customer"). */
+export type InboxLabel = 'INBOX' | 'UNREAD' | 'STARRED' | 'ALL';
 
 export interface InboxThread {
   id: string;
@@ -73,6 +78,12 @@ export interface MailMessage {
   subject: string;
   snippet: string;
   unread: boolean;
+  /** Gmail's SENT label — this mailbox sent it. */
+  sent: boolean;
+  /** RFC 5322 threading headers, verbatim (may be empty on old messages). */
+  rfcMessageId: string;
+  inReplyTo: string;
+  references: string;
   /** Always plain text — from text/plain when there is one, else flattened HTML. */
   bodyText: string;
   /** Sanitized HTML, when the message had any. The app renders `bodyText`. */
@@ -113,9 +124,12 @@ export type AttachmentResult =
  * which is what `readFunctionError` digs out — without it a missing key, a
  * missing mailbox and a Google outage are indistinguishable.
  */
-async function call<T>(body: Record<string, unknown>): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
+async function call<T>(
+  body: Record<string, unknown>,
+  fn: string = FUNCTION,
+): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
   try {
-    const { data, error } = await supabase.functions.invoke(FUNCTION, { body });
+    const { data, error } = await supabase.functions.invoke(fn, { body });
     if (error) {
       const detail = await readFunctionError(error);
       return { ok: false, message: translate(detail ?? error.message) };
@@ -137,7 +151,54 @@ async function call<T>(body: Record<string, unknown>): Promise<{ ok: true; data:
 function translate(code: string): string {
   if (code === 'no_mailbox') return NO_MAILBOX_MESSAGE;
   if (code === 'not_configured') return NOT_CONFIGURED_MESSAGE;
+  if (code === 'scope_missing') return SEND_NOT_ENABLED_MESSAGE;
   return code;
+}
+
+/** True when a failure message is the "no mailbox for you" state, not an outage. */
+export function isNoMailbox(message: string): boolean {
+  return message === NO_MAILBOX_MESSAGE;
+}
+
+// ---------------------------------------------------------------------------
+// Sending (CRM Phase 7C, 2026-09-07) — the `gmail-send` function
+// ---------------------------------------------------------------------------
+
+export type SendResult = { ok: true; id: string; threadId: string | null; mailbox: string } | { ok: false; message: string };
+
+/**
+ * Send a plain-text email from the caller's own mapped mailbox. The function
+ * picks the From address; the client cannot. Pass `threadId` plus the newest
+ * message's `rfcMessageId`/`references` to reply INTO a thread — Gmail then
+ * files it there for both sides and puts it in Sent, which is where the next
+ * `fetchThread` reads it back from. Nothing is stored in Supabase.
+ */
+export async function sendEmail(input: {
+  to: string;
+  cc?: string;
+  subject: string;
+  text: string;
+  threadId?: string | null;
+  inReplyTo?: string | null;
+  references?: string | null;
+}): Promise<SendResult> {
+  if (!input.to.trim()) return { ok: false, message: 'Add a To address.' };
+  if (!input.subject.trim() && !input.text.trim()) return { ok: false, message: 'Write a subject or a message.' };
+  const result = await call<{ mailbox: string; id: string; threadId: string | null }>(
+    {
+      action: 'send',
+      to: input.to.trim(),
+      cc: input.cc?.trim() || undefined,
+      subject: input.subject.trim(),
+      text: input.text,
+      threadId: input.threadId || undefined,
+      inReplyTo: input.inReplyTo || undefined,
+      references: input.references || undefined,
+    },
+    SEND_FUNCTION,
+  );
+  if (!result.ok) return result;
+  return { ok: true, id: result.data.id, threadId: result.data.threadId ?? null, mailbox: result.data.mailbox };
 }
 
 /** One page of thread summaries, newest first. */

@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { DetailPanel } from '@/components/crm/workspace/DetailPanel';
@@ -36,6 +36,7 @@ import {
   type StageChange,
   type WorkspaceRecord,
 } from '@/lib/crmWorkspace';
+import { fetchRecordEmailThreads, type RecordEmailResult } from '@/lib/crmEmail';
 import { fetchCustomerDocuments, type CustomerDocument } from '@/lib/customers';
 import { fetchLeadAppointments, type LeadAppointment } from '@/lib/leadAppointments';
 import { fetchEmployeeOptions } from '@/lib/myhours';
@@ -97,6 +98,10 @@ export function CrmWorkspace() {
   const [history, setHistory] = useState<StageChange[]>([]);
   const [appointments, setAppointments] = useState<LeadAppointment[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
+  // Email is read live from Gmail (a couple of seconds), so it loads beside
+  // the record's other data rather than holding it up. null = loading.
+  const [email, setEmail] = useState<RecordEmailResult | null>(null);
+  const emailFor = useRef<string | null>(null);
 
   const loadTasks = useCallback(async () => {
     const result = await fetchTasks({ all: true });
@@ -168,6 +173,18 @@ export function CrmWorkspace() {
     setDetailLoading(false);
   }, []);
 
+  const loadEmail = useCallback(async (record: WorkspaceRecord) => {
+    emailFor.current = record.key;
+    setEmail(null);
+    const result = await fetchRecordEmailThreads(record.email);
+    // The user may have clicked on; a slow Gmail answer must not land on the wrong record.
+    if (emailFor.current === record.key) setEmail(result);
+  }, []);
+
+  useEffect(() => {
+    if (selected) void loadEmail(selected);
+  }, [selected?.key, loadEmail]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const loadAppointments = useCallback(async (record: WorkspaceRecord) => {
     if (record.kind !== 'lead') return;
     const appts = await fetchLeadAppointments(record.id);
@@ -204,9 +221,19 @@ export function CrmWorkspace() {
   const events: ActivityEvent[] = useMemo(
     () =>
       selected
-        ? composeActivity({ messages, notes, jobs, finance, lead: selected.lead, history, tasks: recordTasks, appointments })
+        ? composeActivity({
+            messages,
+            notes,
+            jobs,
+            finance,
+            lead: selected.lead,
+            history,
+            tasks: recordTasks,
+            appointments,
+            emails: email?.status === 'ok' ? { mailbox: email.mailbox, threads: email.threads } : undefined,
+          })
         : [],
-    [selected, messages, notes, jobs, finance, history, recordTasks, appointments],
+    [selected, messages, notes, jobs, finance, history, recordTasks, appointments, email],
   );
 
   const visible = useMemo(
@@ -308,7 +335,9 @@ export function CrmWorkspace() {
       notesAvailable={notesAvailable}
       events={events}
       loading={detailLoading}
+      email={email}
       onNotesChanged={() => void loadSelected(selected)}
+      onEmailChanged={() => void loadEmail(selected)}
       onOpenDetail={layout === 'wide' ? undefined : () => setDetailOpen(true)}
     />
   ) : (

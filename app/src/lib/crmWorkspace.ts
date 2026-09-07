@@ -26,6 +26,8 @@ import {
   type CustomerNote,
   type CustomerSummary,
 } from '@/lib/crm';
+import { isOurAddress } from '@/lib/crmEmail';
+import { type InboxThread } from '@/lib/gmail';
 import { appointmentInstant, KIND_LABEL, OUTCOME_LABEL, type LeadAppointment } from '@/lib/leadAppointments';
 import { fetchOpenLeads, type Lead, type LeadStatus } from '@/lib/sales';
 import { supabase } from '@/lib/supabase';
@@ -311,7 +313,9 @@ export type ActivityKind =
   | 'lead_status'
   | 'task_added'
   | 'task_done'
-  | 'appointment';
+  | 'appointment'
+  | 'email_in'
+  | 'email_out';
 
 export interface ActivityEvent {
   id: string;
@@ -323,6 +327,8 @@ export interface ActivityEvent {
   actor: string | null;
   /** Where a tap should go, when there is somewhere. */
   jobId: string | null;
+  /** Email rows: the Gmail thread to open in the Email pane. */
+  emailThreadId?: string;
 }
 
 /** "devonsd311@gmail.com" → "Devonsd311", "test-crew@…" → "Test": the first name-ish token, capitalised. */
@@ -360,8 +366,29 @@ export function composeActivity(input: {
   history?: StageChange[];
   tasks?: Task[];
   appointments?: LeadAppointment[];
+  /** Live Gmail threads for the record (lib/crmEmail.ts) — one row per thread, its newest message. */
+  emails?: { mailbox: string; threads: InboxThread[] };
 }): ActivityEvent[] {
   const events: ActivityEvent[] = [];
+
+  if (input.emails) {
+    const { mailbox, threads } = input.emails;
+    for (const t of threads) {
+      if (!t.date) continue;
+      const out = isOurAddress(t.fromAddress, mailbox);
+      const verb = out ? 'Email sent' : t.messageCount > 1 ? 'Email reply received' : 'Email received';
+      events.push({
+        id: `email:${t.id}`,
+        at: t.date,
+        kind: out ? 'email_out' : 'email_in',
+        title: `${verb} · ${t.subject}`,
+        detail: t.snippet ? t.snippet.slice(0, 140) : null,
+        actor: out ? authorName(t.fromAddress) : null,
+        jobId: null,
+        emailThreadId: t.id,
+      });
+    }
+  }
 
   for (const a of input.appointments ?? []) {
     events.push({

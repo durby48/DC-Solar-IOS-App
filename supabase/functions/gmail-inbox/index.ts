@@ -33,6 +33,13 @@
  *   thread     {threadId}                             → messages with bodies
  *   attachment {messageId, attachmentId, …}           → base64 file data
  *
+ * CRM (2026-09-07, additive): `label: 'ALL'` lists across the whole mailbox
+ * (Sent and archived included) so a `q` of `{from:x to:x}` returns every
+ * thread with one customer, and `thread` messages also carry the RFC
+ * Message-ID / In-Reply-To / References headers and a `sent` flag, which is
+ * what a reply needs to thread correctly. Sending itself lives in the
+ * separate `gmail-send` function; this one stays gmail.readonly.
+ *
  * NOTHING IS STORED. There is no table behind this; every response is passed
  * straight through from Google and forgotten. The only cached thing is the
  * Google access token, in module memory, for the few minutes an isolate lives.
@@ -428,13 +435,16 @@ function walk(part: GmailPart | undefined, into: WalkResult): void {
 // Actions
 // ---------------------------------------------------------------------------
 
-type Label = 'INBOX' | 'UNREAD' | 'STARRED';
+type Label = 'INBOX' | 'UNREAD' | 'STARRED' | 'ALL';
 
 function labelIds(label: Label): string[] {
   // UNREAD means "unread IN THE INBOX" — an unread message sitting in a
   // filtered-away label is not something Devon is looking for here.
   if (label === 'UNREAD') return ['INBOX', 'UNREAD'];
   if (label === 'STARRED') return ['STARRED'];
+  // ALL: no label filter — the CRM asks for "everything with this address",
+  // and half of that is in Sent.
+  if (label === 'ALL') return [];
   return ['INBOX'];
 }
 
@@ -526,6 +536,15 @@ async function getThread(token: string, threadId: string) {
       subject: header(message, 'Subject'),
       snippet: message.snippet ?? '',
       unread: (message.labelIds ?? []).includes('UNREAD'),
+      // Gmail's own view of direction: the SENT label is on every message
+      // this mailbox sent, whichever address it was sent from.
+      sent: (message.labelIds ?? []).includes('SENT'),
+      // Threading headers, verbatim. A reply sets In-Reply-To to this
+      // Message-ID and appends it to References; Gmail then files the reply
+      // in this thread for everyone, not just for us.
+      rfcMessageId: header(message, 'Message-ID'),
+      inReplyTo: header(message, 'In-Reply-To'),
+      references: header(message, 'References'),
       bodyText: text,
       bodyHtml: html || null,
       attachments: found.attachments,
@@ -659,7 +678,9 @@ Deno.serve(async (req) => {
     switch (body.action) {
       case 'list': {
         const label: Label =
-          body.label === 'UNREAD' || body.label === 'STARRED' ? body.label : 'INBOX';
+          body.label === 'UNREAD' || body.label === 'STARRED' || body.label === 'ALL'
+            ? body.label
+            : 'INBOX';
         const maxResults = Math.min(
           MAX_THREADS,
           Math.max(1, Math.round(Number(body.maxResults) || MAX_THREADS)),

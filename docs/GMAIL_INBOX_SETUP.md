@@ -174,3 +174,25 @@ Two details worth knowing:
 
 Attachments are capped at 10 MB through the function; anything larger says so
 and points at Gmail.
+
+---
+
+## Sending (CRM Phase 7, 2026-09-07)
+
+The CRM's Email pane (`/workspace` → a record → `SMS | Email`) reads the
+record's threads through `gmail-inbox` (unchanged, still `gmail.readonly`) and
+**sends replies through a separate function, `gmail-send`**, which asks Google
+for a token with exactly one scope, `https://www.googleapis.com/auth/gmail.send`.
+Same three gates, same `MAILBOXES` map (keep the two copies identical), and
+the caller can only ever send from their own mapped mailbox.
+
+**One Workspace admin step (Devon):** in the domain-wide delegation entry for
+client id `105976483744924526112`, set the scopes to
+
+```
+https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.send
+```
+
+Until then `gmail-send` answers `503 scope_missing` and the app's Send button
+shows *"Sending from the app is not switched on yet…"*. Reading is unaffected.
+Design and the audit behind it: `docs/CRM_EMAIL.md`.

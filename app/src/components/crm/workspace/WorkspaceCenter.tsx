@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ActivityTimeline } from '@/components/crm/workspace/ActivityTimeline';
+import { EmailPane } from '@/components/crm/workspace/EmailPane';
 import { Conversation } from '@/components/comms/Conversation';
 import { colors, radii, spacing } from '@/constants/theme';
 import {
@@ -13,6 +14,7 @@ import {
   type MessageTemplate,
 } from '@/lib/comms';
 import { addCustomerNote, type CustomerNote } from '@/lib/crm';
+import { type RecordEmailResult } from '@/lib/crmEmail';
 import { type ActivityEvent, type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { inAppCallingSupported } from '@/lib/voice';
 
@@ -21,9 +23,10 @@ import { inAppCallingSupported } from '@/lib/voice';
  *
  *   Conversation — the existing SMS/call thread and composer
  *                  (`components/comms/Conversation`, the same component the
- *                  Phone section and the customer record render). Email is
- *                  shown as a switch that says, honestly, that it is not
- *                  connected yet.
+ *                  Phone section and the customer record render), or — the
+ *                  Email side of the switch — the record's Gmail threads,
+ *                  read live from the caller's own mailbox with reply and
+ *                  compose (`EmailPane`, Phase 7).
  *   Activity     — the unified timeline: texts, calls, notes, jobs, money,
  *                  all in one chronology.
  *   Notes        — the internal notes, with a box to add one.
@@ -58,7 +61,9 @@ export function WorkspaceCenter({
   notesAvailable,
   events,
   loading,
+  email,
   onNotesChanged,
+  onEmailChanged,
   onOpenDetail,
 }: {
   record: WorkspaceRecord;
@@ -69,13 +74,17 @@ export function WorkspaceCenter({
   notesAvailable: boolean;
   events: ActivityEvent[];
   loading: boolean;
+  /** The record's Gmail threads (null while loading). */
+  email: RecordEmailResult | null;
   onNotesChanged: () => void;
+  onEmailChanged: () => void;
   /** Narrow layouts: the detail column lives behind this. */
   onOpenDetail?: () => void;
 }) {
   const router = useRouter();
   const [pane, setPane] = useState<Pane>('conversation');
   const [channel, setChannel] = useState<Channel>('sms');
+  const [emailThreadId, setEmailThreadId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
@@ -201,15 +210,14 @@ export function WorkspaceCenter({
   } else if (pane === 'conversation') {
     body =
       channel === 'email' ? (
-        <View style={styles.center}>
-          <Ionicons name="mail-outline" size={22} color={colors.inkSoft} />
-          <Text style={styles.emptyTitle}>Email is not connected yet</Text>
-          <Text style={styles.emptyBody}>
-            {record.email
-              ? `${record.email} is on file. Reading and sending customer email from here is the next CRM phase; until then Email lives in the Email tile under Work.`
-              : 'No email address on file for this record, and customer email is the next CRM phase.'}
-          </Text>
-        </View>
+        <EmailPane
+          key={record.key}
+          record={record}
+          email={email}
+          openThreadId={emailThreadId}
+          onOpenThread={setEmailThreadId}
+          onChanged={onEmailChanged}
+        />
       ) : !phone && record.kind === 'lead' ? (
         <View style={styles.center}>
           <Ionicons name="chatbubbles-outline" size={22} color={colors.inkSoft} />
@@ -238,6 +246,11 @@ export function WorkspaceCenter({
     body = (
       <ActivityTimeline
         events={events}
+        onOpenEmail={(threadId) => {
+          setEmailThreadId(threadId);
+          setChannel('email');
+          setPane('conversation');
+        }}
         emptyText={
           record.kind === 'lead'
             ? 'Nothing beyond the lead being created. Texts, calls and notes will show here.'
