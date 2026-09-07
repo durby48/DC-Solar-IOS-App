@@ -235,6 +235,60 @@ export function filterRecords(
 }
 
 // ---------------------------------------------------------------------------
+// Stage / status history (Phase 4, 2026-09-07)
+// ---------------------------------------------------------------------------
+
+/**
+ * One transition of `jobs.stage` or `leads.status`, from `job_stage_history`
+ * / `lead_status_history`. Written by database triggers only — whoever
+ * changed the column (app, ops console, edge function) — so the client never
+ * inserts here. `by` is NULL for service-role writes; the timeline calls that
+ * "system".
+ */
+export interface StageChange {
+  id: string;
+  entity: 'job' | 'lead';
+  entityId: string;
+  from: string | null;
+  to: string | null;
+  by: string | null;
+  at: string;
+}
+
+export async function fetchJobStageHistory(jobIds: string[]): Promise<StageChange[]> {
+  if (jobIds.length === 0) return [];
+  try {
+    const { data, error } = await supabase
+      .from('job_stage_history')
+      .select('id, job_id, from_stage, to_stage, changed_by, changed_at')
+      .in('job_id', jobIds)
+      .order('changed_at', { ascending: false });
+    if (error || !data) return [];
+    return (data as { id: string; job_id: string; from_stage: string | null; to_stage: string | null; changed_by: string | null; changed_at: string }[]).map(
+      (r) => ({ id: r.id, entity: 'job', entityId: r.job_id, from: r.from_stage, to: r.to_stage, by: r.changed_by, at: r.changed_at }),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchLeadStatusHistory(leadId: string): Promise<StageChange[]> {
+  try {
+    const { data, error } = await supabase
+      .from('lead_status_history')
+      .select('id, lead_id, from_status, to_status, changed_by, changed_at')
+      .eq('lead_id', leadId)
+      .order('changed_at', { ascending: false });
+    if (error || !data) return [];
+    return (data as { id: string; lead_id: string; from_status: string | null; to_status: string | null; changed_by: string | null; changed_at: string }[]).map(
+      (r) => ({ id: r.id, entity: 'lead', entityId: r.lead_id, from: r.from_status, to: r.to_status, by: r.changed_by, at: r.changed_at }),
+    );
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The timeline
 // ---------------------------------------------------------------------------
 
@@ -246,11 +300,13 @@ export type ActivityKind =
   | 'job_created'
   | 'job_scheduled'
   | 'job_completed'
+  | 'job_stage'
   | 'estimate'
   | 'contract'
   | 'invoice'
   | 'payment'
-  | 'lead_created';
+  | 'lead_created'
+  | 'lead_status';
 
 export interface ActivityEvent {
   id: string;
@@ -284,9 +340,10 @@ function money(amount: number): string {
  * viewer, which is correct) — so the screen fetches each source once and the
  * timeline never triggers its own round trips.
  *
- * Stage/status HISTORY is not here yet: the tables only hold the current
- * value. When `job_stage_history` / `lead_status_history` exist (Phase 4)
- * they become two more sources in this same function.
+ * Stage/status transitions come from `history` (`fetchJobStageHistory` /
+ * `fetchLeadStatusHistory`). The trigger also logs the INSERT (from NULL) so
+ * the table is complete on its own; the timeline skips those rows because
+ * "Job created" / "Lead created" already stand at that instant.
  */
 export function composeActivity(input: {
   messages: CommsMessage[];
@@ -294,8 +351,38 @@ export function composeActivity(input: {
   jobs: CustomerJob[];
   finance: CustomerFinanceRow[];
   lead?: Lead | null;
+  history?: StageChange[];
 }): ActivityEvent[] {
   const events: ActivityEvent[] = [];
+
+  const jobLabel = new Map<string, string>();
+  for (const j of input.jobs) jobLabel.set(j.id, j.job_number ?? j.name);
+
+  for (const h of input.history ?? []) {
+    if (h.from == null) continue;
+    if (h.entity === 'job') {
+      events.push({
+        id: `hist:${h.id}`,
+        at: h.at,
+        kind: 'job_stage',
+        title: `${jobLabel.get(h.entityId) ?? 'Job'} · ${h.from} → ${h.to ?? 'no stage'}`,
+        detail: null,
+        actor: h.by ? authorName(h.by) : 'system',
+        jobId: h.entityId,
+      });
+    } else {
+      const label = (s: string | null) => (s ? (LEAD_STATUS_LABEL[s as LeadStatus] ?? s) : '—');
+      events.push({
+        id: `hist:${h.id}`,
+        at: h.at,
+        kind: 'lead_status',
+        title: `Lead · ${label(h.from)} → ${label(h.to)}`,
+        detail: null,
+        actor: h.by ? authorName(h.by) : 'system',
+        jobId: null,
+      });
+    }
+  }
 
   for (const m of input.messages) {
     if (m.channel === 'call') {

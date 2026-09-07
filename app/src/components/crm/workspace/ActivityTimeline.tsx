@@ -23,6 +23,8 @@ const ICONS: Record<ActivityKind, { name: keyof typeof Ionicons.glyphMap; fg: st
   job_created: { name: 'hammer', fg: colors.olive, bg: colors.oliveSoft },
   job_scheduled: { name: 'calendar', fg: colors.olive, bg: colors.oliveSoft },
   job_completed: { name: 'checkmark-circle', fg: colors.cream, bg: colors.olive },
+  job_stage: { name: 'swap-horizontal', fg: colors.olive, bg: colors.oliveSoft },
+  lead_status: { name: 'flag', fg: colors.amberDeep, bg: colors.amberSoft },
   estimate: { name: 'receipt', fg: colors.indigoDeep, bg: colors.indigoSoft },
   contract: { name: 'create', fg: colors.violetDeep, bg: colors.violetSoft },
   invoice: { name: 'cash', fg: colors.coralDeep, bg: colors.coralSoft },

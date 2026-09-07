@@ -27,10 +27,13 @@ import {
 } from '@/lib/crm';
 import {
   composeActivity,
+  fetchJobStageHistory,
+  fetchLeadStatusHistory,
   fetchWorkspaceRecords,
   filterRecords,
   type ActivityEvent,
   type RecordKind,
+  type StageChange,
   type WorkspaceRecord,
 } from '@/lib/crmWorkspace';
 import { fetchCustomerDocuments, type CustomerDocument } from '@/lib/customers';
@@ -86,6 +89,7 @@ export function CrmWorkspace() {
   const [notesAvailable, setNotesAvailable] = useState(true);
   const [jobs, setJobs] = useState<CustomerJob[]>([]);
   const [finance, setFinance] = useState<CustomerFinanceRow[]>([]);
+  const [history, setHistory] = useState<StageChange[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
 
   const loadList = useCallback(async () => {
@@ -123,19 +127,28 @@ export function CrmWorkspace() {
         fetchCustomerNotes(record.id),
         fetchCustomerJobs(record.id),
       ]);
-      const financeResult = await fetchCustomerFinance(record.id, jobRows.map((j) => j.id));
+      const jobIds = jobRows.map((j) => j.id);
+      const [financeResult, stageHistory] = await Promise.all([
+        fetchCustomerFinance(record.id, jobIds),
+        fetchJobStageHistory(jobIds),
+      ]);
       setMessages(thread);
       setNotes(noteResult.status === 'ok' ? noteResult.notes : []);
       setNotesAvailable(noteResult.status === 'ok');
       setJobs(jobRows);
       setFinance(financeResult.status === 'ok' ? financeResult.entries : []);
+      setHistory(stageHistory);
     } else {
-      const thread = await fetchThread(record.id, { byLead: true });
+      const [thread, statusHistory] = await Promise.all([
+        fetchThread(record.id, { byLead: true }),
+        fetchLeadStatusHistory(record.id),
+      ]);
       setMessages(thread);
       setNotes([]);
       setNotesAvailable(true);
       setJobs([]);
       setFinance([]);
+      setHistory(statusHistory);
     }
     setDetailLoading(false);
   }, []);
@@ -160,8 +173,8 @@ export function CrmWorkspace() {
   }, [loadList, loadSelected, selected]);
 
   const events: ActivityEvent[] = useMemo(
-    () => (selected ? composeActivity({ messages, notes, jobs, finance, lead: selected.lead }) : []),
-    [selected, messages, notes, jobs, finance],
+    () => (selected ? composeActivity({ messages, notes, jobs, finance, lead: selected.lead, history }) : []),
+    [selected, messages, notes, jobs, finance, history],
   );
 
   const visible = useMemo(() => filterRecords(records, search, kind), [records, search, kind]);
