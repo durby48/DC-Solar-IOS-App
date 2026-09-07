@@ -553,12 +553,20 @@ export function composeActivity(input: {
   }
 
   if (input.lead) {
+    const automatic = Boolean(input.lead.source_ref);
     events.push({
       id: `lead:${input.lead.id}:created`,
       at: input.lead.created_at,
       kind: 'lead_created',
-      title: 'Lead created',
-      detail: input.lead.source ? `Source: ${input.lead.source}` : null,
+      // An intake lead arrived on its own; a typed one was created by someone.
+      title: automatic ? `Lead received · ${input.lead.source ?? 'Website'}` : 'Lead created',
+      detail: automatic
+        ? input.lead.sms_opt_in_at
+          ? 'Opted in to texts on the form'
+          : null
+        : input.lead.source
+          ? `Source: ${input.lead.source}`
+          : null,
       actor: null,
       jobId: null,
     });

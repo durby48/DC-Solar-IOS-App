@@ -37,6 +37,11 @@ export interface Lead {
   notes: string | null;
   converted_job_id: string | null;
   lost_reason: string | null;
+  /** Automatic intake provenance, e.g. `website_quote:<id>`; null when typed in by hand. */
+  source_ref?: string | null;
+  /** Affirmative SMS opt-in evidence carried from the source (Phase 9). Null = none recorded. */
+  sms_opt_in_at?: string | null;
+  sms_opt_in_source?: string | null;
 }
 
 export interface SalesRep {
@@ -115,7 +120,7 @@ export async function fetchSalesData(): Promise<SalesData | null> {
       supabase
         .from('leads')
         .select(
-          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason',
+          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source',
         )
         .eq('company', COMPANY)
         .order('created_at', { ascending: false }),
@@ -258,7 +263,7 @@ export async function fetchOpenLeads(): Promise<Lead[]> {
     const { data, error } = await supabase
       .from('leads')
       .select(
-        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason',
+        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source',
       )
       .eq('company', COMPANY)
       .is('converted_job_id', null)

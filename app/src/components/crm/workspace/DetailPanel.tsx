@@ -296,7 +296,10 @@ export function DetailPanel({
             ) : null}
           </View>
           {record.lead.lost_reason ? <Fact label="Lost because" value={record.lead.lost_reason} /> : null}
-          <Fact label="Created" value={shortDate(record.lead.created_at)} muted />
+          {record.lead.sms_opt_in_at ? (
+            <Fact label="SMS consent" value={`Opted in ${shortDate(record.lead.sms_opt_in_at)} · ${record.lead.sms_opt_in_source?.split('@')[0] ?? 'form'}`} />
+          ) : null}
+          <Fact label={record.lead.source_ref ? 'Received' : 'Created'} value={shortDate(record.lead.created_at)} muted />
         </Section>
       ) : null}
 

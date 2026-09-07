@@ -96,7 +96,7 @@ export async function fetchLeadById(id: string): Promise<Lead | null> {
     const { data, error } = await supabase
       .from('leads')
       .select(
-        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason',
+        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source',
       )
       .eq('company', COMPANY)
       .eq('id', id)

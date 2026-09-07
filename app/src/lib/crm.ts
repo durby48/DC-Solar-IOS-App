@@ -66,6 +66,13 @@ export interface CustomerInput {
   phone: string | null;
   address: string | null;
   notes: string | null;
+  /**
+   * SMS opt-in evidence carried over from a lead at conversion (Phase 9).
+   * Optional and only ever set from a lead that recorded it — never from a
+   * form field, never inferred.
+   */
+  sms_opt_in_at?: string | null;
+  sms_opt_in_source?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +194,8 @@ export async function createCustomerRow(input: CustomerInput): Promise<CreateCus
         phone: input.phone,
         address: input.address,
         notes: input.notes,
+        ...(input.sms_opt_in_at ? { sms_opt_in_at: input.sms_opt_in_at } : {}),
+        ...(input.sms_opt_in_source ? { sms_opt_in_source: input.sms_opt_in_source } : {}),
       })
       .select(CUSTOMER_COLUMNS)
       .single();
@@ -840,7 +849,7 @@ export async function convertLeadToCustomer(
   try {
     const { data: lead, error: leadError } = await supabase
       .from('leads')
-      .select('id, name, phone, email, address, notes, converted_job_id, status')
+      .select('id, name, phone, email, address, notes, converted_job_id, status, sms_opt_in_at, sms_opt_in_source')
       .eq('company', COMPANY)
       .eq('id', leadId)
       .maybeSingle();
@@ -855,14 +864,20 @@ export async function convertLeadToCustomer(
       email: string | null;
       address: string | null;
       notes: string | null;
+      sms_opt_in_at?: string | null;
+      sms_opt_in_source?: string | null;
     };
 
+    // Consent recorded on the lead (website checkbox, server-stamped) travels
+    // with the person; a converted customer must not lose their A2P record.
     const created = await createCustomerRow({
       name: row.name,
       phone: row.phone,
       email: row.email,
       address: row.address,
       notes: row.notes,
+      sms_opt_in_at: row.sms_opt_in_at ?? null,
+      sms_opt_in_source: row.sms_opt_in_source ?? null,
     });
     if (!created.ok) return { ok: false, message: created.message };
     const customerId = created.customer.id;

@@ -1,8 +1,12 @@
-# Automatic lead intake — audit and design (Phase 9A/9B, 2026-09-07)
+# Automatic lead intake — audit, design and what shipped (Phase 9, 2026-09-07)
 
-Status: **audit done, design proposed, NOT implemented.** Phase 9 implementation
-is gated on Devon's real mapped-mailbox Gmail verification (Phase 7) or Carson
-explicitly accepting that blocker. Nothing in this document has been built.
+Status: **SHIPPED** (migration `supabase/migrations/2026-09-07_lead_intake.sql`,
+applied). The Gmail gate was cleared by Devon before implementation. Sections
+7–9 below record what was built and how it was tested; the audit and the
+original design are kept above them because the decisions still stand, with
+one change: **same phone/email never collapses a new inquiry** (the earlier
+"merge" idea was dropped per the Phase 9 context — a matching number is not
+proof of the same submission).
 
 ## 9A — the audit, answered from the code
 
@@ -158,7 +162,53 @@ Phase 10; not proposed for 9.
 4. Should the 4 historical quote requests be replayed into `leads` (they are
    real, two months old)?
 
-## Testing plan (when built)
+## 7. What shipped
+
+- **`public.intake_lead(p_source, p_source_ref, p_name, p_phone, p_email, p_address, p_message, p_service, p_property_type, p_insurance_claim, p_submitted_at, p_sms_consent_at, p_sms_consent_source, p_sms_consent_version) → (lead_id, outcome, match_note)`** — SECURITY DEFINER, owned by postgres, EXECUTE revoked from public/anon/authenticated (proven: both anon and a signed-in viewer get `42501`). It trims, lowercases and validates the email, derives the E.164 for matching, names the source (`Website`), enforces `source_ref` idempotency, writes the lead with `status = new`, `created_by = <source>`, `created_at = submission time`, unassigned, and consent only when the source supplied a timestamp (`sms_opt_in_source` = `source@version`).
+- **Trigger `quote_requests_intake_trg`** (AFTER INSERT on `quote_requests`, SECURITY DEFINER function) calls it with `source_ref = 'website_quote:<id>'` and writes back `quote_requests.lead_id`, `intake_outcome`, `intake_at`. Any error is caught and recorded as `error: …` — the visitor's insert never fails.
+- **Columns:** `leads.source_ref` (+ unique partial index `leads_source_ref_uq` on `(company, source_ref)`), `leads.sms_opt_in_at`, `leads.sms_opt_in_source`, `customers.sms_opt_in_at`, `quote_requests.lead_id / intake_outcome / intake_at`.
+- **RLS: no policy changed.** `leads` policies untouched; `quote_requests` keeps insert-only-for-public and no read policy (proven: anon reads 0 rows of either).
+- **App (small, additive):** `Lead` type and the three lead selects carry the new columns; `convertLeadToCustomer` reads the lead's consent and `createCustomerRow` writes it onto the customer (optional fields, nothing else in conversion changed); Activity shows `Lead received · Website` (+ "Opted in to texts on the form") for intake leads and keeps `Lead created` for typed ones; the lead detail panel shows an **SMS consent** fact and labels the date **Received** instead of Created.
+- **Website: unchanged.** **Native: untouched.** No public edge function — the website already writes to Supabase, and no second source exists yet.
+
+### Final dedupe / re-inquiry behaviour
+
+| Case | Result |
+|---|---|
+| Same `source_ref` (retry, replay) | `duplicate` — the existing lead id is returned, nothing written. |
+| Same `phone_e164` or email as an **open** lead | `created` — a new lead, whose notes say `Possible repeat: open lead "<name>" (<id>) has the same phone/email.`; the open lead gets `Re-inquiry via Website on <date> (new lead <id>).` |
+| Same phone/email as a won/lost lead | `created`, notes say `Previous lead "<name>" (<status>, <id>).` |
+| Same phone/email as a customer | `created`, notes say `Existing customer "<name>" (<id>).` |
+| Website error inside intake | quote row kept, `intake_outcome = error: …`, no lead. |
+
+## 8. Historical replay — examined 4, replayed 0, skipped 4
+
+Every existing `quote_requests` row was inspected. All four are bot
+submissions: random-letter names (`jpYIsLOzbFzdASmKGZhijFp`), random-letter
+addresses and messages, dotted-Gmail addresses (`j.et.o.h.am.923@…`), every
+one "insurance claim = yes", and the two with consent stamps came from
+`192.42.116.x` (a Tor exit range). None matches any lead or customer. Each
+row now carries `intake_outcome = 'skipped: bot submission (…); reviewed
+2026-09-07'`. No real customer inquiry has arrived through the form yet.
+
+Consequence worth deciding: the trigger will faithfully turn the **next** bot
+submission into a lead. Filtering belongs on the website (a honeypot field
+or Cloudflare Turnstile on `QuoteForm.tsx`) — a marketing-site change,
+not made here.
+
+## 9. Testing performed (2026-09-07, test-operator session, fresh Metro)
+
+- Website-style insert as `anon` through the public policy → exactly one lead: phone `(816) 555-0199` → `+18165550199`, email lowercased, source `Website`, `source_ref = website_quote:<id>`, status `new`, unassigned, `created_by = website`, `created_at` = the request's time, consent copied with `public_quote_form@dc_solar_sms_quote_v1_2026_08_25`; `quote_requests.lead_id` and `intake_outcome = created` written back.
+- Same `source_ref` through `intake_lead` again → `duplicate`, still one lead.
+- Second `anon` insert with the same phone, different name → a second lead with the `Possible repeat…` note; the first lead got the `Re-inquiry…` line with the new id.
+- `anon` / signed-in viewer executing `intake_lead` → `permission denied`; `anon` reads 0 rows of `quote_requests` and `leads`; viewer reads 0 leads (unchanged).
+- CRM: both leads in the Leads lens (`Lead · New lead · Website`), search, detail panel (Website, SMS consent, Received), Activity `Lead received · Website / Opted in to texts on the form`, SMS composer offered.
+- Manual `+ Lead` from the workspace → `/leads` → created `Manual Lead Test` with no `source_ref`, `created_by` = the operator, status new.
+- Conversion (`Convert to customer`) → customer created with `sms_opt_in_at` and `sms_opt_in_source` copied; lead marked won.
+- All test rows deleted afterwards (customer, three leads, two quote requests). Bot rows retained with their skip reason.
+- Fresh-tab hard load of `/workspace` clean; `tsc` and `expo export --platform web` clean.
+
+## Testing plan (as written before implementation)
 
 1. Hard-load `/workspace`; manual `+ Lead` still works.
 2. POST the website form (or insert a `quote_requests` row with the service
