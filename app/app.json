@@ -21,10 +21,13 @@
         "NSLocationWhenInUseUsageDescription": "DC Solar uses your location to stamp clock-in and clock-out punches for accurate job records.",
         "NSCameraUsageDescription": "DC Solar uses the camera to take job photos and receipt pictures.",
         "NSPhotoLibraryUsageDescription": "DC Solar uses your photo library to attach job photos and receipts.",
+        "NSMicrophoneUsageDescription": "DC Solar uses the microphone to place calls to customers from the DC Solar business number.",
+        "UIBackgroundModes": ["audio", "voip"],
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
+      "permissions": ["android.permission.RECORD_AUDIO"],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -100,7 +103,7 @@
         }
       }
     },
-    "runtimeVersion": "2",
+    "runtimeVersion": "3",
     "updates": {
       "url": "https://u.expo.dev/c1bf33f2-33a6-4730-9fb3-4b98405c2c82"
     }

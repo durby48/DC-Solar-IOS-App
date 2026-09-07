@@ -44,6 +44,8 @@ export default function CallScreen() {
   const [detail, setDetail] = useState<string | null>(null);
   const [failCode, setFailCode] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
+  const [speaker, setSpeaker] = useState(false);
+  const [speakerSupported, setSpeakerSupported] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
   const [dialed, setDialed] = useState('');
   const [seconds, setSeconds] = useState(0);
@@ -66,6 +68,7 @@ export default function CallScreen() {
     void (async () => {
       const result = await startInAppCall({
         to,
+        name,
         customerId,
         contactId,
         onState: (next, info) => {
@@ -81,6 +84,7 @@ export default function CallScreen() {
       if (cancelled) return;
       if (result.ok) {
         callRef.current = result.call;
+        setSpeakerSupported(result.call.speakerSupported);
       } else {
         setState('failed');
         setFailCode(result.code ?? null);
@@ -91,7 +95,7 @@ export default function CallScreen() {
       cancelled = true;
       callRef.current?.hangUp();
     };
-  }, [to, customerId, contactId]);
+  }, [to, name, customerId, contactId]);
 
   // The timer.
   useEffect(() => {
@@ -122,6 +126,12 @@ export default function CallScreen() {
     const next = !muted;
     callRef.current?.mute(next);
     setMuted(next);
+  };
+
+  const toggleSpeaker = () => {
+    const next = !speaker;
+    setSpeaker(next);
+    void callRef.current?.setSpeaker(next);
   };
 
   const pressKey = (key: string) => {
@@ -245,6 +255,15 @@ export default function CallScreen() {
                 disabled={!live}
                 onPress={() => setShowKeys((v) => !v)}
               />
+              {speakerSupported ? (
+                <Control
+                  icon={speaker ? 'volume-high' : 'volume-medium'}
+                  label="Speaker"
+                  active={speaker}
+                  disabled={!live}
+                  onPress={toggleSpeaker}
+                />
+              ) : null}
             </View>
             <Pressable
               onPress={hangUp}

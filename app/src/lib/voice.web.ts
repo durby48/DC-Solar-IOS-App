@@ -1,27 +1,35 @@
 /**
  * In-app calling — WEB implementation (see `lib/voice.ts` for the split).
  *
- * HOW A CALL HAPPENS. `twilio-voice-token` mints an Access Token for this
- * signed-in admin (identity = staff_profiles.voice_identity). The Twilio
- * Voice JS SDK opens a WebRTC leg to Twilio with it; Twilio asks the TwiML
- * App's Voice URL — `twilio-voice-outbound` — what to do, and that returns
- * <Dial callerId="+1816…"><Number>the customer</Number></Dial>. No bridge
- * leg, no personal cell: the person's audio is already on the line and the
+ * The Twilio Voice JS SDK opens a WebRTC leg to Twilio with the token from
+ * `twilio-voice-token`; Twilio asks the TwiML App's Voice URL —
+ * `twilio-voice-outbound` — what to do, and that returns
+ * <Dial callerId="+1816…"><Number>the customer</Number></Dial>. No bridge leg,
+ * no personal cell: the person's audio is already on the line and the
  * customer sees the DC Solar number.
  *
  * ONE DEVICE PER CALL. A fresh token and a fresh `Device` for every call is
  * simpler than keeping a registered device alive across screens and
- * refreshing its token, and the app does not receive calls in the browser
- * (incoming is Phase 4), so there is nothing to stay registered for.
+ * refreshing its token, and the browser does not receive calls (incoming is
+ * Phase 4b), so there is nothing to stay registered for.
  *
- * The SDK is imported lazily so it stays out of the initial bundle for every
- * screen that never calls.
+ * THE DIST BUNDLE, NOT THE PACKAGE ENTRY. The package's `import` export
+ * condition points Metro at an ESM build it cannot evaluate ("Cannot set
+ * property default of #<Object> which has only a getter" — module-namespace
+ * getters vs. the CJS interop). `dist/twilio.js` is the self-contained bundle
+ * Twilio's own CDN serves: one file, no internal module graph. It is imported
+ * lazily so it stays out of the initial bundle for screens that never call.
  */
 
-import { supabase } from '@/lib/supabase';
+import {
+  fetchVoiceToken,
+  type ActiveCall,
+  type CallState,
+  type StartCallInput,
+  type StartCallResult,
+} from './voice';
 
-import type { ActiveCall, CallState, StartCallInput, StartCallResult } from './voice';
-
+export { fetchVoiceToken } from './voice';
 export type { ActiveCall, CallState, StartCallInput, StartCallResult } from './voice';
 
 export function inAppCallingSupported(): boolean {
@@ -32,58 +40,14 @@ export function inAppCallingSupported(): boolean {
   );
 }
 
-/** The JSON body supabase-js hides on `error.context`. */
-async function readPayload(error: unknown): Promise<{ code?: string; error?: string } | null> {
-  const context = (error as { context?: unknown })?.context;
-  if (!context || typeof context !== 'object') return null;
-  try {
-    const response = context as Response;
-    if (typeof response.clone === 'function') {
-      return (await response.clone().json()) as { code?: string; error?: string };
-    }
-  } catch {
-    // not JSON
-  }
-  return null;
-}
-
-async function fetchToken(): Promise<
-  { ok: true; token: string } | { ok: false; code?: string; message: string }
-> {
-  try {
-    const { data, error } = await supabase.functions.invoke('twilio-voice-token', { body: {} });
-    if (error) {
-      const payload = await readPayload(error);
-      return {
-        ok: false,
-        code: payload?.code,
-        message: payload?.error ?? error.message ?? 'Could not start the call.',
-      };
-    }
-    const result = data as { ok?: boolean; token?: string; code?: string; error?: string } | null;
-    if (!result?.ok || !result.token) {
-      return { ok: false, code: result?.code, message: result?.error ?? 'Could not start the call.' };
-    }
-    return { ok: true, token: result.token };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : 'Could not start the call.' };
-  }
-}
-
 export async function startInAppCall(input: StartCallInput): Promise<StartCallResult> {
   if (!inAppCallingSupported()) {
     return { ok: false, code: 'unsupported', message: 'This browser cannot place calls.' };
   }
 
-  const token = await fetchToken();
+  const token = await fetchVoiceToken();
   if (!token.ok) return token;
 
-  // The package's `import` export condition points Metro at an ESM build it
-  // cannot evaluate ("Cannot set property default of #<Object> which has only
-  // a getter" — module-namespace getters vs. the CJS interop). `dist/twilio.js`
-  // is the self-contained browser bundle Twilio's CDN serves: one file, no
-  // internal module graph, exposes `Twilio.Device` on globalThis (and
-  // module.exports). Type-only import of `Device` above is erased at runtime.
   type DeviceCtor = typeof import('@twilio/voice-sdk').Device;
   let Device: DeviceCtor;
   try {
@@ -121,10 +85,11 @@ export async function startInAppCall(input: StartCallInput): Promise<StartCallRe
   } catch (e) {
     device.destroy();
     const message = e instanceof Error ? e.message : 'Could not start the call.';
+    const micDenied = /permission|NotAllowed/i.test(message);
     return {
       ok: false,
-      code: /permission|NotAllowed/i.test(message) ? 'mic_denied' : undefined,
-      message: /permission|NotAllowed/i.test(message)
+      code: micDenied ? 'mic_denied' : undefined,
+      message: micDenied
         ? 'The browser blocked the microphone. Allow it for this site and try again.'
         : message,
     };
@@ -160,6 +125,8 @@ export async function startInAppCall(input: StartCallInput): Promise<StartCallRe
     mute: (on) => call.mute(on),
     sendDigits: (digits) => call.sendDigits(digits),
     hangUp: () => call.disconnect(),
+    speakerSupported: false,
+    setSpeaker: async () => {},
   };
   return { ok: true, call: active };
 }
