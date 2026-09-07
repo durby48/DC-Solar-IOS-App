@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import type { ReactNode } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
@@ -17,7 +18,13 @@ import { type RecordKind, type WorkspaceRecord } from '@/lib/crmWorkspace';
  * Pattern: Chatwoot's conversation list (recency-ordered, unread state on the
  * row, search on top) applied to records rather than conversations, because
  * in DC Solar the durable thing is the customer, not the thread.
+ *
+ * A fourth lens, Tasks, swaps the record list for `tasksPane` (the bucketed
+ * follow-up list) under the same search box; its chip carries the number of
+ * tasks overdue or due today.
  */
+
+export type ListMode = RecordKind | 'all' | 'tasks';
 
 function relativeTime(iso: string | null): string {
   if (!iso) return '';
@@ -44,6 +51,8 @@ export function RecordList({
   kind,
   onKind,
   onNewLead,
+  taskBadge = 0,
+  tasksPane,
 }: {
   records: WorkspaceRecord[];
   total: { customers: number; leads: number };
@@ -51,9 +60,13 @@ export function RecordList({
   onSelect: (record: WorkspaceRecord) => void;
   search: string;
   onSearch: (next: string) => void;
-  kind: RecordKind | 'all';
-  onKind: (next: RecordKind | 'all') => void;
+  kind: ListMode;
+  onKind: (next: ListMode) => void;
   onNewLead?: () => void;
+  /** Open tasks overdue or due today — shown on the Tasks chip. */
+  taskBadge?: number;
+  /** Rendered in place of the record list while `kind === 'tasks'`. */
+  tasksPane?: ReactNode;
 }) {
   const renderRow = ({ item }: { item: WorkspaceRecord }) => {
     const selected = item.key === selectedKey;
@@ -102,7 +115,7 @@ export function RecordList({
         <TextInput
           value={search}
           onChangeText={onSearch}
-          placeholder="Search name, phone, address, job #"
+          placeholder={kind === 'tasks' ? 'Search tasks' : 'Search name, phone, address, job #'}
           placeholderTextColor={colors.inkSoft}
           autoCapitalize="none"
           autoCorrect={false}
@@ -118,26 +131,38 @@ export function RecordList({
         <Chip label={`All ${total.customers + total.leads}`} tone="ocean" selected={kind === 'all'} onPress={() => onKind('all')} />
         <Chip label={`Customers ${total.customers}`} tone="ocean" selected={kind === 'customer'} onPress={() => onKind('customer')} />
         <Chip label={`Leads ${total.leads}`} tone="ocean" selected={kind === 'lead'} onPress={() => onKind('lead')} />
-        {onNewLead ? (
+        {tasksPane ? (
+          <Chip
+            label={taskBadge ? `Tasks ${taskBadge}` : 'Tasks'}
+            tone={taskBadge && kind !== 'tasks' ? 'sun' : 'ocean'}
+            selected={kind === 'tasks'}
+            onPress={() => onKind('tasks')}
+          />
+        ) : null}
+        {onNewLead && kind !== 'tasks' ? (
           <Pressable onPress={onNewLead} style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
             <Ionicons name="add" size={14} color={colors.ocean} />
             <Text style={styles.newLeadText}>Lead</Text>
           </Pressable>
         ) : null}
       </View>
-      <FlatList
-        data={records}
-        keyExtractor={(item) => item.key}
-        renderItem={renderRow}
-        style={styles.list}
-        contentContainerStyle={styles.listContent}
-        keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={
-          <Text style={styles.empty}>
-            {search ? 'Nobody matches that search.' : 'No records yet.'}
-          </Text>
-        }
-      />
+      {kind === 'tasks' && tasksPane ? (
+        tasksPane
+      ) : (
+        <FlatList
+          data={records}
+          keyExtractor={(item) => item.key}
+          renderItem={renderRow}
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={
+            <Text style={styles.empty}>
+              {search ? 'Nobody matches that search.' : 'No records yet.'}
+            </Text>
+          }
+        />
+      )}
     </View>
   );
 }

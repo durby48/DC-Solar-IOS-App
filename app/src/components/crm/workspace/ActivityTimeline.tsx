@@ -25,6 +25,8 @@ const ICONS: Record<ActivityKind, { name: keyof typeof Ionicons.glyphMap; fg: st
   job_completed: { name: 'checkmark-circle', fg: colors.cream, bg: colors.olive },
   job_stage: { name: 'swap-horizontal', fg: colors.olive, bg: colors.oliveSoft },
   lead_status: { name: 'flag', fg: colors.amberDeep, bg: colors.amberSoft },
+  task_added: { name: 'checkbox-outline', fg: colors.indigoDeep, bg: colors.indigoSoft },
+  task_done: { name: 'checkbox', fg: colors.mintDeep, bg: colors.mintSoft },
   estimate: { name: 'receipt', fg: colors.indigoDeep, bg: colors.indigoSoft },
   contract: { name: 'create', fg: colors.violetDeep, bg: colors.violetSoft },
   invoice: { name: 'cash', fg: colors.coralDeep, bg: colors.coralSoft },

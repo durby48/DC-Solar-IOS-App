@@ -3,6 +3,8 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { TaskComposer } from '@/components/crm/workspace/TaskComposer';
+import { TaskItem } from '@/components/crm/workspace/TaskItem';
 import { Pill } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
 import { type Assignment } from '@/lib/assignments';
@@ -13,6 +15,7 @@ import { type CustomerDocument } from '@/lib/customers';
 import { updateLead } from '@/lib/leads';
 import { assignLead, setLeadStatus, type LeadStatus } from '@/lib/sales';
 import { STAGE_COLORS, isStage } from '@/lib/stages';
+import { type Task } from '@/lib/tasks';
 
 /**
  * The right column: the record's facts, editable in place.
@@ -21,8 +24,8 @@ import { STAGE_COLORS, isStage } from '@/lib/stages';
  * (status chips write straight through `setLeadStatus`, the rep picker
  * through `assignLead` — the same functions the Sales tab uses), the money
  * rollup where the caller may see money, the next scheduled day, who is
- * assigned, and files. Tasks and Email are listed as what they are: not
- * built yet. No faked panels.
+ * assigned, follow-up tasks (open ones, tick to close, add inline — Phase
+ * 5), and files. What is not built yet says so. No faked panels.
  *
  * Pattern: Chatwoot's ContactPanel / Twenty's editable field panel — small
  * label-over-value rows, an Edit toggle that turns the section into inputs,
@@ -71,7 +74,10 @@ export function DetailPanel({
   assignments,
   reps,
   hasMoney,
+  tasks,
+  myEmail,
   onChanged,
+  onTasksChanged,
   onClose,
 }: {
   record: WorkspaceRecord;
@@ -81,7 +87,10 @@ export function DetailPanel({
   assignments: Assignment[];
   reps: { email: string; name: string }[];
   hasMoney: boolean;
+  tasks: Task[];
+  myEmail: string | null;
   onChanged: () => void;
+  onTasksChanged: () => void;
   /** Narrow layouts: the panel is a sheet with a close. */
   onClose?: () => void;
 }) {
@@ -92,10 +101,14 @@ export function DetailPanel({
   const [error, setError] = useState<string | null>(null);
   const [statusBusy, setStatusBusy] = useState<LeadStatus | null>(null);
   const [repOpen, setRepOpen] = useState(false);
+  const [addingTask, setAddingTask] = useState(false);
+  const [showDoneTasks, setShowDoneTasks] = useState(false);
 
   useEffect(() => {
     setEditing(false);
     setError(null);
+    setAddingTask(false);
+    setShowDoneTasks(false);
     setForm({
       name: record.name,
       phone: record.phone ?? '',
@@ -158,6 +171,8 @@ export function DetailPanel({
   const summary = record.summary;
   const rep = record.lead?.assigned_to ?? null;
   const repName = rep ? (reps.find((r) => r.email.toLowerCase() === rep.toLowerCase())?.name ?? rep) : null;
+  const openTasks = tasks.filter((t) => !t.done_at);
+  const doneTasks = tasks.filter((t) => t.done_at);
 
   return (
     <ScrollView style={styles.column} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -341,8 +356,39 @@ export function DetailPanel({
         ) : null}
       </Section>
 
-      <Section title="Tasks">
-        <Text style={styles.factMuted}>Follow-up tasks are a later CRM phase — nothing to show yet.</Text>
+      <Section
+        title={`Tasks${openTasks.length ? ` · ${openTasks.length}` : ''}`}
+        right={
+          <Pressable onPress={() => setAddingTask((v) => !v)} hitSlop={6} accessibilityLabel={addingTask ? 'Cancel new task' : 'New task'}>
+            <Ionicons name={addingTask ? 'close-circle-outline' : 'add-circle-outline'} size={18} color={colors.ocean} />
+          </Pressable>
+        }>
+        {addingTask ? (
+          <TaskComposer
+            reps={reps}
+            myEmail={myEmail}
+            link={
+              record.kind === 'customer'
+                ? { customerId: record.id, jobId: current?.id ?? null }
+                : { leadId: record.id }
+            }
+            onAdded={() => {
+              setAddingTask(false);
+              onTasksChanged();
+            }}
+            onCancel={() => setAddingTask(false)}
+          />
+        ) : null}
+        {openTasks.length === 0 && !addingTask ? <Text style={styles.factMuted}>No open tasks.</Text> : null}
+        {openTasks.map((t) => (
+          <TaskItem key={t.id} task={t} reps={reps} onChanged={onTasksChanged} />
+        ))}
+        {doneTasks.length ? (
+          <Pressable onPress={() => setShowDoneTasks((v) => !v)} hitSlop={4}>
+            <Text style={styles.linkText}>{showDoneTasks ? 'Hide done' : `Show ${doneTasks.length} done`}</Text>
+          </Pressable>
+        ) : null}
+        {showDoneTasks ? doneTasks.slice(0, 10).map((t) => <TaskItem key={t.id} task={t} reps={reps} onChanged={onTasksChanged} />) : null}
       </Section>
 
       {record.kind === 'customer' ? (
@@ -437,5 +483,6 @@ const styles = StyleSheet.create({
   moneyLabel: { color: colors.inkSoft, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
   file: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   fileText: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: '600' },
+  linkText: { color: colors.ocean, fontSize: 12, fontWeight: '700' },
   pressed: { opacity: 0.6 },
 });

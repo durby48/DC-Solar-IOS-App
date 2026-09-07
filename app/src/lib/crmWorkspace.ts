@@ -28,6 +28,7 @@ import {
 } from '@/lib/crm';
 import { fetchOpenLeads, type Lead, type LeadStatus } from '@/lib/sales';
 import { supabase } from '@/lib/supabase';
+import { type Task } from '@/lib/tasks';
 import { type Customer } from '@/lib/types';
 
 const COMPANY = 'dc-solar';
@@ -306,7 +307,9 @@ export type ActivityKind =
   | 'invoice'
   | 'payment'
   | 'lead_created'
-  | 'lead_status';
+  | 'lead_status'
+  | 'task_added'
+  | 'task_done';
 
 export interface ActivityEvent {
   id: string;
@@ -320,7 +323,8 @@ export interface ActivityEvent {
   jobId: string | null;
 }
 
-function authorName(email: string | null | undefined): string | null {
+/** "devonsd311@gmail.com" → "Devonsd311", "test-crew@…" → "Test": the first name-ish token, capitalised. */
+export function authorName(email: string | null | undefined): string | null {
   if (!email) return null;
   const local = email.split('@')[0] ?? '';
   const first = local.split(/[._-]/)[0] ?? local;
@@ -352,8 +356,33 @@ export function composeActivity(input: {
   finance: CustomerFinanceRow[];
   lead?: Lead | null;
   history?: StageChange[];
+  tasks?: Task[];
 }): ActivityEvent[] {
   const events: ActivityEvent[] = [];
+
+  for (const t of input.tasks ?? []) {
+    events.push({
+      id: `task:${t.id}:added`,
+      at: t.created_at,
+      kind: 'task_added',
+      title: `Task added · ${t.title}`,
+      detail: t.notes,
+      actor: authorName(t.created_by),
+      jobId: t.job_id,
+    });
+    if (t.done_at) {
+      events.push({
+        id: `task:${t.id}:done`,
+        at: t.done_at,
+        kind: 'task_done',
+        title: `Task done · ${t.title}`,
+        detail: null,
+        // The row does not record who ticked it; the assignee is the best guess.
+        actor: authorName(t.assigned_to),
+        jobId: t.job_id,
+      });
+    }
+  }
 
   const jobLabel = new Map<string, string>();
   for (const j of input.jobs) jobLabel.set(j.id, j.job_number ?? j.name);

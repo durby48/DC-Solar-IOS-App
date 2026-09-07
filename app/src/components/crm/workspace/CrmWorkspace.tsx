@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { DetailPanel } from '@/components/crm/workspace/DetailPanel';
-import { RecordList } from '@/components/crm/workspace/RecordList';
+import { RecordList, type ListMode } from '@/components/crm/workspace/RecordList';
+import { TasksPane } from '@/components/crm/workspace/TasksPane';
 import { WorkspaceCenter } from '@/components/crm/workspace/WorkspaceCenter';
 import { colors, spacing } from '@/constants/theme';
 import { fetchAssignmentsByJob, type Assignment } from '@/lib/assignments';
@@ -32,13 +33,13 @@ import {
   fetchWorkspaceRecords,
   filterRecords,
   type ActivityEvent,
-  type RecordKind,
   type StageChange,
   type WorkspaceRecord,
 } from '@/lib/crmWorkspace';
 import { fetchCustomerDocuments, type CustomerDocument } from '@/lib/customers';
 import { fetchEmployeeOptions } from '@/lib/myhours';
 import { useRole } from '@/lib/role';
+import { countDueNow, fetchTasks, type Task } from '@/lib/tasks';
 
 /**
  * The CRM workspace: list · conversation/activity · details, on one screen.
@@ -73,7 +74,7 @@ export function CrmWorkspace() {
   const [hasMoney, setHasMoney] = useState(false);
   const [listStatus, setListStatus] = useState<'loading' | 'ok' | 'unavailable'>('loading');
   const [search, setSearch] = useState('');
-  const [kind, setKind] = useState<RecordKind | 'all'>('all');
+  const [kind, setKind] = useState<ListMode>('all');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
 
@@ -82,6 +83,9 @@ export function CrmWorkspace() {
   const [reps, setReps] = useState<{ email: string; name: string }[]>([]);
   const [assignments, setAssignments] = useState<Map<string, Assignment[]>>(new Map());
   const [documents, setDocuments] = useState<Map<string, CustomerDocument[]>>(new Map());
+  // Every task the caller may read (RLS: all for admins). The record's own
+  // tasks are a filter over this, so a tick anywhere refreshes one read.
+  const [tasks, setTasks] = useState<Task[]>([]);
 
   // Per-selection loads.
   const [messages, setMessages] = useState<CommsMessage[]>([]);
@@ -92,6 +96,11 @@ export function CrmWorkspace() {
   const [history, setHistory] = useState<StageChange[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  const loadTasks = useCallback(async () => {
+    const result = await fetchTasks({ all: true });
+    setTasks(result.status === 'ok' ? result.tasks : []);
+  }, []);
+
   const loadList = useCallback(async () => {
     const [result, s, t, r, a, d] = await Promise.all([
       fetchWorkspaceRecords(),
@@ -100,6 +109,7 @@ export function CrmWorkspace() {
       fetchEmployeeOptions(),
       fetchAssignmentsByJob(),
       fetchCustomerDocuments(),
+      loadTasks(),
     ]);
     setRecords(result.records);
     setHasMoney(result.hasMoney);
@@ -109,7 +119,7 @@ export function CrmWorkspace() {
     setReps(r);
     setAssignments(a ?? new Map());
     setDocuments(d ?? new Map());
-  }, []);
+  }, [loadTasks]);
 
   useFocusEffect(
     useCallback(() => {
@@ -172,12 +182,27 @@ export function CrmWorkspace() {
     if (selected) await loadSelected(selected);
   }, [loadList, loadSelected, selected]);
 
-  const events: ActivityEvent[] = useMemo(
-    () => (selected ? composeActivity({ messages, notes, jobs, finance, lead: selected.lead, history }) : []),
-    [selected, messages, notes, jobs, finance, history],
+  const recordTasks = useMemo(
+    () =>
+      selected
+        ? tasks.filter((t) => (selected.kind === 'customer' ? t.customer_id === selected.id : t.lead_id === selected.id))
+        : [],
+    [selected, tasks],
   );
 
-  const visible = useMemo(() => filterRecords(records, search, kind), [records, search, kind]);
+  const events: ActivityEvent[] = useMemo(
+    () =>
+      selected
+        ? composeActivity({ messages, notes, jobs, finance, lead: selected.lead, history, tasks: recordTasks })
+        : [],
+    [selected, messages, notes, jobs, finance, history, recordTasks],
+  );
+
+  const visible = useMemo(
+    () => filterRecords(records, kind === 'tasks' ? '' : search, kind === 'tasks' ? 'all' : kind),
+    [records, search, kind],
+  );
+  const taskBadge = useMemo(() => countDueNow(tasks), [tasks]);
   const totals = useMemo(
     () => ({
       customers: records.filter((r) => r.kind === 'customer').length,
@@ -234,6 +259,21 @@ export function CrmWorkspace() {
       kind={kind}
       onKind={setKind}
       onNewLead={() => router.push('/leads' as never)}
+      taskBadge={taskBadge}
+      tasksPane={
+        <TasksPane
+          tasks={tasks}
+          records={records}
+          reps={reps}
+          myEmail={role?.email ?? null}
+          query={search}
+          onChanged={() => void loadTasks()}
+          onSelectRecord={(r) => {
+            setSelectedKey(r.key);
+            setDetailOpen(false);
+          }}
+        />
+      }
     />
   );
 
@@ -273,7 +313,10 @@ export function CrmWorkspace() {
       assignments={assignments.get(selected.currentJob?.id ?? '') ?? []}
       reps={reps}
       hasMoney={hasMoney}
+      tasks={recordTasks}
+      myEmail={role?.email ?? null}
       onChanged={() => void refreshAll()}
+      onTasksChanged={() => void loadTasks()}
       onClose={layout === 'wide' ? undefined : () => setDetailOpen(false)}
     />
   ) : null;
