@@ -22,15 +22,13 @@
 
 import type { Call as TwilioCall, Voice as TwilioVoice } from '@twilio/voice-react-native-sdk';
 
-import {
-  fetchVoiceToken,
-  type ActiveCall,
-  type CallState,
-  type StartCallInput,
-  type StartCallResult,
-} from './voice';
+// Type-only from './voice' (erased at runtime). The RUNTIME import comes from
+// voiceToken.ts: on iOS, `./voice` resolves to THIS file, and a runtime
+// self-import overflows the call stack (found on web 2026-09-07; same bug).
+import type { ActiveCall, CallState, StartCallInput, StartCallResult } from './voice';
+import { fetchVoiceToken } from './voiceToken';
 
-export { fetchVoiceToken } from './voice';
+export { fetchVoiceToken } from './voiceToken';
 export type { ActiveCall, CallState, StartCallInput, StartCallResult } from './voice';
 
 type Sdk = typeof import('@twilio/voice-react-native-sdk');

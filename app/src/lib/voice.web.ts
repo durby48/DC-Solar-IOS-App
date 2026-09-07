@@ -21,15 +21,13 @@
  * lazily so it stays out of the initial bundle for screens that never call.
  */
 
-import {
-  fetchVoiceToken,
-  type ActiveCall,
-  type CallState,
-  type StartCallInput,
-  type StartCallResult,
-} from './voice';
+// Type-only from './voice' (erased at runtime). The RUNTIME import comes from
+// voiceToken.ts: on web, `./voice` resolves to THIS file, and a runtime
+// self-import overflowed the call stack (2026-09-07).
+import type { ActiveCall, CallState, StartCallInput, StartCallResult } from './voice';
+import { fetchVoiceToken } from './voiceToken';
 
-export { fetchVoiceToken } from './voice';
+export { fetchVoiceToken } from './voiceToken';
 export type { ActiveCall, CallState, StartCallInput, StartCallResult } from './voice';
 
 export function inAppCallingSupported(): boolean {

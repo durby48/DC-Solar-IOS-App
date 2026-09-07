@@ -18,7 +18,8 @@
  * with the DC Solar number as caller ID. No bridge leg.
  */
 
-import { supabase } from '@/lib/supabase';
+// NEVER add a runtime `./voice` import to a sibling: see lib/voiceToken.ts.
+export { fetchVoiceToken } from './voiceToken';
 
 export type CallState = 'connecting' | 'ringing' | 'active' | 'ended' | 'failed';
 
@@ -46,55 +47,6 @@ export interface StartCallInput {
 export type StartCallResult =
   | { ok: true; call: ActiveCall }
   | { ok: false; code?: string; message: string };
-
-/** The JSON body supabase-js hides on `error.context`. */
-async function readPayload(error: unknown): Promise<{ code?: string; error?: string } | null> {
-  const context = (error as { context?: unknown })?.context;
-  if (!context || typeof context !== 'object') return null;
-  try {
-    const response = context as Response;
-    if (typeof response.clone === 'function') {
-      return (await response.clone().json()) as { code?: string; error?: string };
-    }
-  } catch {
-    // not JSON
-  }
-  return null;
-}
-
-/**
- * A fresh Voice Access Token from `twilio-voice-token`. Shared by the web
- * and native implementations; a 503 `not_configured` here is the honest
- * "in-app calling is not set up yet" that the call screen shows.
- */
-export async function fetchVoiceToken(): Promise<
-  { ok: true; token: string; identity: string } | { ok: false; code?: string; message: string }
-> {
-  try {
-    const { data, error } = await supabase.functions.invoke('twilio-voice-token', { body: {} });
-    if (error) {
-      const payload = await readPayload(error);
-      return {
-        ok: false,
-        code: payload?.code,
-        message: payload?.error ?? error.message ?? 'Could not start the call.',
-      };
-    }
-    const result = data as {
-      ok?: boolean;
-      token?: string;
-      identity?: string;
-      code?: string;
-      error?: string;
-    } | null;
-    if (!result?.ok || !result.token) {
-      return { ok: false, code: result?.code, message: result?.error ?? 'Could not start the call.' };
-    }
-    return { ok: true, token: result.token, identity: result.identity ?? '' };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : 'Could not start the call.' };
-  }
-}
 
 /** Can THIS build place a call itself? Only web and native say yes. */
 export function inAppCallingSupported(): boolean {
