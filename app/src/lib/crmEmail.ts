@@ -47,18 +47,25 @@ export function isOurAddress(address: string, mailbox: string | null): boolean {
 export async function fetchRecordEmailThreads(email: string | null | undefined): Promise<RecordEmailResult> {
   const address = (email ?? '').trim().toLowerCase();
   if (!address || !address.includes('@')) return { status: 'no_email' };
+  // "No mailbox for this account" is a property of the session, not the
+  // record: remember it so an unmapped admin costs one 403, not one per click.
+  if (noMailboxMessage) return { status: 'no_mailbox', message: noMailboxMessage };
   const result = await fetchInboxThreads({
     q: `{from:${address} to:${address} cc:${address}}`,
     label: 'ALL',
     maxResults: 25,
   });
   if (!result.ok) {
-    return isNoMailbox(result.message)
-      ? { status: 'no_mailbox', message: result.message }
-      : { status: 'unavailable', message: result.message };
+    if (isNoMailbox(result.message)) {
+      noMailboxMessage = result.message;
+      return { status: 'no_mailbox', message: result.message };
+    }
+    return { status: 'unavailable', message: result.message };
   }
   return { status: 'ok', mailbox: result.mailbox, threads: result.threads };
 }
+
+let noMailboxMessage: string | null = null;
 
 /** "Re: Re: Estimate" → "Estimate"; keeps the subject readable in a one-line row. */
 export function bareSubject(subject: string): string {
