@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AppointmentComposer, AppointmentItem } from '@/components/crm/workspace/Appointments';
+import { CurrentJobCard } from '@/components/crm/workspace/CurrentJobCard';
 import { TaskComposer } from '@/components/crm/workspace/TaskComposer';
 import { TaskItem } from '@/components/crm/workspace/TaskItem';
 import { Pill } from '@/components/ui';
@@ -22,12 +23,15 @@ import { type Task } from '@/lib/tasks';
 /**
  * The right column: the record's facts, editable in place.
  *
- * Contact, jobs (current one first, stage pill, tap to open), lead funnel
- * (status chips write straight through `setLeadStatus`, the rep picker
- * through `assignLead` — the same functions the Sales tab uses), the money
- * rollup where the caller may see money, the next scheduled day, who is
- * assigned, follow-up tasks (open ones, tick to close, add inline — Phase
- * 5), and files. What is not built yet says so. No faked panels.
+ * Contact, then the CURRENT JOB as a card of its own with its stage as a
+ * live control (Phase 8 — `CurrentJobCard`, writes through `updateJobStage`
+ * exactly like the Pipeline), lead funnel (status chips write straight
+ * through `setLeadStatus`, the rep picker through `assignLead` — the same
+ * functions the Sales tab uses), the money rollup where the caller may see
+ * money, follow-up tasks (open ones, tick to close, add inline — Phase 5),
+ * the OTHER jobs behind a disclosure so history stays one tap away without
+ * burying the present, and files. What is not built yet says so. No faked
+ * panels.
  *
  * Pattern: Chatwoot's ContactPanel / Twenty's editable field panel — small
  * label-over-value rows, an Edit toggle that turns the section into inputs,
@@ -79,6 +83,7 @@ export function DetailPanel({
   tasks,
   appointments,
   myEmail,
+  canEditStage = false,
   onChanged,
   onTasksChanged,
   onAppointmentsChanged,
@@ -94,6 +99,8 @@ export function DetailPanel({
   tasks: Task[];
   appointments: LeadAppointment[];
   myEmail: string | null;
+  /** Admins may move the current job's stage from here. */
+  canEditStage?: boolean;
   onChanged: () => void;
   onTasksChanged: () => void;
   onAppointmentsChanged: () => void;
@@ -111,6 +118,7 @@ export function DetailPanel({
   const [showDoneTasks, setShowDoneTasks] = useState(false);
   const [addingAppt, setAddingAppt] = useState(false);
   const [showPastAppts, setShowPastAppts] = useState(false);
+  const [showAllJobs, setShowAllJobs] = useState(false);
 
   useEffect(() => {
     setEditing(false);
@@ -119,6 +127,7 @@ export function DetailPanel({
     setShowDoneTasks(false);
     setAddingAppt(false);
     setShowPastAppts(false);
+    setShowAllJobs(false);
     setForm({
       name: record.name,
       phone: record.phone ?? '',
@@ -171,7 +180,9 @@ export function DetailPanel({
   };
 
   const current = record.currentJob;
-  const orderedJobs = [...jobs].sort((a, b) => (a.id === current?.id ? -1 : b.id === current?.id ? 1 : 0));
+  const currentJob = current ? (jobs.find((j) => j.id === current.id) ?? null) : null;
+  const otherJobs = jobs.filter((j) => j.id !== current?.id);
+  const OTHER_JOBS_PREVIEW = 3;
   const nextDay = jobs
     .map((j) => j.scheduled_for)
     .filter((d): d is string => Boolean(d) && (d as string) >= new Date().toISOString().slice(0, 10))
@@ -289,9 +300,17 @@ export function DetailPanel({
         </Section>
       ) : null}
 
-      {record.kind === 'customer' ? (
+      {record.kind === 'customer' && currentJob ? (
+        <CurrentJobCard
+          job={currentJob}
+          crew={crew.map((a) => a.name.split(' ')[0] ?? a.name)}
+          nextDay={nextDay ?? null}
+          canEdit={canEditStage}
+          onChanged={onChanged}
+        />
+      ) : record.kind === 'customer' ? (
         <Section
-          title={`Jobs${jobs.length ? ` · ${jobs.length}` : ''}`}
+          title="Jobs"
           right={
             <Pressable
               onPress={() => router.push({ pathname: '/job-editor', params: { customerId: record.id } } as never)}
@@ -300,33 +319,7 @@ export function DetailPanel({
               <Ionicons name="add-circle-outline" size={18} color={colors.ocean} />
             </Pressable>
           }>
-          {orderedJobs.length === 0 ? (
-            <Text style={styles.factMuted}>No jobs yet.</Text>
-          ) : (
-            orderedJobs.map((j) => {
-              const stage = isStage(j.stage) ? j.stage : null;
-              const pill = stage ? STAGE_COLORS[stage] : { bg: colors.slateSoft, fg: colors.slateDeep };
-              const isCurrent = j.id === current?.id;
-              return (
-                <Pressable
-                  key={j.id}
-                  onPress={() => router.push({ pathname: '/job/[id]', params: { id: j.id } })}
-                  style={({ pressed }) => [styles.job, isCurrent && styles.jobCurrent, pressed && styles.pressed]}>
-                  <View style={styles.jobBody}>
-                    <Text style={styles.jobTitle} numberOfLines={1}>
-                      {j.job_number ?? j.name}
-                      {isCurrent ? <Text style={styles.jobCurrentTag}> · current</Text> : null}
-                    </Text>
-                    <Text style={styles.jobMeta} numberOfLines={1}>
-                      {j.name !== j.job_number ? j.name : ''}
-                      {j.scheduled_for ? `${j.name !== j.job_number ? ' · ' : ''}${shortDate(j.scheduled_for)}` : ''}
-                    </Text>
-                  </View>
-                  <Pill label={stage ?? (j.status ?? 'No stage')} bg={pill.bg} fg={pill.fg} />
-                </Pressable>
-              );
-            })
-          )}
+          <Text style={styles.factMuted}>No jobs yet.</Text>
         </Section>
       ) : null}
 
@@ -383,12 +376,7 @@ export function DetailPanel({
           ) : null}
           {showPastAppts ? pastAppts.slice(0, 10).map((a) => <AppointmentItem key={a.id} appointment={a} reps={reps} onChanged={onAppointmentsChanged} />) : null}
         </Section>
-      ) : (
-        <Section title="Next up">
-          <Fact label="Next scheduled day" value={nextDay ? shortDate(nextDay) : null} muted={!nextDay} />
-          <Fact label="Crew on current job" value={crew.length ? crew.map((a) => a.name).join(', ') : current ? null : undefined} muted />
-        </Section>
-      )}
+      ) : null}
 
       <Section
         title={`Tasks${openTasks.length ? ` · ${openTasks.length}` : ''}`}
@@ -424,6 +412,51 @@ export function DetailPanel({
         ) : null}
         {showDoneTasks ? doneTasks.slice(0, 10).map((t) => <TaskItem key={t.id} task={t} reps={reps} onChanged={onTasksChanged} />) : null}
       </Section>
+
+      {record.kind === 'customer' && currentJob ? (
+        <Section
+          title={otherJobs.length ? `Other jobs · ${otherJobs.length}` : 'Jobs'}
+          right={
+            <Pressable
+              onPress={() => router.push({ pathname: '/job-editor', params: { customerId: record.id } } as never)}
+              hitSlop={6}
+              accessibilityLabel="New job">
+              <Ionicons name="add-circle-outline" size={18} color={colors.ocean} />
+            </Pressable>
+          }>
+          {otherJobs.length === 0 ? <Text style={styles.factMuted}>Just the one.</Text> : null}
+          {(showAllJobs ? otherJobs : otherJobs.slice(0, OTHER_JOBS_PREVIEW)).map((j) => {
+            const stage = isStage(j.stage) ? j.stage : null;
+            const pill = stage ? STAGE_COLORS[stage] : { bg: colors.slateSoft, fg: colors.slateDeep };
+            return (
+              <Pressable
+                key={j.id}
+                onPress={() => router.push({ pathname: '/job/[id]', params: { id: j.id } })}
+                style={({ pressed }) => [styles.job, pressed && styles.pressed]}>
+                <View style={styles.jobBody}>
+                  <Text style={styles.jobTitle} numberOfLines={1}>
+                    {j.job_number ?? j.name}
+                  </Text>
+                  <Text style={styles.jobMeta} numberOfLines={1}>
+                    {j.name !== j.job_number ? j.name : ''}
+                    {j.completed_on
+                      ? `${j.name !== j.job_number ? ' · ' : ''}done ${shortDate(j.completed_on)}`
+                      : j.scheduled_for
+                        ? `${j.name !== j.job_number ? ' · ' : ''}${shortDate(j.scheduled_for)}`
+                        : ''}
+                  </Text>
+                </View>
+                <Pill label={stage ?? (j.status ?? 'No stage')} bg={pill.bg} fg={pill.fg} />
+              </Pressable>
+            );
+          })}
+          {otherJobs.length > OTHER_JOBS_PREVIEW ? (
+            <Pressable onPress={() => setShowAllJobs((v) => !v)} hitSlop={4}>
+              <Text style={styles.linkText}>{showAllJobs ? 'Show fewer' : `Show all ${otherJobs.length}`}</Text>
+            </Pressable>
+          ) : null}
+        </Section>
+      ) : null}
 
       {record.kind === 'customer' ? (
         <Section

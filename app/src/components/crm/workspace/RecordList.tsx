@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import type { ReactNode } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { Chip } from '@/components/ui';
@@ -22,6 +22,12 @@ import { type RecordKind, type WorkspaceRecord } from '@/lib/crmWorkspace';
  * A fourth lens, Tasks, swaps the record list for `tasksPane` (the bucketed
  * follow-up list) under the same search box; its chip carries the number of
  * tasks overdue or due today.
+ *
+ * Desktop (Phase 8): the selected row carries a left accent bar and a white
+ * ground — Chatwoot's active-conversation treatment, where a tint alone was
+ * invisible on this palette. `/` focuses the search box from anywhere on the
+ * page; ↑ / ↓ in it move the selection, Enter opens the top match, Esc
+ * clears. All web-only listeners, no-ops on a phone.
  */
 
 export type ListMode = RecordKind | 'all' | 'tasks';
@@ -68,6 +74,47 @@ export function RecordList({
   /** Rendered in place of the record list while `kind === 'tasks'`. */
   tasksPane?: ReactNode;
 }) {
+  const searchRef = useRef<TextInput>(null);
+  const listRef = useRef<FlatList<WorkspaceRecord>>(null);
+
+  // "/" anywhere on the page → the search box (web only).
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  const step = (delta: 1 | -1) => {
+    if (records.length === 0) return;
+    const index = records.findIndex((r) => r.key === selectedKey);
+    const next = index === -1 ? (delta === 1 ? 0 : records.length - 1) : Math.min(records.length - 1, Math.max(0, index + delta));
+    onSelect(records[next]);
+    try {
+      listRef.current?.scrollToIndex({ index: next, viewPosition: 0.5, animated: false });
+    } catch {
+      // A row not yet measured: FlatList throws, the selection still moved.
+    }
+  };
+
+  const onSearchKey = (key: string) => {
+    if (key === 'ArrowDown') step(1);
+    else if (key === 'ArrowUp') step(-1);
+    else if (key === 'Enter') {
+      if (records[0] && !records.some((r) => r.key === selectedKey)) onSelect(records[0]);
+    } else if (key === 'Escape') {
+      onSearch('');
+      searchRef.current?.blur();
+    }
+  };
+
   const renderRow = ({ item }: { item: WorkspaceRecord }) => {
     const selected = item.key === selectedKey;
     const unread = item.unread > 0;
@@ -75,6 +122,7 @@ export function RecordList({
       <Pressable
         onPress={() => onSelect(item)}
         style={({ pressed }) => [styles.row, selected && styles.rowSelected, pressed && styles.rowPressed]}>
+        <View style={[styles.accent, selected && styles.accentSelected]} />
         <CustomerAvatar customer={{ id: item.id, name: item.name }} size={36} url={null} />
         <View style={styles.rowBody}>
           <View style={styles.rowTop}>
@@ -113,8 +161,10 @@ export function RecordList({
       <View style={styles.searchRow}>
         <Ionicons name="search" size={15} color={colors.inkSoft} />
         <TextInput
+          ref={searchRef}
           value={search}
           onChangeText={onSearch}
+          onKeyPress={(e) => onSearchKey(e.nativeEvent.key)}
           placeholder={kind === 'tasks' ? 'Search tasks' : 'Search name, phone, address, job #'}
           placeholderTextColor={colors.inkSoft}
           autoCapitalize="none"
@@ -124,6 +174,13 @@ export function RecordList({
         {search ? (
           <Pressable onPress={() => onSearch('')} hitSlop={8} accessibilityLabel="Clear search">
             <Ionicons name="close-circle" size={15} color={colors.inkSoft} />
+          </Pressable>
+        ) : Platform.OS === 'web' ? (
+          <Text style={styles.kbd}>/</Text>
+        ) : null}
+        {onNewLead ? (
+          <Pressable onPress={onNewLead} hitSlop={6} accessibilityLabel="New lead" style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
+            <Ionicons name="person-add-outline" size={15} color={colors.ocean} />
           </Pressable>
         ) : null}
       </View>
@@ -139,19 +196,17 @@ export function RecordList({
             onPress={() => onKind('tasks')}
           />
         ) : null}
-        {onNewLead && kind !== 'tasks' ? (
-          <Pressable onPress={onNewLead} style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
-            <Ionicons name="add" size={14} color={colors.ocean} />
-            <Text style={styles.newLeadText}>Lead</Text>
-          </Pressable>
-        ) : null}
       </View>
       {kind === 'tasks' && tasksPane ? (
         tasksPane
       ) : (
         <FlatList
+          ref={listRef}
           data={records}
           keyExtractor={(item) => item.key}
+          onScrollToIndexFailed={() => {
+            // Unmeasured rows: nothing to do, the selection already moved.
+          }}
           renderItem={renderRow}
           style={styles.list}
           contentContainerStyle={styles.listContent}
@@ -191,31 +246,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingBottom: spacing.xs,
   },
-  newLead: {
-    marginLeft: 'auto',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    backgroundColor: colors.white,
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+  newLead: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.skySoft },
+  kbd: {
+    color: colors.inkSoft,
+    fontSize: 10,
+    fontWeight: '800',
     borderWidth: 1,
     borderColor: colors.line,
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
   },
-  newLeadText: { color: colors.ocean, fontSize: 12, fontWeight: '800' },
   list: { flex: 1 },
   listContent: { paddingBottom: spacing.xl },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    paddingHorizontal: spacing.sm + 2,
+    paddingLeft: spacing.sm,
+    paddingRight: spacing.sm + 2,
     paddingVertical: spacing.sm + 2,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
   rowSelected: { backgroundColor: colors.white },
+  accent: { width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: 'transparent', marginRight: -2 },
+  accentSelected: { backgroundColor: colors.ocean },
   rowPressed: { backgroundColor: colors.skySoft },
   rowBody: { flex: 1, gap: 2 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },

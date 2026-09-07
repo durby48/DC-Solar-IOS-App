@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ActivityTimeline } from '@/components/crm/workspace/ActivityTimeline';
@@ -15,7 +15,8 @@ import {
 } from '@/lib/comms';
 import { addCustomerNote, type CustomerNote } from '@/lib/crm';
 import { type RecordEmailResult } from '@/lib/crmEmail';
-import { type ActivityEvent, type WorkspaceRecord } from '@/lib/crmWorkspace';
+import { Chip } from '@/components/ui';
+import { type ActivityEvent, type ActivityKind, type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { inAppCallingSupported } from '@/lib/voice';
 
 /**
@@ -39,6 +40,21 @@ import { inAppCallingSupported } from '@/lib/voice';
 
 type Pane = 'conversation' | 'activity' | 'notes';
 type Channel = 'sms' | 'email';
+
+/**
+ * Activity lenses (Phase 8). Forty-five rows for a long customer is a wall;
+ * Twenty's timeline solves it with per-type filters, so: one chip per group
+ * that actually has rows, counts on the chips, "All" first.
+ */
+type ActivityFilter = 'all' | 'comms' | 'email' | 'money' | 'jobs' | 'notes' | 'followups';
+const ACTIVITY_GROUPS: { key: Exclude<ActivityFilter, 'all'>; label: string; kinds: ActivityKind[] }[] = [
+  { key: 'comms', label: 'Texts & calls', kinds: ['sms_in', 'sms_out', 'call'] },
+  { key: 'email', label: 'Email', kinds: ['email_in', 'email_out'] },
+  { key: 'money', label: 'Money', kinds: ['estimate', 'contract', 'invoice', 'payment'] },
+  { key: 'jobs', label: 'Jobs', kinds: ['job_created', 'job_scheduled', 'job_completed', 'job_stage'] },
+  { key: 'notes', label: 'Notes', kinds: ['note'] },
+  { key: 'followups', label: 'Tasks & visits', kinds: ['task_added', 'task_done', 'appointment', 'lead_created', 'lead_status'] },
+];
 
 function noteTime(iso: string): string {
   const d = new Date(iso);
@@ -85,6 +101,19 @@ export function WorkspaceCenter({
   const [pane, setPane] = useState<Pane>('conversation');
   const [channel, setChannel] = useState<Channel>('sms');
   const [emailThreadId, setEmailThreadId] = useState<string | null>(null);
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all');
+
+  const groupCounts = useMemo(() => {
+    const counts = new Map<ActivityFilter, number>();
+    for (const g of ACTIVITY_GROUPS) counts.set(g.key, events.filter((e) => g.kinds.includes(e.kind)).length);
+    return counts;
+  }, [events]);
+  const filteredEvents = useMemo(() => {
+    if (activityFilter === 'all') return events;
+    const kinds = ACTIVITY_GROUPS.find((g) => g.key === activityFilter)?.kinds ?? [];
+    return events.filter((e) => kinds.includes(e.kind));
+  }, [events, activityFilter]);
+  const emailCount = email?.status === 'ok' ? email.threads.length : 0;
   const [noteDraft, setNoteDraft] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [noteError, setNoteError] = useState<string | null>(null);
@@ -193,7 +222,9 @@ export function WorkspaceCenter({
           <Pressable
             onPress={() => setChannel('email')}
             style={[styles.channel, channel === 'email' && styles.channelActive]}>
-            <Text style={[styles.channelText, channel === 'email' && styles.channelTextActive]}>Email</Text>
+            <Text style={[styles.channelText, channel === 'email' && styles.channelTextActive]}>
+              Email{emailCount ? ` ${emailCount}` : ''}
+            </Text>
           </Pressable>
         </View>
       ) : null}
@@ -243,20 +274,39 @@ export function WorkspaceCenter({
         />
       );
   } else if (pane === 'activity') {
+    const groups = ACTIVITY_GROUPS.filter((g) => (groupCounts.get(g.key) ?? 0) > 0);
     body = (
-      <ActivityTimeline
-        events={events}
-        onOpenEmail={(threadId) => {
-          setEmailThreadId(threadId);
-          setChannel('email');
-          setPane('conversation');
-        }}
-        emptyText={
-          record.kind === 'lead'
-            ? 'Nothing beyond the lead being created. Texts, calls and notes will show here.'
-            : 'Nothing has happened with this customer yet.'
-        }
-      />
+      <View style={styles.activity}>
+        {groups.length > 1 ? (
+          <View style={styles.filterRow}>
+            <Chip label={`All ${events.length}`} tone="ocean" selected={activityFilter === 'all'} onPress={() => setActivityFilter('all')} />
+            {groups.map((g) => (
+              <Chip
+                key={g.key}
+                label={`${g.label} ${groupCounts.get(g.key) ?? 0}`}
+                tone="ocean"
+                selected={activityFilter === g.key}
+                onPress={() => setActivityFilter(activityFilter === g.key ? 'all' : g.key)}
+              />
+            ))}
+          </View>
+        ) : null}
+        <ActivityTimeline
+          events={filteredEvents}
+          onOpenEmail={(threadId) => {
+            setEmailThreadId(threadId);
+            setChannel('email');
+            setPane('conversation');
+          }}
+          emptyText={
+            activityFilter !== 'all'
+              ? 'Nothing of that kind yet.'
+              : record.kind === 'lead'
+                ? 'Nothing beyond the lead being created. Texts, calls and notes will show here.'
+                : 'Nothing has happened with this customer yet.'
+          }
+        />
+      </View>
     );
   } else {
     body = (
@@ -323,6 +373,14 @@ export function WorkspaceCenter({
 
 const styles = StyleSheet.create({
   column: { flex: 1, backgroundColor: colors.cream },
+  activity: { flex: 1 },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

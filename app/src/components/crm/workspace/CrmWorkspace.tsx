@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { DetailPanel } from '@/components/crm/workspace/DetailPanel';
 import { RecordList, type ListMode } from '@/components/crm/workspace/RecordList';
@@ -66,6 +66,37 @@ import { countDueNow, fetchTasks, type Task } from '@/lib/tasks';
 const WIDE = 1100;
 const MEDIUM = 760;
 
+/**
+ * Where you were (Phase 8): the last selected record and lens survive a
+ * reload, a tab change and coming back tomorrow — per browser, web only.
+ * Read once when the list first loads; a record that no longer exists is
+ * simply ignored.
+ */
+const REMEMBER_KEY = 'dcsolar.crm.workspace';
+function remembered(): { selectedKey: string | null; kind: ListMode } {
+  try {
+    if (Platform.OS !== 'web' || typeof localStorage === 'undefined') return { selectedKey: null, kind: 'all' };
+    const raw = localStorage.getItem(REMEMBER_KEY);
+    if (!raw) return { selectedKey: null, kind: 'all' };
+    const parsed = JSON.parse(raw) as { selectedKey?: unknown; kind?: unknown };
+    const kind = parsed.kind;
+    return {
+      selectedKey: typeof parsed.selectedKey === 'string' ? parsed.selectedKey : null,
+      kind: kind === 'customer' || kind === 'lead' || kind === 'tasks' ? kind : 'all',
+    };
+  } catch {
+    return { selectedKey: null, kind: 'all' };
+  }
+}
+function remember(state: { selectedKey: string | null; kind: ListMode }): void {
+  try {
+    if (Platform.OS !== 'web' || typeof localStorage === 'undefined') return;
+    localStorage.setItem(REMEMBER_KEY, JSON.stringify(state));
+  } catch {
+    // Private mode, quota, blocked storage: forgetting is fine.
+  }
+}
+
 export function CrmWorkspace() {
   const role = useRole();
   const router = useRouter();
@@ -76,8 +107,9 @@ export function CrmWorkspace() {
   const [hasMoney, setHasMoney] = useState(false);
   const [listStatus, setListStatus] = useState<'loading' | 'ok' | 'unavailable'>('loading');
   const [search, setSearch] = useState('');
-  const [kind, setKind] = useState<ListMode>('all');
+  const [kind, setKind] = useState<ListMode>(() => remembered().kind);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const restored = useRef(false);
   const [detailOpen, setDetailOpen] = useState(false);
 
   const [settings, setSettings] = useState<CommsSettings | null>(null);
@@ -135,6 +167,17 @@ export function CrmWorkspace() {
   );
 
   const selected = useMemo(() => records.find((r) => r.key === selectedKey) ?? null, [records, selectedKey]);
+
+  // Restore the last record once the list is in; remember every change after.
+  useEffect(() => {
+    if (restored.current || records.length === 0) return;
+    restored.current = true;
+    const last = remembered().selectedKey;
+    if (last && !selectedKey && records.some((r) => r.key === last)) setSelectedKey(last);
+  }, [records, selectedKey]);
+  useEffect(() => {
+    if (restored.current) remember({ selectedKey, kind });
+  }, [selectedKey, kind]);
 
   const loadSelected = useCallback(async (record: WorkspaceRecord) => {
     setDetailLoading(true);
@@ -356,6 +399,7 @@ export function CrmWorkspace() {
       tasks={recordTasks}
       appointments={appointments}
       myEmail={role?.email ?? null}
+      canEditStage={role?.isAdmin === true}
       onChanged={() => void refreshAll()}
       onTasksChanged={() => void loadTasks()}
       onAppointmentsChanged={() => void loadAppointments(selected)}
