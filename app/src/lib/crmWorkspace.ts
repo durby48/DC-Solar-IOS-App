@@ -26,6 +26,7 @@ import {
   type CustomerNote,
   type CustomerSummary,
 } from '@/lib/crm';
+import { appointmentInstant, KIND_LABEL, OUTCOME_LABEL, type LeadAppointment } from '@/lib/leadAppointments';
 import { fetchOpenLeads, type Lead, type LeadStatus } from '@/lib/sales';
 import { supabase } from '@/lib/supabase';
 import { type Task } from '@/lib/tasks';
@@ -309,7 +310,8 @@ export type ActivityKind =
   | 'lead_created'
   | 'lead_status'
   | 'task_added'
-  | 'task_done';
+  | 'task_done'
+  | 'appointment';
 
 export interface ActivityEvent {
   id: string;
@@ -357,8 +359,21 @@ export function composeActivity(input: {
   lead?: Lead | null;
   history?: StageChange[];
   tasks?: Task[];
+  appointments?: LeadAppointment[];
 }): ActivityEvent[] {
   const events: ActivityEvent[] = [];
+
+  for (const a of input.appointments ?? []) {
+    events.push({
+      id: `appt:${a.id}`,
+      at: appointmentInstant(a),
+      kind: 'appointment',
+      title: `${KIND_LABEL[a.kind] ?? a.kind}${a.outcome ? ` · ${OUTCOME_LABEL[a.outcome]}` : ''}`,
+      detail: a.note,
+      actor: authorName(a.assigned_to ?? a.created_by),
+      jobId: null,
+    });
+  }
 
   for (const t of input.tasks ?? []) {
     events.push({

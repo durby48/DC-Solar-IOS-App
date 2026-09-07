@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { AppointmentComposer, AppointmentItem } from '@/components/crm/workspace/Appointments';
 import { TaskComposer } from '@/components/crm/workspace/TaskComposer';
 import { TaskItem } from '@/components/crm/workspace/TaskItem';
 import { Pill } from '@/components/ui';
@@ -12,6 +13,7 @@ import { formatPhone } from '@/lib/comms';
 import { updateCustomer, type CustomerFinanceRow, type CustomerJob } from '@/lib/crm';
 import { LEAD_STATUS_LABEL, LEAD_STATUS_ORDER, type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { type CustomerDocument } from '@/lib/customers';
+import { isUpcoming, type LeadAppointment } from '@/lib/leadAppointments';
 import { updateLead } from '@/lib/leads';
 import { assignLead, setLeadStatus, type LeadStatus } from '@/lib/sales';
 import { STAGE_COLORS, isStage } from '@/lib/stages';
@@ -75,9 +77,11 @@ export function DetailPanel({
   reps,
   hasMoney,
   tasks,
+  appointments,
   myEmail,
   onChanged,
   onTasksChanged,
+  onAppointmentsChanged,
   onClose,
 }: {
   record: WorkspaceRecord;
@@ -88,9 +92,11 @@ export function DetailPanel({
   reps: { email: string; name: string }[];
   hasMoney: boolean;
   tasks: Task[];
+  appointments: LeadAppointment[];
   myEmail: string | null;
   onChanged: () => void;
   onTasksChanged: () => void;
+  onAppointmentsChanged: () => void;
   /** Narrow layouts: the panel is a sheet with a close. */
   onClose?: () => void;
 }) {
@@ -103,12 +109,16 @@ export function DetailPanel({
   const [repOpen, setRepOpen] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
   const [showDoneTasks, setShowDoneTasks] = useState(false);
+  const [addingAppt, setAddingAppt] = useState(false);
+  const [showPastAppts, setShowPastAppts] = useState(false);
 
   useEffect(() => {
     setEditing(false);
     setError(null);
     setAddingTask(false);
     setShowDoneTasks(false);
+    setAddingAppt(false);
+    setShowPastAppts(false);
     setForm({
       name: record.name,
       phone: record.phone ?? '',
@@ -173,6 +183,9 @@ export function DetailPanel({
   const repName = rep ? (reps.find((r) => r.email.toLowerCase() === rep.toLowerCase())?.name ?? rep) : null;
   const openTasks = tasks.filter((t) => !t.done_at);
   const doneTasks = tasks.filter((t) => t.done_at);
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const upcomingAppts = appointments.filter((a) => isUpcoming(a, todayISO));
+  const pastAppts = appointments.filter((a) => !isUpcoming(a, todayISO)).reverse();
 
   return (
     <ScrollView style={styles.column} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -336,25 +349,46 @@ export function DetailPanel({
         </Section>
       ) : null}
 
-      <Section title="Next up">
-        <Fact label="Next scheduled day" value={nextDay ? shortDate(nextDay) : null} muted={!nextDay} />
-        <Fact
-          label={record.kind === 'lead' ? 'Appointment' : 'Crew on current job'}
-          value={
-            record.kind === 'lead'
-              ? null
-              : crew.length
-                ? crew.map((a) => a.name).join(', ')
-                : current
-                  ? null
-                  : undefined
-          }
-          muted
-        />
-        {record.kind === 'lead' ? (
-          <Text style={styles.factMuted}>Pre-sale appointments for leads are a later CRM phase.</Text>
-        ) : null}
-      </Section>
+      {record.kind === 'lead' ? (
+        <Section
+          title={`Appointments${upcomingAppts.length ? ` · ${upcomingAppts.length}` : ''}`}
+          right={
+            <Pressable onPress={() => setAddingAppt((v) => !v)} hitSlop={6} accessibilityLabel={addingAppt ? 'Cancel new appointment' : 'New appointment'}>
+              <Ionicons name={addingAppt ? 'close-circle-outline' : 'add-circle-outline'} size={18} color={colors.ocean} />
+            </Pressable>
+          }>
+          {addingAppt ? (
+            <AppointmentComposer
+              leadId={record.id}
+              reps={reps}
+              myEmail={myEmail}
+              defaultAssignee={record.lead?.assigned_to ?? null}
+              onAdded={() => {
+                setAddingAppt(false);
+                onAppointmentsChanged();
+              }}
+              onCancel={() => setAddingAppt(false)}
+            />
+          ) : null}
+          {upcomingAppts.length === 0 && !addingAppt ? (
+            <Text style={styles.factMuted}>Nothing scheduled. Site visits and calls booked here show on the Calendar too.</Text>
+          ) : null}
+          {upcomingAppts.map((a) => (
+            <AppointmentItem key={a.id} appointment={a} reps={reps} onChanged={onAppointmentsChanged} />
+          ))}
+          {pastAppts.length ? (
+            <Pressable onPress={() => setShowPastAppts((v) => !v)} hitSlop={4}>
+              <Text style={styles.linkText}>{showPastAppts ? 'Hide past' : `Show ${pastAppts.length} past`}</Text>
+            </Pressable>
+          ) : null}
+          {showPastAppts ? pastAppts.slice(0, 10).map((a) => <AppointmentItem key={a.id} appointment={a} reps={reps} onChanged={onAppointmentsChanged} />) : null}
+        </Section>
+      ) : (
+        <Section title="Next up">
+          <Fact label="Next scheduled day" value={nextDay ? shortDate(nextDay) : null} muted={!nextDay} />
+          <Fact label="Crew on current job" value={crew.length ? crew.map((a) => a.name).join(', ') : current ? null : undefined} muted />
+        </Section>
+      )}
 
       <Section
         title={`Tasks${openTasks.length ? ` · ${openTasks.length}` : ''}`}

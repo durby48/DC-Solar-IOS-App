@@ -37,6 +37,7 @@ import {
   type WorkspaceRecord,
 } from '@/lib/crmWorkspace';
 import { fetchCustomerDocuments, type CustomerDocument } from '@/lib/customers';
+import { fetchLeadAppointments, type LeadAppointment } from '@/lib/leadAppointments';
 import { fetchEmployeeOptions } from '@/lib/myhours';
 import { useRole } from '@/lib/role';
 import { countDueNow, fetchTasks, type Task } from '@/lib/tasks';
@@ -94,6 +95,7 @@ export function CrmWorkspace() {
   const [jobs, setJobs] = useState<CustomerJob[]>([]);
   const [finance, setFinance] = useState<CustomerFinanceRow[]>([]);
   const [history, setHistory] = useState<StageChange[]>([]);
+  const [appointments, setAppointments] = useState<LeadAppointment[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
 
   const loadTasks = useCallback(async () => {
@@ -148,10 +150,12 @@ export function CrmWorkspace() {
       setJobs(jobRows);
       setFinance(financeResult.status === 'ok' ? financeResult.entries : []);
       setHistory(stageHistory);
+      setAppointments([]);
     } else {
-      const [thread, statusHistory] = await Promise.all([
+      const [thread, statusHistory, appts] = await Promise.all([
         fetchThread(record.id, { byLead: true }),
         fetchLeadStatusHistory(record.id),
+        fetchLeadAppointments(record.id),
       ]);
       setMessages(thread);
       setNotes([]);
@@ -159,8 +163,15 @@ export function CrmWorkspace() {
       setJobs([]);
       setFinance([]);
       setHistory(statusHistory);
+      setAppointments(appts.status === 'ok' ? appts.appointments : []);
     }
     setDetailLoading(false);
+  }, []);
+
+  const loadAppointments = useCallback(async (record: WorkspaceRecord) => {
+    if (record.kind !== 'lead') return;
+    const appts = await fetchLeadAppointments(record.id);
+    setAppointments(appts.status === 'ok' ? appts.appointments : []);
   }, []);
 
   useEffect(() => {
@@ -193,9 +204,9 @@ export function CrmWorkspace() {
   const events: ActivityEvent[] = useMemo(
     () =>
       selected
-        ? composeActivity({ messages, notes, jobs, finance, lead: selected.lead, history, tasks: recordTasks })
+        ? composeActivity({ messages, notes, jobs, finance, lead: selected.lead, history, tasks: recordTasks, appointments })
         : [],
-    [selected, messages, notes, jobs, finance, history, recordTasks],
+    [selected, messages, notes, jobs, finance, history, recordTasks, appointments],
   );
 
   const visible = useMemo(
@@ -314,9 +325,11 @@ export function CrmWorkspace() {
       reps={reps}
       hasMoney={hasMoney}
       tasks={recordTasks}
+      appointments={appointments}
       myEmail={role?.email ?? null}
       onChanged={() => void refreshAll()}
       onTasksChanged={() => void loadTasks()}
+      onAppointmentsChanged={() => void loadAppointments(selected)}
       onClose={layout === 'wide' ? undefined : () => setDetailOpen(false)}
     />
   ) : null;

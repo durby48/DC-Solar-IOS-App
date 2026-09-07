@@ -27,6 +27,7 @@ const ICONS: Record<ActivityKind, { name: keyof typeof Ionicons.glyphMap; fg: st
   lead_status: { name: 'flag', fg: colors.amberDeep, bg: colors.amberSoft },
   task_added: { name: 'checkbox-outline', fg: colors.indigoDeep, bg: colors.indigoSoft },
   task_done: { name: 'checkbox', fg: colors.mintDeep, bg: colors.mintSoft },
+  appointment: { name: 'calendar-outline', fg: colors.violetDeep, bg: colors.violetSoft },
   estimate: { name: 'receipt', fg: colors.indigoDeep, bg: colors.indigoSoft },
   contract: { name: 'create', fg: colors.violetDeep, bg: colors.violetSoft },
   invoice: { name: 'cash', fg: colors.coralDeep, bg: colors.coralSoft },

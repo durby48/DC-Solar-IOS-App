@@ -16,6 +16,7 @@ import { colors, radii, spacing } from '@/constants/theme';
 import { fetchAssignmentsByJob, type Assignment } from '@/lib/assignments';
 import { fetchJobs, fetchScheduleEntries, fetchScheduleRange, type ScheduleEntry } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
+import { fetchLeadAppointmentsRange, KIND_LABEL, type LeadAppointmentEntry } from '@/lib/leadAppointments';
 import { type Job } from '@/lib/types';
 import { useRole } from '@/lib/role';
 import { formatTimeLabel } from '@/lib/time';
@@ -34,6 +35,12 @@ import { formatTimeLabel } from '@/lib/time';
  * trophy placard at the top of this screen. It is the one thing here that
  * isn't the schedule, and it is deliberately above the week/month toggle:
  * recognition you have to scroll to find is not recognition.
+ *
+ * Lead appointments (CRM Phase 6, 2026-09-07) ride alongside: a second,
+ * separate read of `lead_appointments` for the same date range, rendered
+ * after each day's jobs and tapping through to the lead. The job schedule
+ * reads, rows and types are untouched — an appointment is never a
+ * ScheduleEntry. Leads RLS decides who sees which.
  */
 
 /** One cell of the month grid. */
@@ -165,6 +172,8 @@ export default function CalendarScreen() {
   const [monthEntries, setMonthEntries] = useState<ScheduleEntry[]>([]);
   const [monthLoading, setMonthLoading] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [weekAppts, setWeekAppts] = useState<LeadAppointmentEntry[]>([]);
+  const [monthAppts, setMonthAppts] = useState<LeadAppointmentEntry[]>([]);
 
   // Refetch on every focus so stage/schedule edits made on other screens show
   // up immediately.
@@ -203,6 +212,9 @@ export default function CalendarScreen() {
       setMonthEntries(entries);
       setMonthLoading(false);
     });
+    fetchLeadAppointmentsRange(from, to).then((appts) => {
+      if (!cancelled) setMonthAppts(appts);
+    });
     // Default the selected day to today when it's inside this month.
     const todayStr = todayISO();
     setSelectedDay(
@@ -223,10 +235,19 @@ export default function CalendarScreen() {
     fetchScheduleRange(isoOf(monday), isoOf(saturday)).then((entries) => {
       if (!cancelled) setWeekEntries(entries);
     });
+    fetchLeadAppointmentsRange(isoOf(monday), isoOf(saturday)).then((appts) => {
+      if (!cancelled) setWeekAppts(appts);
+    });
     return () => {
       cancelled = true;
     };
   }, [weekOffset, scheduleEntries]);
+
+  /** A day's lead appointments, canceled ones dropped. */
+  const apptsFor = useCallback(
+    (source: LeadAppointmentEntry[], day: string) => source.filter((a) => a.appt_date === day && a.outcome !== 'canceled'),
+    [],
+  );
 
   /** "Devon, Isaiah" — first names of the crew assigned to a job. */
   const crewLine = useCallback(
@@ -252,6 +273,26 @@ export default function CalendarScreen() {
   const weekRows = buildWeekRows(weekSource, weekOffset);
 
   const openJob = (id: string) => router.push({ pathname: '/job/[id]', params: { id } });
+  const openLead = (id: string) => router.push({ pathname: '/leads/[id]', params: { id } } as never);
+
+  /** One lead appointment on the schedule: "Site visit — George Janus · 10:00 AM", then "Lead · Devon". */
+  const appointmentLine = (a: LeadAppointmentEntry) => {
+    const time = formatTimeLabel(a.start_time);
+    const who = a.assigned_to ? a.assigned_to.split('@')[0] : null;
+    return (
+      <AnimatedPressable key={`appt-${a.id}`} onPress={() => openLead(a.lead_id)} haptic="tapLight" scaleTo={0.99}>
+        <AppText variant="bodyStrong" color={colors.accentLink} numberOfLines={2}>
+          {KIND_LABEL[a.kind] ?? a.kind} — {a.lead_name}
+          {a.lead_address ? ` — ${a.lead_address}` : ''}
+          {time ? ` · ${time}` : ''}
+        </AppText>
+        <AppText variant="caption" color={colors.textSecondary}>
+          Lead{who ? ` · ${who}` : ''}
+          {a.outcome ? ` · ${a.outcome.replace('_', '-')}` : ''}
+        </AppText>
+      </AnimatedPressable>
+    );
+  };
 
   const note = (message: string) => (
     <Card tone="sunk">
@@ -303,6 +344,7 @@ export default function CalendarScreen() {
             const grid = buildMonthGrid(base.getFullYear(), base.getMonth() + monthOffset);
             const entriesFor = (day: string) => monthEntries.filter((e) => e.work_date === day);
             const selectedEntries = selectedDay ? entriesFor(selectedDay) : [];
+            const selectedAppts = selectedDay ? apptsFor(monthAppts, selectedDay) : [];
             return (
               <>
                 <Card padded={false} style={styles.gridCard}>
@@ -322,6 +364,7 @@ export default function CalendarScreen() {
                     <View key={wi} style={styles.gridWeekRow}>
                       {week.map((day) => {
                         const dayEntries = entriesFor(day.dateISO);
+                        const dayAppts = apptsFor(monthAppts, day.dateISO);
                         const isToday = day.dateISO === today;
                         const isSelected = day.dateISO === selectedDay;
                         return (
@@ -365,12 +408,29 @@ export default function CalendarScreen() {
                                 </AppText>
                               </AnimatedPressable>
                             ))}
-                            {dayEntries.length > 2 ? (
+                            {dayAppts.slice(0, Math.max(0, 2 - dayEntries.length)).map((a) => (
+                              <AnimatedPressable
+                                key={`appt-${a.id}`}
+                                onPress={() => openLead(a.lead_id)}
+                                haptic="tapLight"
+                                hitSlop={2}
+                                style={[styles.gridChip, styles.gridChipLead]}>
+                                <AppText
+                                  variant="caption"
+                                  color={colors.ink}
+                                  align="center"
+                                  numberOfLines={1}
+                                  style={styles.gridChipText}>
+                                  {a.lead_name}
+                                </AppText>
+                              </AnimatedPressable>
+                            ))}
+                            {dayEntries.length + dayAppts.length > 2 ? (
                               <AppText
                                 variant="caption"
                                 color={colors.accentPrimary}
                                 style={styles.gridMore}>
-                                +{dayEntries.length - 2}
+                                +{dayEntries.length + dayAppts.length - 2}
                               </AppText>
                             ) : null}
                           </AnimatedPressable>
@@ -396,8 +456,17 @@ export default function CalendarScreen() {
                       }
                       style={styles.sectionSpaced}
                     />
+                    {selectedAppts.length > 0 ? (
+                      <Card padded={false}>
+                        {selectedAppts.map((a, index) => (
+                          <View key={`appt-${a.id}`} style={[styles.dayRow, index > 0 && styles.rowBorder]}>
+                            <View style={styles.dayJobs}>{appointmentLine(a)}</View>
+                          </View>
+                        ))}
+                      </Card>
+                    ) : null}
                     {selectedEntries.length === 0 ? (
-                      note('Nothing scheduled.')
+                      selectedAppts.length === 0 ? note('Nothing scheduled.') : null
                     ) : (
                       <Card padded={false}>
                         {selectedEntries.map((entry, index) => {
@@ -530,11 +599,12 @@ export default function CalendarScreen() {
                         </AnimatedPressable>
                       );
                     })
-                  ) : row.isTomorrow ? (
+                  ) : row.isTomorrow && apptsFor(weekAppts, row.dateISO).length === 0 ? (
                     <AppText variant="body" color={colors.textMuted} style={styles.italic}>
                       No work for tomorrow
                     </AppText>
                   ) : null}
+                  {apptsFor(weekAppts, row.dateISO).map(appointmentLine)}
                 </View>
               </View>
             ))}
@@ -670,6 +740,9 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     paddingHorizontal: 2,
     paddingVertical: 1,
+  },
+  gridChipLead: {
+    backgroundColor: colors.violetSoft,
   },
   gridChipText: {
     fontSize: 8,
