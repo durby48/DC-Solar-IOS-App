@@ -9,7 +9,7 @@ import { fetchUnreadCount, useCommsRealtime } from '@/lib/comms';
 import { useRoleGate } from '@/lib/role';
 
 /**
- * `/phone` — the phone app: Contacts · Keypad · Recents · Messages.
+ * `/phone` — the phone app: Messages · Recents · Keypad · Contacts.
  *
  * A NESTED `Tabs` INSIDE THE ROOT STACK. The app's own tab bar (Home /
  * Calendar / Pipeline / Customers / Menu) is untouched; this is a second,
@@ -104,18 +104,15 @@ export default function PhoneLayout() {
       {/* `/phone` → keypad. Exists so a hard load of the bare path has a
           page to serve; hidden from the bar so it is not a fifth tab. */}
       <Tabs.Screen name="index" options={{ href: null }} />
+      {/* Order is Devon's: Messages · Recents · Keypad · Contacts. Keypad
+          stays the default tab; the bar order is separate from that. */}
       <Tabs.Screen
-        name="contacts"
+        name="messages"
         options={{
-          title: 'Contacts',
-          tabBarIcon: ({ focused }) => <TabIcon name="people" focused={focused} />,
-        }}
-      />
-      <Tabs.Screen
-        name="keypad"
-        options={{
-          title: 'Keypad',
-          tabBarIcon: ({ focused }) => <TabIcon name="keypad" focused={focused} />,
+          title: 'Messages',
+          tabBarIcon: ({ focused }) => <TabIcon name="chatbubbles" focused={focused} />,
+          tabBarBadge: unread > 0 ? unread : undefined,
+          tabBarBadgeStyle: { backgroundColor: colors.danger, color: colors.white },
         }}
       />
       <Tabs.Screen
@@ -126,12 +123,17 @@ export default function PhoneLayout() {
         }}
       />
       <Tabs.Screen
-        name="messages"
+        name="keypad"
         options={{
-          title: 'Messages',
-          tabBarIcon: ({ focused }) => <TabIcon name="chatbubbles" focused={focused} />,
-          tabBarBadge: unread > 0 ? unread : undefined,
-          tabBarBadgeStyle: { backgroundColor: colors.danger, color: colors.white },
+          title: 'Keypad',
+          tabBarIcon: ({ focused }) => <TabIcon name="keypad" focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
+        name="contacts"
+        options={{
+          title: 'Contacts',
+          tabBarIcon: ({ focused }) => <TabIcon name="people" focused={focused} />,
         }}
       />
     </Tabs>

@@ -78,11 +78,31 @@ export async function startInAppCall(input: StartCallInput): Promise<StartCallRe
   const token = await fetchToken();
   if (!token.ok) return token;
 
-  let Device: typeof import('@twilio/voice-sdk').Device;
+  // The package's `import` export condition points Metro at an ESM build it
+  // cannot evaluate ("Cannot set property default of #<Object> which has only
+  // a getter" — module-namespace getters vs. the CJS interop). `dist/twilio.js`
+  // is the self-contained browser bundle Twilio's CDN serves: one file, no
+  // internal module graph, exposes `Twilio.Device` on globalThis (and
+  // module.exports). Type-only import of `Device` above is erased at runtime.
+  type DeviceCtor = typeof import('@twilio/voice-sdk').Device;
+  let Device: DeviceCtor;
   try {
-    ({ Device } = await import('@twilio/voice-sdk'));
-  } catch {
-    return { ok: false, message: 'The calling module could not be loaded. Reload the page and try again.' };
+    const mod = (await import('@twilio/voice-sdk/dist/twilio.js')) as unknown as {
+      Device?: DeviceCtor;
+      default?: { Device?: DeviceCtor };
+    };
+    const fromGlobal = (globalThis as unknown as { Twilio?: { Device?: DeviceCtor } }).Twilio?.Device;
+    const found = mod?.Device ?? mod?.default?.Device ?? fromGlobal;
+    if (!found) throw new Error('bundle loaded but exposed no Device');
+    Device = found;
+  } catch (e) {
+    // Say WHY. "Could not be loaded" alone sent Devon straight back to us.
+    const why = e instanceof Error ? e.message : String(e);
+    console.error('voice-sdk import failed', e);
+    return {
+      ok: false,
+      message: `The calling module could not be loaded (${why}). Reload the page and try again.`,
+    };
   }
 
   const device = new Device(token.token, { logLevel: 'error' });
@@ -124,7 +144,17 @@ export async function startInAppCall(input: StartCallInput): Promise<StartCallRe
   call.on('disconnect', () => finish('ended'));
   call.on('cancel', () => finish('ended'));
   call.on('reject', () => finish('ended', 'They declined the call.'));
-  call.on('error', (error: { message?: string }) => finish('failed', error?.message ?? 'The call failed.'));
+  call.on('error', (error: { code?: number; message?: string }) => {
+    // 31401 = the browser refused the microphone. Say that in plain words;
+    // the SDK's own sentence is aimed at a developer.
+    const micDenied = error?.code === 31401 || /permission|NotAllowed/i.test(error?.message ?? '');
+    finish(
+      'failed',
+      micDenied
+        ? 'The browser blocked the microphone. Allow it for this site (the lock icon by the address) and try again.'
+        : (error?.message ?? 'The call failed.'),
+    );
+  });
 
   const active: ActiveCall = {
     mute: (on) => call.mute(on),
