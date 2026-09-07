@@ -1,6 +1,6 @@
 import { Tabs, useNavigation, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 
 import { TabIcon } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
@@ -205,6 +205,18 @@ export default function TabsLayout() {
           tabBarIcon: ({ focused }) => <TabIcon name="people" focused={focused} />,
           tabBarBadge: unread > 0 ? unread : undefined,
           tabBarBadgeStyle: { backgroundColor: colors.danger, color: colors.white },
+        }}
+      />
+      {/* CRM workspace (web-first, 2026-09-07). `href: null` off the web keeps
+          the phone's tab bar exactly as it was — the route still exists there
+          for a deep link, it just is not offered. Drop the Platform check when
+          the workspace is ready for the phone. */}
+      <Tabs.Screen
+        name="workspace"
+        options={{
+          title: 'CRM',
+          href: Platform.OS === 'web' ? undefined : null,
+          tabBarIcon: ({ focused }) => <TabIcon name="briefcase" focused={focused} />,
         }}
       />
       <Tabs.Screen

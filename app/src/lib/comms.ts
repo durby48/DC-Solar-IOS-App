@@ -706,7 +706,7 @@ export function formatDuration(seconds: number): string {
  */
 export async function fetchThread(
   customerId: string,
-  options?: { byPhone?: boolean; byContact?: boolean },
+  options?: { byPhone?: boolean; byContact?: boolean; byLead?: boolean },
 ): Promise<CommsMessage[]> {
   try {
     let query = supabase.from('messages').select(MESSAGE_COLUMNS).eq('company', COMPANY);
@@ -717,6 +717,10 @@ export async function fetchThread(
         .or(`from_number.eq.${customerId},to_number.eq.${customerId}`);
     } else if (options?.byContact) {
       query = query.eq('contact_id', customerId);
+    } else if (options?.byLead) {
+      // A lead's thread (CRM workspace, 2026-09-07). Rows carry lead_id from
+      // twilio-inbound / twilio-send-sms; same shape as the contact variant.
+      query = query.eq('lead_id', customerId);
     } else {
       query = query.eq('customer_id', customerId);
     }
