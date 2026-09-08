@@ -322,27 +322,50 @@ undelivered message "delivered". Both are compared in constant time.
 
 ## 8. Incoming calls ring the app like a real call (CallKit) — added 2026-09-08
 
+**Who rings.** `voice_routes` maps each Twilio number to ONE employee:
+`+18167446473 → devonsd311@gmail.com` (seeded). That person's app rings
+first, then their own cell (`staff_profiles.cell_phone_e164`), then the
+caller hears an apology and the person gets a "Missed call" push. Nobody
+else rings. To give Isaiah his own number later: buy it, point its *A call
+comes in* webhook at `twilio-voice-inbound?k=…`, insert one `voice_routes`
+row. No code.
+
 The native SDK in build 30 already handles PushKit + CallKit. What it needs
-is a way for Twilio to wake the phone: an **APNs VoIP push credential**.
+is a way for Twilio to wake the phone: an **APNs VoIP push credential**. No
+Mac is required — the CSR and the PEM conversion work with OpenSSL on Windows
+(Git Bash ships it). Keep `voip.key` private throughout.
 
-1. **Apple** — developer.apple.com → Certificates → **+** → *VoIP Services
-   Certificate* → App ID `com.dcsolarkc.fieldapp`. Download it, add it to
-   Keychain on a Mac, export as `.p12`, then:
+1. **Key + CSR** (any machine):
    ```
-   openssl pkcs12 -in voip.p12 -nokeys -out voip-cert.pem -legacy
-   openssl pkcs12 -in voip.p12 -nocerts -nodes -out voip-key.pem -legacy
+   openssl req -new -newkey rsa:2048 -nodes -keyout voip.key -out voip.csr -subj "/CN=DC Solar VoIP/O=DC Solar LLC/C=US"
    ```
-2. **Twilio** — Console → Account → **Push Credentials → Create new**: type
-   **APN**, sandbox **off** (production), paste `voip-cert.pem` and
-   `voip-key.pem` (the parts between the BEGIN/END lines). Copy the `CR…` SID.
-3. **Supabase** — edge-function secret `TWILIO_PUSH_CREDENTIAL_SID = CR…`.
-   No redeploy: `twilio-voice-token` reads it per request and starts minting
-   tokens with `incoming: allow` + the credential; `twilio-voice-inbound`
-   starts ringing the app before the cell.
-4. **The number** — the *A call comes in* webhook from § 3's table.
-5. Each admin opens **Home** on build 30 once (that registers the device; it
-   re-registers on every Home open). Then a customer calling (816) 744-6473
-   rings their iPhone with the customer's name, lock screen included.
+2. **Apple** — developer.apple.com → Certificates, IDs & Profiles →
+   Certificates → **+** → *VoIP Services Certificate* → App ID
+   `com.dcsolarkc.fieldapp` → upload `voip.csr` → download
+   `voip_services.cer` → convert:
+   ```
+   openssl x509 -inform der -in voip_services.cer -out voip-cert.pem
+   ```
+3. **Twilio** — Console → Account → **Push Credentials → Create**: name
+   "DC Solar iOS VoIP", type **APN**, **Sandbox: off** (TestFlight and App
+   Store builds use production APNs), *Certificate* = contents of
+   `voip-cert.pem`, *Private key* = contents of `voip.key` (BEGIN/END lines
+   included). If the console asks for a `.p12` instead:
+   `openssl pkcs12 -export -in voip-cert.pem -inkey voip.key -out voip.p12`.
+   Copy the credential SID (`CR…`).
+4. **Supabase** — edge-function secret `TWILIO_PUSH_CREDENTIAL_SID = CR…`
+   (dashboard → Edge Functions → Secrets, or the Management API
+   `POST /v1/projects/kjamxfezsathrsbztiln/secrets`). **No redeploy**:
+   `twilio-voice-token` reads it per request and starts minting tokens with
+   `incoming: allow` + the credential; `twilio-voice-inbound` starts ringing
+   the app before the cell.
+5. **The number** — the *A call comes in* webhook from § 5's table (done
+   2026-09-08).
+6. Devon opens **Home** on build 30 (OTA 932156b5 or later) once — that
+   registers the device, and it re-registers on every Home open. Then a
+   customer calling (816) 744-6473 rings his iPhone with the customer's name,
+   lock screen included.
 
-Not configured = nothing breaks: the app never registers, callers ring the
-owner's cell, missed calls still get logged and pushed.
+Not configured = nothing breaks: the app never registers, callers ring
+Devon's cell, missed calls still get logged and pushed. Delete `voip.key`
+from the machine once the credential exists; it lives in Twilio now.
