@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -36,13 +36,13 @@ import { inAppCallingSupported } from '@/lib/voice';
  * the outcome and duration. `fetchRecents` folds consecutive calls to the
  * same party into one row with a count.
  *
- * BE HONEST ABOUT "MISSED". Until in-app calling ships (Phase 4) the DC Solar
- * number cannot receive a call at all, so there is no such thing as a missed
- * inbound call yet. The Missed segment shows OUTBOUND bridge calls that did
- * not connect — failed, busy, no answer, cancelled — and says so, rather than
- * shipping a tab that is always empty.
+ * "MISSED" (since 2026-09-08 the number receives calls — `twilio-voice-inbound`
+ * logs each one as a `messages` row with direction 'in'): an inbound call
+ * that ended no-answer / busy / failed / cancelled, and an outbound call that
+ * never connected. The missed-call push opens this screen on the Missed
+ * segment (`?segment=missed`, from lib/notificationRouter.ts).
  *
- * Tap a row to redial; ⓘ opens the customer's record.
+ * Tap a row to call back; ⓘ opens the customer's record.
  */
 
 function when(iso: string): string {
@@ -82,12 +82,19 @@ function outcome(call: RecentCall): string {
 
 export default function RecentsScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ segment?: string }>();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [calls, setCalls] = useState<RecentCall[]>([]);
   const [settings, setSettings] = useState<CommsSettings | null>(null);
   const [profile, setProfile] = useState<StaffProfile | null>(null);
-  const [segment, setSegment] = useState<'all' | 'missed'>('all');
+  const [segment, setSegment] = useState<'all' | 'missed'>(params.segment === 'missed' ? 'missed' : 'all');
+
+  // A later `?segment=missed` (a second missed-call tap while this tab is
+  // already mounted) still lands on Missed.
+  useEffect(() => {
+    if (params.segment === 'missed') setSegment('missed');
+  }, [params.segment]);
   const [redialId, setRedialId] = useState<string | null>(null);
   const [note, setNote] = useState<{ kind: 'ok' | 'error' | 'info'; text: string } | null>(null);
 
@@ -227,8 +234,8 @@ export default function RecentsScreen() {
       </View>
       {segment === 'missed' ? (
         <Text style={styles.hint}>
-          Calls placed from the DC Solar number that did not connect. The number cannot
-          receive calls yet, so there are no missed incoming calls to show.
+          Incoming calls to the DC Solar number that nobody answered, and outgoing calls that
+          did not connect. Tap one to call back.
         </Text>
       ) : null}
       {note ? (
@@ -273,8 +280,8 @@ export default function RecentsScreen() {
             {!voiceReady
               ? NOT_CONFIGURED_VOICE
               : segment === 'missed'
-                ? 'Every call from the DC Solar number has connected so far.'
-                : 'Calls placed from the DC Solar number — from the keypad, a contact, or a customer record — show up here.'}
+                ? 'Nothing missed: every call to or from the DC Solar number has connected so far.'
+                : 'Calls to and from the DC Solar number — incoming, from the keypad, a contact, or a customer record — show up here.'}
           </Text>
         </View>
       }

@@ -34,6 +34,7 @@ import { router } from 'expo-router';
 
 import type { Call as TwilioCall, CallInvite as TwilioCallInvite, Voice as TwilioVoice } from '@twilio/voice-react-native-sdk';
 
+import { reportDiagnostic } from './diagnostics';
 import { setIncomingCall, type IncomingCallSession } from './incomingCall';
 // Type-only from './voice' (erased at runtime). The RUNTIME import comes from
 // voiceToken.ts: on iOS, `./voice` resolves to THIS file, and a runtime
@@ -184,7 +185,9 @@ function attachInviteListener(mod: Sdk, v: TwilioVoice): void {
   v.on(Voice.Event.CallInvite, (invite: TwilioCallInvite) => {
     // CallKit is already ringing; the SDK reported the invite natively. We
     // only care about the answer.
+    reportDiagnostic('voice_invite', null, { stage: 'ringing', to: invite.getTo?.() ?? null });
     invite.on(CallInvite.Event.Accepted, (call: TwilioCall) => {
+      reportDiagnostic('voice_invite', true, { stage: 'accepted' });
       const custom = (invite.getCustomParameters?.() ?? {}) as Record<string, string | undefined>;
       const from = invite.getFrom?.() ?? '';
       const phone = /^\+/.test(from) ? from : (custom.phone ?? from);
@@ -218,21 +221,33 @@ function attachInviteListener(mod: Sdk, v: TwilioVoice): void {
         // The screen will find the session on its next mount.
       }
     });
-    invite.on(CallInvite.Event.Rejected, () => setIncomingCall(null));
-    invite.on(CallInvite.Event.Cancelled, () => setIncomingCall(null));
+    invite.on(CallInvite.Event.Rejected, () => {
+      reportDiagnostic('voice_invite', null, { stage: 'rejected' });
+      setIncomingCall(null);
+    });
+    invite.on(CallInvite.Event.Cancelled, () => {
+      reportDiagnostic('voice_invite', null, { stage: 'cancelled' });
+      setIncomingCall(null);
+    });
   });
 }
 
+/** Which identity this device is currently bound to (module memory only). */
+let registeredIdentity: string | null = null;
+
 /**
- * Register this device for incoming calls (CallKit + VoIP push). Called from
- * Home for admins on every open; the registration is a Twilio-side binding
- * so calling it again is a refresh, not a duplicate. Returns why it did
- * not happen when it did not — the UI never shows that, the logs do.
+ * The SDK's `register()` needs the PushKit device token, which iOS hands
+ * the native module asynchronously after launch. On a cold start the first
+ * attempt can run before it exists and fail; a short retry ladder covers
+ * that without anything else changing. Non-retryable answers (no module,
+ * not an admin, credential not configured) return at once.
  */
-export async function registerForIncomingCalls(): Promise<IncomingRegistration> {
+const RETRY_DELAYS_MS = [2000, 6000, 15000];
+
+async function registerOnce(): Promise<IncomingRegistration & { identity?: string; retryable?: boolean }> {
   const mod = loadSdk();
   const v = getVoice();
-  if (!mod || !v) return { ok: false, code: 'unsupported', message: 'No native voice module in this build.' };
+  if (!mod || !v) return { ok: false, code: 'unsupported', message: 'No native voice module in this build.', retryable: false };
 
   const token = await fetchVoiceToken();
   if (!token.ok) {
@@ -240,6 +255,8 @@ export async function registerForIncomingCalls(): Promise<IncomingRegistration> 
       ok: false,
       code: token.code === 'forbidden' ? 'not_admin' : 'not_configured',
       message: token.message,
+      // A network blip while fetching the token is worth another go.
+      retryable: token.code !== 'forbidden' && token.code !== 'not_configured',
     };
   }
   if (!token.incoming) {
@@ -247,32 +264,103 @@ export async function registerForIncomingCalls(): Promise<IncomingRegistration> 
       ok: false,
       code: 'not_configured',
       message: 'Incoming calls need TWILIO_PUSH_CREDENTIAL_SID on the edge functions (docs/TWILIO_SETUP.md § 8).',
+      identity: token.identity,
+      retryable: false,
     };
   }
 
   try {
     attachInviteListener(mod, v);
+    // Account switch on the same phone: drop the previous person's binding
+    // before taking a new one, so this device cannot keep ringing for them.
+    if (registeredIdentity && registeredIdentity !== token.identity && registeredToken) {
+      try {
+        await v.unregister(registeredToken);
+        reportDiagnostic('voice_unregister', true, { identity: registeredIdentity, reason: 'account switch' });
+      } catch (e) {
+        reportDiagnostic('voice_unregister', false, {
+          identity: registeredIdentity,
+          reason: 'account switch',
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+      registeredIdentity = null;
+      registeredToken = null;
+    }
     // CallKit shows this instead of the raw From; the TwiML sets displayName
     // to the customer's name when the number is known, else the number.
     await v.setIncomingCallContactHandleTemplate('${displayName}');
     await v.register(token.token);
     registeredToken = token.token;
-    return { ok: true };
+    registeredIdentity = token.identity;
+    return { ok: true, identity: token.identity };
   } catch (e) {
-    return { ok: false, code: 'error', message: e instanceof Error ? e.message : 'Could not register for calls.' };
+    return {
+      ok: false,
+      code: 'error',
+      message: e instanceof Error ? e.message : 'Could not register for calls.',
+      identity: token.identity,
+      retryable: true,
+    };
   }
+}
+
+let registering: Promise<IncomingRegistration> | null = null;
+
+/**
+ * Register this device for incoming calls (CallKit + VoIP push). Called from
+ * Home for admins on every open and whenever the app returns to the
+ * foreground; the registration is a Twilio-side binding, so calling it
+ * again is a refresh, not a duplicate. Every attempt's outcome is recorded
+ * to `client_diagnostics` (identity and error text, never the token) so a
+ * phone that does not ring can be diagnosed from a desk. Concurrent calls
+ * share one attempt.
+ */
+export async function registerForIncomingCalls(): Promise<IncomingRegistration> {
+  if (registering) return registering;
+  registering = (async () => {
+    let result = await registerOnce();
+    for (let i = 0; !result.ok && result.retryable && i < RETRY_DELAYS_MS.length; i++) {
+      reportDiagnostic('voice_register', false, {
+        attempt: i + 1,
+        code: result.code,
+        error: result.message,
+        identity: result.identity ?? null,
+        willRetryInMs: RETRY_DELAYS_MS[i],
+      });
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[i]));
+      result = await registerOnce();
+    }
+    reportDiagnostic('voice_register', result.ok, {
+      code: result.ok ? 'registered' : result.code,
+      error: result.ok ? null : result.message,
+      identity: result.identity ?? null,
+      attempts: 1 + (result.ok ? 0 : RETRY_DELAYS_MS.length),
+    });
+    const { retryable: _r, identity: _i, ...plain } = result;
+    return plain as IncomingRegistration;
+  })().finally(() => {
+    registering = null;
+  });
+  return registering;
 }
 
 /** Stop ringing this device (sign-out). Needs a valid token; best-effort. */
 export async function unregisterForIncomingCalls(): Promise<void> {
   const v = getVoice();
   if (!v) return;
+  const identity = registeredIdentity;
   try {
     const token = registeredToken ?? (await fetchVoiceToken().then((t) => (t.ok ? t.token : null)));
-    if (token) await v.unregister(token);
-  } catch {
+    if (token) {
+      await v.unregister(token);
+      reportDiagnostic('voice_unregister', true, { identity, reason: 'sign-out' });
+    }
+  } catch (e) {
+    reportDiagnostic('voice_unregister', false, { identity, reason: 'sign-out', error: e instanceof Error ? e.message : String(e) });
     // The binding expires on Twilio's side on its own.
   } finally {
     registeredToken = null;
+    registeredIdentity = null;
   }
 }

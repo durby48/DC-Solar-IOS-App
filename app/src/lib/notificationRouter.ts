@@ -33,6 +33,7 @@ import { router, usePathname, useRootNavigationState } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
+import { reportDiagnostic } from '@/lib/diagnostics';
 import { parseNotificationTarget, type NotificationTarget } from '@/lib/notificationTargets';
 import { supabase } from '@/lib/supabase';
 
@@ -51,7 +52,6 @@ function compact(params: Record<string, string | undefined>): Record<string, str
 export function routeForTarget(target: NotificationTarget): Route {
   switch (target.type) {
     case 'sms_thread':
-    case 'call':
       return {
         pathname: '/messages/thread',
         params: compact({
@@ -62,6 +62,11 @@ export function routeForTarget(target: NotificationTarget): Route {
           name: target.name,
         }),
       };
+    case 'call':
+      // A missed call is a CALL LOG entry, not a conversation: Phone →
+      // Recents, opened on the Missed segment. (Routing this into the SMS
+      // thread was the 2026-09-08 misroute.)
+      return { pathname: '/phone/recents', params: { segment: 'missed' } };
     case 'lead':
       return { pathname: '/leads/[id]', params: { id: target.leadId } };
     case 'customer':
@@ -102,12 +107,18 @@ function enqueue(response: Notifications.NotificationResponse | null | undefined
   if (!response) return;
   const id = response.notification.request.identifier;
   if (handled.has(id)) return;
-  const target = parseNotificationTarget(response.notification.request.content.data);
+  const data = response.notification.request.content.data;
+  const target = parseNotificationTarget(data);
   if (!target) {
     handled.add(id);
+    reportDiagnostic('notification_tap', false, {
+      reason: 'no target',
+      dataType: typeof (data as { type?: unknown } | null)?.type === 'string' ? String((data as { type?: unknown }).type) : null,
+    });
     return;
   }
   pending = { id, target };
+  reportDiagnostic('notification_tap', null, { stage: 'queued', targetType: target.type });
   notifyListeners();
 }
 
@@ -116,7 +127,13 @@ export function navigateToTarget(target: NotificationTarget): void {
   const route = routeForTarget(target);
   try {
     router.push({ pathname: route.pathname, params: route.params ?? {} } as never);
-  } catch {
+    reportDiagnostic('notification_tap', true, { targetType: target.type, route: route.pathname });
+  } catch (e) {
+    reportDiagnostic('notification_tap', false, {
+      targetType: target.type,
+      route: route.pathname,
+      error: e instanceof Error ? e.message : String(e),
+    });
     try {
       router.replace('/(tabs)' as never);
     } catch {

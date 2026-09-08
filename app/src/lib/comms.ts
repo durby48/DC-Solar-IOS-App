@@ -1203,9 +1203,9 @@ export interface RecentCall {
   direction: MessageDirection;
   status: string;
   /**
-   * Did not connect. Until in-app calling ships there are no inbound calls
-   * at all, so this is an OUTBOUND bridge call that ended failed / busy /
-   * no-answer / canceled — the Recents screen says so on the segment.
+   * Did not connect: an INBOUND call nobody answered (no-answer / busy /
+   * failed / canceled, written by twilio-voice-inbound + twilio-status) or an
+   * outbound call that never got through. Direction tells which.
    */
   missed: boolean;
   durationSeconds: number | null;

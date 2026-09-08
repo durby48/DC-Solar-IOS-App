@@ -1,7 +1,7 @@
 import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import { setStatusBarStyle } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, AppState, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import BuildInfo from '@/components/BuildInfo';
 import { ClockCard } from '@/components/ClockCard';
@@ -159,10 +159,17 @@ export default function HomeScreen() {
   }, [sessionEmail, jobs]);
 
   // Incoming calls ring this phone like a real call (CallKit) once the
-  // Twilio push credential exists; until then this is a silent no-op.
+  // Twilio push credential exists; until then this is a silent no-op. The
+  // result is recorded to client_diagnostics by the voice module itself.
+  // Re-run whenever the app comes back to the foreground: the PushKit
+  // token and the Twilio binding can both change while it was away.
   useEffect(() => {
     if (!sessionEmail || !isAdmin) return;
     void registerForIncomingCalls();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void registerForIncomingCalls();
+    });
+    return () => sub.remove();
   }, [sessionEmail, isAdmin]);
 
   // Shared helper: ends the session (with a timeout) and resets the ROOT

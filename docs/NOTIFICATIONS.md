@@ -25,7 +25,7 @@ Every push carries `data` = a **notification target** (server: `sanitizeTarget()
 | type | fields | tap opens |
 |---|---|---|
 | `sms_thread` | customerId? leadId? contactId? phone? name? | `/messages/thread` — the exact thread the inbound text was filed under |
-| `call` | same as sms_thread | the caller's thread (missed calls) |
+| `call` | same as sms_thread | **Phone → Recents, Missed segment** (`/phone/recents?segment=missed`). A missed call is a call-log entry, not a conversation; routing it into the SMS thread was the 2026-09-08 misroute. |
 | `lead` | leadId | `/leads/[id]` |
 | `customer` | customerId | `/crm/[id]` |
 | `job` | jobId | `/job/[id]` |
@@ -37,6 +37,30 @@ Strings only, ids only, no bodies, no notes, no secrets. The on-device job remin
 ## The router (`lib/notificationRouter.ts`, mounted once in `app/_layout.tsx`)
 
 tap → `parseNotificationTarget(data)` → `routeForTarget()` → `router.push()`. One path for foreground taps, background taps and cold start (`getLastNotificationResponseAsync`). The target is **queued** until the root navigator has a key, a session exists and the pathname has left `/` (i.e. `app/index.tsx` has finished landing the person) — so a cold-start tap is not lost and a tap while signed out continues to the record after login. Each response is handled once (by identifier). A route that cannot be placed falls back to Home; a record that no longer exists is shown by the destination screen's own not-found state.
+
+## Diagnostics — reading a phone's failures from a desk (2026-09-08)
+
+`client_diagnostics` (self-insert, admin-read; `lib/diagnostics.ts::reportDiagnostic`)
+records, per signed-in device: every incoming-call registration attempt and
+its outcome (`voice_register`: identity, error code/message, attempt count —
+never the token), account-switch and sign-out unregistrations
+(`voice_unregister`), call invites ringing / accepted / rejected / cancelled
+(`voice_invite`), notification taps (queued → routed, or why not:
+`notification_tap`), and JS crashes caught by the root `ErrorBoundary` in
+`app/_layout.tsx` (`js_error`: message + top of stack). Each row carries
+`app_version` ("1.x (30)") and `runtime` ("3 · <update id>"), which answers
+"is that phone even on the OTA?" before anything else. Read it with:
+
+```sql
+select created_at, email, kind, ok, detail, app_version, runtime
+  from public.client_diagnostics order by created_at desc limit 50;
+```
+
+Registration itself now retries (2 s, 6 s, 15 s) when the SDK's `register()`
+fails — on a cold start the PushKit token can arrive after the first
+attempt — and re-runs whenever the app returns to the foreground. Switching
+accounts on one phone unregisters the previous identity before registering
+the new one.
 
 ## Coverage after this change
 
