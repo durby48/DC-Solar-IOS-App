@@ -21,6 +21,9 @@
 //       (skipped for extracted.source = 'email-scanner' rows — the email
 //        path already pushed; prevents double notifications)
 //     - job_assignments inserts          → 🔧 push to the assigned member
+//     - leads inserts with source_ref    → 🌐 push to admins (CRM Phase 10:
+//       an automatic lead — website quote form — arrived; typed-in leads
+//       never reach here, the trigger has WHEN source_ref IS NOT NULL)
 //
 // audience: "admins" (default — owner/operator only; bank alerts are
 // admin business) or "all" (whole crew).
@@ -408,6 +411,21 @@ Deno.serve(async (req) => {
         audience: 'admins',
       };
     }
+  }
+
+  if (!message && table === 'leads' && op === 'INSERT' && typeof record?.source_ref === 'string') {
+    const name = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : 'Someone';
+    const contact =
+      (typeof record.phone === 'string' && record.phone.trim()) ||
+      (typeof record.email === 'string' && record.email.trim()) ||
+      'no phone or email';
+    const source = typeof record.source === 'string' && record.source ? record.source : 'Website';
+    message = {
+      title: `🌐 New ${source.toLowerCase()} lead`,
+      body: truncate(`${name} · ${contact}. A follow-up task is waiting in the CRM.`, 200),
+      emails: null,
+      audience: 'admins',
+    };
   }
 
   if (!message && table === 'job_schedule_dates' && record?.job_id) {

@@ -403,13 +403,16 @@ export function composeActivity(input: {
   }
 
   for (const t of input.tasks ?? []) {
+    // Phase 10: automation writes tasks as created_by = 'automation'. Say so —
+    // an automated action must never look like something a person did.
+    const automatic = t.created_by === 'automation';
     events.push({
       id: `task:${t.id}:added`,
       at: t.created_at,
       kind: 'task_added',
-      title: `Task added · ${t.title}`,
+      title: automatic ? `Task created automatically · ${t.title}` : `Task added · ${t.title}`,
       detail: t.notes,
-      actor: authorName(t.created_by),
+      actor: automatic ? 'Automation' : authorName(t.created_by),
       jobId: t.job_id,
     });
     if (t.done_at) {
