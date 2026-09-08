@@ -4,13 +4,19 @@
  * (docs/TWILIO_SETUP.md § 8); until then Twilio's demo answers, which is
  * what has been happening since the number was bought.
  *
+ * WHO RINGS (v2, 2026-09-08). `voice_routes` maps the DIALED number to ONE
+ * employee (`assigned_to`, an employees.email). The main number rings
+ * Devon; a second number can ring Isaiah later with one row and no code.
+ *
  * THE RING ORDER
- *   1. the app, as a real iPhone call (CallKit) on every admin's phone that
- *      has registered for incoming calls — simultaneous ring, first to
- *      answer wins. Only attempted when the push credential exists.
- *   2. the owner's cell (staff_profiles.cell_phone_e164), if nobody answered
- *      in the app or the app path is not configured.
+ *   1. that person's app, as a real iPhone call (CallKit), if they have a
+ *      voice identity and the push credential exists.
+ *   2. that person's own cell (staff_profiles.cell_phone_e164, when
+ *      voice_bridge_enabled), if the app did not answer or is not configured.
+ *      Never the Twilio number itself — a loop is refused.
  *   3. a short spoken apology and a hang-up. No voicemail yet.
+ * A number with no route skips to 3 and the missed-call push goes to the
+ * admins, so an unrouted number gets noticed rather than guessed about.
  *
  * Every step is one Twilio request to this function with `?step=`:
  *   (none)   the call arrived → log it, identify the caller, <Dial> step 1
@@ -160,9 +166,40 @@ Deno.serve(async (req) => {
 
     const callSid = form.get('CallSid') ?? '';
     const from = toE164(form.get('From') ?? '');
+    // The number that was dialed decides who rings. Twilio sends it on every
+    // step of the same call, so no state has to be carried between steps.
+    const dialed = toE164(form.get('To') ?? '') ?? fromNumber;
     const step = url.searchParams.get('step') ?? '';
     const k = encodeURIComponent(webhookSecret);
     const statusUrl = `${base}/twilio-status?k=${k}`;
+
+    // --- who this number belongs to ----------------------------------------------
+    interface Route {
+      assignedTo: string;
+      identity: string | null;
+      cell: string | null;
+    }
+    const resolveRoute = async (): Promise<Route | null> => {
+      const { data: routeRow } = await admin
+        .from('voice_routes')
+        .select('assigned_to')
+        .eq('company', COMPANY)
+        .eq('number_e164', dialed)
+        .maybeSingle();
+      const assignedTo = (routeRow as { assigned_to?: string } | null)?.assigned_to?.toLowerCase();
+      if (!assignedTo) return null;
+      const { data: profile } = await admin
+        .from('staff_profiles')
+        .select('voice_identity, cell_phone_e164, voice_bridge_enabled')
+        .eq('company', COMPANY)
+        .eq('email', assignedTo)
+        .maybeSingle();
+      const p = profile as { voice_identity: string | null; cell_phone_e164: string | null; voice_bridge_enabled: boolean } | null;
+      const cell = p?.cell_phone_e164 && p.voice_bridge_enabled !== false ? p.cell_phone_e164 : null;
+      // A cell that IS a Twilio number would ring this function again. Refuse.
+      const safeCell = cell && cell !== dialed && cell !== fromNumber ? cell : null;
+      return { assignedTo, identity: p?.voice_identity ?? null, cell: safeCell };
+    };
 
     // --- who is calling ---------------------------------------------------------
     const identify = async (): Promise<Caller> => {
@@ -180,25 +217,10 @@ Deno.serve(async (req) => {
       return caller;
     };
 
-    // --- the owner's cell, the fallback ----------------------------------------
-    const ownerCell = async (): Promise<string | null> => {
-      const { data: owners } = await admin.from('employees').select('email').eq('company', COMPANY).eq('role', 'owner').eq('is_test', false);
-      const emails = ((owners as { email: string }[] | null) ?? []).map((o) => o.email.toLowerCase());
-      if (emails.length === 0) return null;
-      const { data: profiles } = await admin
-        .from('staff_profiles')
-        .select('email, cell_phone_e164, voice_bridge_enabled')
-        .eq('company', COMPANY)
-        .in('email', emails);
-      const p = ((profiles as { cell_phone_e164: string | null; voice_bridge_enabled: boolean }[] | null) ?? []).find(
-        (row) => row.cell_phone_e164 && row.voice_bridge_enabled !== false,
-      );
-      return p?.cell_phone_e164 ?? null;
-    };
-
-    const dialCell = async (): Promise<Response> => {
-      const cell = await ownerCell();
-      if (!cell) return finish(await identify(), 'no-answer');
+    // --- the assigned person's cell, the fallback ------------------------------
+    const dialCell = async (route: Route | null): Promise<Response> => {
+      const cell = route?.cell ?? null;
+      if (!cell) return finish(await identify(), 'no-answer', route);
       return xml(
         `<Response>` +
           `<Dial callerId="${esc(from ?? fromNumber)}" timeout="${CELL_RING_SECONDS}" answerOnBridge="true" action="${esc(`${self}?k=${k}&step=cell`)}" method="POST">` +
@@ -208,8 +230,11 @@ Deno.serve(async (req) => {
       );
     };
 
-    /** The call is over without an answer: mark it, tell the admins, apologise. */
-    const finish = async (caller: Caller, status: string): Promise<Response> => {
+    /**
+     * The call is over without an answer: mark it, tell the person whose
+     * number it is (the admins when the number is unrouted), apologise.
+     */
+    const finish = async (caller: Caller, status: string, route: Route | null): Promise<Response> => {
       if (callSid) {
         await admin.from('messages').update({ status }).eq('twilio_sid', callSid);
       }
@@ -223,6 +248,7 @@ Deno.serve(async (req) => {
               title: '📞 Missed call',
               body: `${caller.who}${from && caller.who !== pretty(from) ? ` · ${pretty(from)}` : ''}`,
               audience: 'admins',
+              ...(route ? { emails: [route.assignedTo] } : {}),
               target: {
                 type: 'call',
                 ...(caller.customerId ? { customerId: caller.customerId } : {}),
@@ -246,18 +272,18 @@ Deno.serve(async (req) => {
     if (step === 'app') {
       const outcome = form.get('DialCallStatus') ?? '';
       if (outcome === 'completed') return xml('<Response/>');
-      return dialCell();
+      return dialCell(await resolveRoute());
     }
 
     // ---- step: the cell dial finished --------------------------------------------
     if (step === 'cell') {
       const outcome = form.get('DialCallStatus') ?? '';
       if (outcome === 'completed') return xml('<Response/>');
-      return finish(await identify(), outcome === 'busy' ? 'busy' : 'no-answer');
+      return finish(await identify(), outcome === 'busy' ? 'busy' : 'no-answer', await resolveRoute());
     }
 
     // ---- first contact: log it and ring ------------------------------------------
-    const caller = await identify();
+    const [caller, route] = await Promise.all([identify(), resolveRoute()]);
     if (callSid) {
       await admin.from('messages').insert({
         company: COMPANY,
@@ -267,25 +293,18 @@ Deno.serve(async (req) => {
         channel: 'call',
         direction: 'in',
         from_number: from,
-        to_number: fromNumber,
+        to_number: dialed,
         body: `Incoming call from ${caller.who}`,
         status: 'ringing',
         twilio_sid: callSid,
       });
     }
 
-    // Ring the app only when phones can actually be reached (VoIP push).
+    // Ring the app only when phones can actually be reached (VoIP push) and
+    // the number's person has a voice identity (they opened the app once).
     const appReady = Boolean(Deno.env.get('TWILIO_PUSH_CREDENTIAL_SID'));
-    let identities: string[] = [];
-    if (appReady) {
-      const { data: admins } = await admin.from('employees').select('email').eq('company', COMPANY).in('role', ['owner', 'operator']).eq('is_test', false);
-      const emails = ((admins as { email: string }[] | null) ?? []).map((a) => a.email.toLowerCase());
-      if (emails.length > 0) {
-        const { data: profiles } = await admin.from('staff_profiles').select('voice_identity').eq('company', COMPANY).in('email', emails).not('voice_identity', 'is', null);
-        identities = ((profiles as { voice_identity: string }[] | null) ?? []).map((p) => p.voice_identity).filter(Boolean);
-      }
-    }
-    if (identities.length === 0) return dialCell();
+    const identities: string[] = appReady && route?.identity ? [route.identity] : [];
+    if (identities.length === 0) return dialCell(route);
 
     const paramXml =
       `<Parameter name="displayName" value="${esc(caller.who)}"/>` +
