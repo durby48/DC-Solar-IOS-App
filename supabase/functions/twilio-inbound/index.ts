@@ -349,6 +349,17 @@ Deno.serve(async (req) => {
             title: `💬 ${who}`,
             body: preview || (mediaUrls.length > 0 ? 'Sent a photo' : 'New text message'),
             audience: 'admins',
+            // The notification target (see notify/index.ts): the EXACT thread
+            // this message was filed under, by id — a tap opens it, not the
+            // inbox. Strangers carry only the number.
+            target: {
+              type: 'sms_thread',
+              ...(customerId ? { customerId } : {}),
+              ...(leadId ? { leadId } : {}),
+              ...(contactId ? { contactId } : {}),
+              phone: from,
+              name: who,
+            },
           }),
         });
       } catch {

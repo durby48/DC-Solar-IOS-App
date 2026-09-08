@@ -48,10 +48,26 @@ export type StartCallResult =
   | { ok: true; call: ActiveCall }
   | { ok: false; code?: string; message: string };
 
+export type IncomingRegistration =
+  | { ok: true }
+  | { ok: false; code: 'unsupported' | 'not_configured' | 'not_admin' | 'error'; message: string };
+
 /** Can THIS build place a call itself? Only web and native say yes. */
 export function inAppCallingSupported(): boolean {
   return false;
 }
+
+/**
+ * Register this device to RECEIVE calls to the DC Solar number as a real
+ * phone call (CallKit). Native only; needs the Twilio push credential on the
+ * edge functions (docs/TWILIO_SETUP.md § 8). Everything else answers
+ * 'unsupported' and the number keeps ringing the owner's cell instead.
+ */
+export async function registerForIncomingCalls(): Promise<IncomingRegistration> {
+  return { ok: false, code: 'unsupported', message: 'This platform cannot receive calls.' };
+}
+
+export async function unregisterForIncomingCalls(): Promise<void> {}
 
 export async function startInAppCall(_input: StartCallInput): Promise<StartCallResult> {
   return {

@@ -156,19 +156,32 @@ export async function scheduleJobReminders(jobs: ReminderJob[]): Promise<void> {
   }
 }
 
+/** This device's Expo push token, or null (web, no permission, no project id). */
+async function currentPushToken(): Promise<string | null> {
+  if (Platform.OS === 'web') return null;
+  try {
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+    if (!projectId) return null;
+    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Register this device's Expo push token under the signed-in employee so
- * future server-side triggers (payment received, contract signed, …) can
- * reach them. Safe to call on every sign-in; upserts by token.
+ * Register this device's Expo push token under the signed-in employee so the
+ * server-side triggers (texts, leads, tasks, schedule, money) can reach them.
+ * Safe to call on every sign-in and every Home open; upserts by token, so a
+ * device that changes hands moves to the new person the moment they open
+ * Home — one token is never attached to two people.
  */
 export async function registerPushToken(email: string): Promise<void> {
   if (Platform.OS === 'web') return;
   if (!(await ensurePermission())) return;
   try {
-    const projectId =
-      Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-    if (!projectId) return;
-    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+    const token = await currentPushToken();
     if (!token) return;
     await supabase.from('push_tokens').upsert(
       {
@@ -182,5 +195,23 @@ export async function registerPushToken(email: string): Promise<void> {
     );
   } catch {
     // best-effort — the push_tokens table may not exist until migration 9 runs
+  }
+}
+
+/**
+ * Forget this device on sign-out, so the next person's pushes do not arrive
+ * on it and the previous person's stop. Runs BEFORE the session ends: the
+ * delete policy is "your own email", which needs the JWT still in hand.
+ * Best-effort — a failed delete just leaves a stale row that the next
+ * sign-in on this device overwrites (upsert by token).
+ */
+export async function unregisterPushToken(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  try {
+    const token = await currentPushToken();
+    if (!token) return;
+    await supabase.from('push_tokens').delete().eq('token', token);
+  } catch {
+    // best-effort
   }
 }

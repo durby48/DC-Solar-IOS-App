@@ -27,6 +27,7 @@ import { todayISO } from '@/lib/dates';
 import { visibleGroups, visibleItems } from '@/lib/hub';
 import { type Job } from '@/lib/types';
 import { registerPushToken, scheduleJobReminders } from '@/lib/notifications';
+import { registerForIncomingCalls } from '@/lib/voice';
 import { clearRoleCache, useRoleGate } from '@/lib/role';
 import { resetToLogin, signOutAndLeave } from '@/lib/signOut';
 import { supabase } from '@/lib/supabase';
@@ -150,10 +151,19 @@ export default function HomeScreen() {
    * Both are silent no-ops on web and on denied permission.
    */
   useEffect(() => {
-    if (!sessionEmail || jobs.length === 0) return;
-    void scheduleJobReminders(jobs);
+    if (!sessionEmail) return;
+    // Registration must not wait for jobs: a new operator with nothing
+    // scheduled yet (or a viewer) still needs texts and leads to reach them.
     void registerPushToken(sessionEmail);
+    if (jobs.length > 0) void scheduleJobReminders(jobs);
   }, [sessionEmail, jobs]);
+
+  // Incoming calls ring this phone like a real call (CallKit) once the
+  // Twilio push credential exists; until then this is a silent no-op.
+  useEffect(() => {
+    if (!sessionEmail || !isAdmin) return;
+    void registerForIncomingCalls();
+  }, [sessionEmail, isAdmin]);
 
   // Shared helper: ends the session (with a timeout) and resets the ROOT
   // stack to the login route. `router.replace('/')` from inside the tabs

@@ -20,6 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ConnectionBanner } from '@/components/ConnectionBanner';
 import { colors } from '@/constants/theme';
+import { useNotificationRouting } from '@/lib/notificationRouter';
 import { configureNotificationHandler } from '@/lib/notifications';
 
 /**
@@ -84,6 +85,11 @@ const appTheme = {
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts(FONT_FACES);
+
+  // A tapped notification — text, lead, task, job — opens the exact screen,
+  // whether the app was open, in the background, or not running at all.
+  // One router for every case: lib/notificationRouter.ts.
+  useNotificationRouting();
 
   /**
    * Fonts NEVER block the app.

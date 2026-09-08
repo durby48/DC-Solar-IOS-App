@@ -34,7 +34,8 @@ async function readPayload(error: unknown): Promise<{ code?: string; error?: str
  * call screen shows.
  */
 export async function fetchVoiceToken(): Promise<
-  { ok: true; token: string; identity: string } | { ok: false; code?: string; message: string }
+  | { ok: true; token: string; identity: string; incoming: boolean }
+  | { ok: false; code?: string; message: string }
 > {
   try {
     const { data, error } = await supabase.functions.invoke('twilio-voice-token', { body: {} });
@@ -50,13 +51,15 @@ export async function fetchVoiceToken(): Promise<
       ok?: boolean;
       token?: string;
       identity?: string;
+      /** True when the token also allows INCOMING calls (push credential configured). */
+      incoming?: boolean;
       code?: string;
       error?: string;
     } | null;
     if (!result?.ok || !result.token) {
       return { ok: false, code: result?.code, message: result?.error ?? 'Could not start the call.' };
     }
-    return { ok: true, token: result.token, identity: result.identity ?? '' };
+    return { ok: true, token: result.token, identity: result.identity ?? '', incoming: result.incoming === true };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not start the call.' };
   }

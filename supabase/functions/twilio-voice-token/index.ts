@@ -67,6 +67,8 @@ async function mintToken(input: {
   apiKeySecret: string;
   appSid: string;
   identity: string;
+  /** Twilio Push Credential (CR…) for the iOS VoIP certificate; enables incoming. */
+  pushCredentialSid?: string;
 }): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const header = { typ: 'JWT', alg: 'HS256', cty: 'twilio-fpa;v=1' };
@@ -79,9 +81,13 @@ async function mintToken(input: {
     grants: {
       identity: input.identity,
       voice: {
-        // Outbound only. Incoming calls to the browser are Phase 4 work
-        // (they need presence, ringing UI and a fallback to Devon's cell).
-        incoming: { allow: false },
+        // Incoming calls (2026-09-08): allowed only when a Twilio Push
+        // Credential exists for the iOS app's VoIP certificate — without
+        // it a phone cannot be reached while the app is closed, and Twilio
+        // refuses the registration anyway. `twilio-voice-inbound` rings the
+        // registered identities and falls back to the owner's cell.
+        incoming: { allow: Boolean(input.pushCredentialSid) },
+        ...(input.pushCredentialSid ? { push_credential_sid: input.pushCredentialSid } : {}),
         outgoing: { application_sid: input.appSid },
       },
     },
@@ -174,8 +180,9 @@ Deno.serve(async (req) => {
     }
     if (!identity) return fail(500, 'server_error', 'Could not assign a calling identity.');
 
-    const token = await mintToken({ accountSid, apiKeySid, apiKeySecret, appSid, identity });
-    return ok({ token, identity, ttl: TTL_SECONDS });
+    const pushCredentialSid = Deno.env.get('TWILIO_PUSH_CREDENTIAL_SID') || undefined;
+    const token = await mintToken({ accountSid, apiKeySid, apiKeySecret, appSid, identity, pushCredentialSid });
+    return ok({ token, identity, ttl: TTL_SECONDS, incoming: Boolean(pushCredentialSid) });
   } catch (e) {
     return fail(500, 'server_error', e instanceof Error ? e.message : 'Token failed.');
   }

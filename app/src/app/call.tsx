@@ -5,8 +5,11 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
+import { PulseRing } from '@/components/ui';
 import { colors, fonts, radii, spacing } from '@/constants/theme';
 import { formatDuration, formatPhone, placeBridgeCall } from '@/lib/comms';
+import { takeIncomingCall } from '@/lib/incomingCall';
+import { playRingbackTone } from '@/lib/ringback';
 import { inAppCallingSupported, startInAppCall, type ActiveCall, type CallState } from '@/lib/voice';
 
 /**
@@ -27,6 +30,15 @@ import { inAppCallingSupported, startInAppCall, type ActiveCall, type CallState 
 
 const DTMF_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'] as const;
 
+/**
+ * How long we'll wait for real progress (the far end audibly ringing, or the
+ * call ending one way or another) before giving up. A hung WebRTC/SDK
+ * handshake never fires an event at all — no 'error', nothing — and without
+ * this a person is left staring at "Calling…" forever with no way back to a
+ * call that could actually go through (the bridge).
+ */
+const CALL_SETUP_TIMEOUT_MS = 30_000;
+
 export default function CallScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -34,15 +46,24 @@ export default function CallScreen() {
     name?: string;
     customerId?: string;
     contactId?: string;
+    /** '1' when CallKit just answered an incoming call (lib/incomingCall.ts). */
+    incoming?: string;
   }>();
-  const to = typeof params.to === 'string' ? params.to : '';
-  const name = typeof params.name === 'string' && params.name ? params.name : formatPhone(to);
-  const customerId = typeof params.customerId === 'string' ? params.customerId : null;
-  const contactId = typeof params.contactId === 'string' ? params.contactId : null;
+  // An answered incoming call is taken once, on first render, and then owns
+  // this screen; everything below reads the same fields either way.
+  const [incoming] = useState(() => (params.incoming === '1' ? takeIncomingCall() : null));
+  const isIncoming = params.incoming === '1';
+  const to = incoming ? incoming.phone : typeof params.to === 'string' ? params.to : '';
+  const name = incoming
+    ? incoming.name
+    : typeof params.name === 'string' && params.name
+      ? params.name
+      : formatPhone(to);
+  const customerId = incoming ? incoming.customerId : typeof params.customerId === 'string' ? params.customerId : null;
+  const contactId = incoming ? incoming.contactId : typeof params.contactId === 'string' ? params.contactId : null;
 
   const [state, setState] = useState<CallState | 'starting'>('starting');
   const [detail, setDetail] = useState<string | null>(null);
-  const [failCode, setFailCode] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
   const [speaker, setSpeaker] = useState(false);
   const [speakerSupported, setSpeakerSupported] = useState(false);
@@ -55,16 +76,63 @@ export default function CallScreen() {
   const callRef = useRef<ActiveCall | null>(null);
   const startedAt = useRef<number | null>(null);
   const endedSeconds = useRef<number | null>(null);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // An incoming call is already live when this screen appears: adopt it,
+  // follow its state, never dial.
+  useEffect(() => {
+    if (!isIncoming) return;
+    if (!incoming) {
+      setState('ended');
+      setDetail('That call has already ended.');
+      return;
+    }
+    callRef.current = incoming.call;
+    setSpeakerSupported(incoming.call.speakerSupported);
+    startedAt.current = Date.now();
+    setState(incoming.state);
+    setDetail(incoming.detail);
+    const unsubscribe = incoming.subscribe((next, info) => {
+      if ((next === 'ended' || next === 'failed') && startedAt.current !== null) {
+        endedSeconds.current = Math.round((Date.now() - startedAt.current) / 1000);
+      }
+      setState(next);
+      setDetail(info ?? null);
+    });
+    return () => {
+      unsubscribe();
+      callRef.current?.hangUp();
+    };
+  }, [isIncoming, incoming]);
 
   // Place the call once, on mount. Strict-mode double mount is not a concern
   // in production; in dev the second Device simply replaces the first.
   useEffect(() => {
+    if (isIncoming) return;
     if (!to) {
       setState('failed');
       setDetail('No number to dial.');
       return;
     }
     let cancelled = false;
+
+    const clearWatchdog = () => {
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
+    };
+
+    watchdogRef.current = setTimeout(() => {
+      if (cancelled) return;
+      callRef.current?.hangUp();
+      callRef.current = null;
+      setState('failed');
+      setDetail(
+        'Taking too long to connect. Check your connection and try again, or ring their cell directly.',
+      );
+    }, CALL_SETUP_TIMEOUT_MS);
+
     void (async () => {
       const result = await startInAppCall({
         to,
@@ -77,6 +145,13 @@ export default function CallScreen() {
           if ((next === 'ended' || next === 'failed') && startedAt.current !== null) {
             endedSeconds.current = Math.round((Date.now() - startedAt.current) / 1000);
           }
+          // The far end audibly ringing (or the call being over one way or
+          // another) is real proof of life — that's the watchdog's job done.
+          // 'connecting' alone is not: the SDK reports it immediately, before
+          // anything has actually reached the other side.
+          if (next === 'ringing' || next === 'active' || next === 'ended' || next === 'failed') {
+            clearWatchdog();
+          }
           setState(next);
           setDetail(info ?? null);
         },
@@ -86,16 +161,25 @@ export default function CallScreen() {
         callRef.current = result.call;
         setSpeakerSupported(result.call.speakerSupported);
       } else {
+        clearWatchdog();
         setState('failed');
-        setFailCode(result.code ?? null);
         setDetail(result.message);
       }
     })();
     return () => {
       cancelled = true;
+      clearWatchdog();
       callRef.current?.hangUp();
     };
-  }, [to, name, customerId, contactId]);
+  }, [to, name, customerId, contactId, isIncoming]);
+
+  // Sound like a phone: a ringback tone while we're dialing or the far end
+  // is ringing, so "Calling…" never sounds like the app has frozen. Web
+  // only — see lib/ringback.ts for why native skips this.
+  useEffect(() => {
+    if (state !== 'connecting' && state !== 'ringing') return undefined;
+    return playRingbackTone();
+  }, [state]);
 
   // The timer.
   useEffect(() => {
@@ -175,18 +259,25 @@ export default function CallScreen() {
       <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
       <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
         <View style={styles.top}>
-          <Text style={styles.from}>DC Solar KC · (816) 744-6473</Text>
+          <Text style={styles.from}>
+            {isIncoming ? 'Incoming · DC Solar KC (816) 744-6473' : 'DC Solar KC · (816) 744-6473'}
+          </Text>
         </View>
 
         <View style={styles.who}>
-          {/[A-Za-z]/.test(name) ? (
-            <CustomerAvatar customer={{ id: customerId ?? contactId ?? to, name }} size={104} url={null} />
-          ) : (
-            // A bare number has no initials worth showing — "(8" is not a person.
-            <View style={styles.numberAvatar}>
-              <Ionicons name="person" size={48} color={colors.textOnDark} />
-            </View>
-          )}
+          <View style={styles.avatarWrap}>
+            {state === 'connecting' || state === 'ringing' ? (
+              <PulseRing color={colors.sun} radius={52} />
+            ) : null}
+            {/[A-Za-z]/.test(name) ? (
+              <CustomerAvatar customer={{ id: customerId ?? contactId ?? to, name }} size={104} url={null} />
+            ) : (
+              // A bare number has no initials worth showing — "(8" is not a person.
+              <View style={styles.numberAvatar}>
+                <Ionicons name="person" size={48} color={colors.textOnDark} />
+              </View>
+            )}
+          </View>
           <Text style={styles.name} numberOfLines={2}>
             {name}
           </Text>
@@ -216,7 +307,9 @@ export default function CallScreen() {
 
         {over ? (
           <View style={styles.overArea}>
-            {failCode === 'unsupported' || failCode === 'not_configured' ? (
+            {/* Any in-app failure — not just "unsupported"/"not configured" —
+                gets the same working way out: a call still needs to happen. */}
+            {state === 'failed' ? (
               <>
                 <Pressable
                   onPress={() => void bridge()}
@@ -310,6 +403,7 @@ const styles = StyleSheet.create({
   top: { alignItems: 'center', paddingTop: spacing.md },
   from: { color: colors.oliveSoft, fontFamily: fonts.medium, fontSize: 13, letterSpacing: 0.3 },
   who: { alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg },
+  avatarWrap: { width: 104, height: 104, alignItems: 'center', justifyContent: 'center' },
   numberAvatar: {
     width: 104,
     height: 104,

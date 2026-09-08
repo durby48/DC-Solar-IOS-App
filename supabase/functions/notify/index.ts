@@ -31,11 +31,52 @@
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const COMPANY = 'dc-solar';
 
+/**
+ * THE NOTIFICATION TARGET CONTRACT (2026-09-08). Every push carries a `data`
+ * object that says what the notification is ABOUT, with stable ids, so a tap
+ * can open the exact screen — never a name or a number to be looked up
+ * later. The app's `lib/notificationTargets.ts` is the other half of this
+ * contract; keep the two in step.
+ *
+ *   sms_thread   { customerId?, leadId?, contactId?, phone?, name? }
+ *   call         { customerId?, leadId?, contactId?, phone?, name? }  (missed call → same thread)
+ *   lead         { leadId }
+ *   customer     { customerId }
+ *   job          { jobId }
+ *   task         { taskId, leadId?, customerId? }
+ *   appointment  { appointmentId, leadId }
+ *
+ * Values are strings only (Expo delivers `data` as JSON; iOS keeps it small).
+ * Nothing else goes in here: no notes, no bodies, no secrets.
+ */
+type TargetType = 'sms_thread' | 'call' | 'lead' | 'customer' | 'job' | 'task' | 'appointment';
+type Target = { type: TargetType } & Record<string, string>;
+
+const TARGET_TYPES = new Set<string>(['sms_thread', 'call', 'lead', 'customer', 'job', 'task', 'appointment']);
+const TARGET_KEYS = new Set<string>([
+  'type', 'customerId', 'leadId', 'contactId', 'phone', 'name', 'jobId', 'taskId', 'appointmentId',
+]);
+
+/** Accept a caller-supplied target only if it is exactly the contract. */
+function sanitizeTarget(raw: unknown): Target | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!TARGET_KEYS.has(key)) continue;
+    if (typeof value !== 'string' || value.length === 0 || value.length > 200) continue;
+    out[key] = value;
+  }
+  if (!TARGET_TYPES.has(out.type ?? '')) return null;
+  return out as Target;
+}
+
 interface PushMessage {
   to: string;
   title: string;
   body: string;
   sound: 'default';
+  priority: 'high';
+  data?: Target;
 }
 
 function json(status: number, payload: Record<string, unknown>): Response {
@@ -259,13 +300,17 @@ async function logEmailTransaction(params: {
   return inserted ? 'logged' : 'error';
 }
 
-/** Normalize any accepted body shape into {title, body, emails?, audience}. */
-function normalize(payload: Record<string, unknown>): {
+interface OutboundMessage {
   title: string;
   body: string;
   emails: string[] | null;
   audience: 'admins' | 'all';
-} | null {
+  /** Where a tap goes. Optional: an informational push may have nowhere to go. */
+  target?: Target;
+}
+
+/** Normalize any accepted body shape into {title, body, emails?, audience, target?}. */
+function normalize(payload: Record<string, unknown>): OutboundMessage | null {
   // Database webhook shape (finance_entries INSERT).
   if (payload.type === 'INSERT' && payload.record && typeof payload.record === 'object') {
     const record = payload.record as Record<string, unknown>;
@@ -280,6 +325,7 @@ function normalize(payload: Record<string, unknown>): {
       body: `$${Number.isFinite(amount) ? amount.toLocaleString('en-US') : '?'} from ${who}`,
       emails: null,
       audience: 'admins',
+      target: typeof record.job_id === 'string' ? { type: 'job', jobId: record.job_id } : undefined,
     };
   }
 
@@ -296,7 +342,8 @@ function normalize(payload: Record<string, unknown>): {
     };
   }
 
-  // Direct shape.
+  // Direct shape (twilio-inbound, twilio-voice-inbound, scripts). `target`
+  // is honoured only when it matches the contract exactly.
   if (typeof payload.title === 'string' && typeof payload.body === 'string') {
     const emails =
       Array.isArray(payload.emails) && payload.emails.every((e) => typeof e === 'string')
@@ -307,6 +354,7 @@ function normalize(payload: Record<string, unknown>): {
       body: truncate(payload.body, 200),
       emails,
       audience: payload.audience === 'all' ? 'all' : 'admins',
+      target: sanitizeTarget(payload.target) ?? undefined,
     };
   }
 
@@ -394,6 +442,9 @@ Deno.serve(async (req) => {
     return ` · ${hour12}:${`${m || 0}`.padStart(2, '0')} ${ampm}`;
   };
 
+  const jobTarget = (jobId: unknown): Target | undefined =>
+    typeof jobId === 'string' ? { type: 'job', jobId } : undefined;
+
   if (!message && table === 'job_assignments' && record?.email) {
     const label = await jobLabel(record.job_id);
     if (op === 'INSERT') {
@@ -402,6 +453,7 @@ Deno.serve(async (req) => {
         body: truncate(`You've been assigned to ${label}.`, 200),
         emails: [String(record.email)],
         audience: 'admins',
+        target: jobTarget(record.job_id),
       };
     } else if (op === 'DELETE') {
       message = {
@@ -409,6 +461,7 @@ Deno.serve(async (req) => {
         body: truncate(`You've been taken off ${label}.`, 200),
         emails: [String(record.email)],
         audience: 'admins',
+        target: jobTarget(record.job_id),
       };
     }
   }
@@ -425,7 +478,53 @@ Deno.serve(async (req) => {
       body: truncate(`${name} · ${contact}. A follow-up task is waiting in the CRM.`, 200),
       emails: null,
       audience: 'admins',
+      target: typeof record.id === 'string' ? { type: 'lead', leadId: record.id } : undefined,
     };
+  }
+
+  // A task handed to someone (INSERT with an assignee, or an UPDATE that
+  // changes the assignee). The person who assigned it to themselves is not
+  // told twice; automation-created tasks reach the assignee like any other.
+  if (!message && table === 'tasks' && typeof record?.assigned_to === 'string' && record.assigned_to) {
+    const assignee = String(record.assigned_to).toLowerCase();
+    const reassigned = op === 'UPDATE' && String(oldRecord?.assigned_to ?? '').toLowerCase() === assignee;
+    const selfAssigned = op === 'INSERT' && String(record.created_by ?? '').toLowerCase() === assignee;
+    if ((op === 'INSERT' || op === 'UPDATE') && !reassigned && !selfAssigned) {
+      const title = typeof record.title === 'string' ? record.title : 'a task';
+      const target: Target = { type: 'task', taskId: String(record.id) };
+      if (typeof record.lead_id === 'string') target.leadId = record.lead_id;
+      if (typeof record.customer_id === 'string') target.customerId = record.customer_id;
+      message = {
+        title: '✅ Task for you',
+        body: truncate(title, 200),
+        emails: [assignee],
+        audience: 'admins',
+        target,
+      };
+    }
+  }
+
+  // A lead appointment given to someone: same rule as tasks.
+  if (!message && table === 'lead_appointments' && typeof record?.assigned_to === 'string' && record.assigned_to) {
+    const assignee = String(record.assigned_to).toLowerCase();
+    const reassigned = op === 'UPDATE' && String(oldRecord?.assigned_to ?? '').toLowerCase() === assignee;
+    const selfAssigned = op === 'INSERT' && String(record.created_by ?? '').toLowerCase() === assignee;
+    if ((op === 'INSERT' || op === 'UPDATE') && !reassigned && !selfAssigned) {
+      const leads = typeof record.lead_id === 'string' ? await rest(`leads?id=eq.${record.lead_id}&select=name&limit=1`) : null;
+      const leadName = (leads?.[0] as { name?: string } | undefined)?.name ?? 'a lead';
+      const kind = String(record.kind ?? 'appointment').replace('_', ' ');
+      message = {
+        title: '📅 Appointment for you',
+        body: truncate(`${kind} with ${leadName} · ${prettyDate(record.appt_date)}${prettyTime(record.start_time)}`, 200),
+        emails: [assignee],
+        audience: 'admins',
+        target: {
+          type: 'appointment',
+          appointmentId: String(record.id),
+          ...(typeof record.lead_id === 'string' ? { leadId: record.lead_id } : {}),
+        },
+      };
+    }
   }
 
   if (!message && table === 'job_schedule_dates' && record?.job_id) {
@@ -452,6 +551,7 @@ Deno.serve(async (req) => {
         body: truncate(body, 200),
         emails,
         audience: 'admins',
+        target: jobTarget(record.job_id),
       };
     }
   }
@@ -478,13 +578,17 @@ Deno.serve(async (req) => {
     : '';
   const tokens = await rest(`push_tokens?company=eq.${COMPANY}&select=token${filter}`);
   if (!tokens) return json(500, { error: 'could not read push_tokens' });
-  if (tokens.length === 0) return json(200, { sent: 0, skipped: 'no registered devices' });
+  if (tokens.length === 0) {
+    return json(200, { sent: 0, skipped: 'no registered devices', target: message.target ?? null });
+  }
 
   const messages: PushMessage[] = tokens.map((row) => ({
     to: String(row.token),
     title: message.title,
     body: message.body,
     sound: 'default',
+    priority: 'high',
+    ...(message.target ? { data: message.target } : {}),
   }));
 
   // Expo accepts up to 100 messages per request.
@@ -509,5 +613,7 @@ Deno.serve(async (req) => {
     sent,
     logged: logged ?? undefined,
     errors: errors.length ? errors : undefined,
+    // Echoed so a test can see what went out without a device: never tokens.
+    target: message.target ?? null,
   });
 });

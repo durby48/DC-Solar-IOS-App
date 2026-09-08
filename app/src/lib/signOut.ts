@@ -22,8 +22,10 @@
  *   - Cached role/account info would otherwise survive into the next sign-in.
  */
 
+import { unregisterPushToken } from '@/lib/notifications';
 import { clearRoleCache } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
+import { unregisterForIncomingCalls } from '@/lib/voice';
 
 const SIGN_OUT_TIMEOUT_MS = 4000;
 
@@ -63,6 +65,18 @@ export function resetToLogin(navigation: Resettable): void {
 /** End the session locally and remotely, never hanging the caller. */
 export async function endSession(): Promise<void> {
   const timeout = new Promise<void>((resolve) => setTimeout(resolve, SIGN_OUT_TIMEOUT_MS));
+  // This device stops being this person's: no more pushes, no more incoming
+  // calls. Both need the session still alive, so they go first — and they
+  // are raced against the same timeout so a dead network cannot hold the
+  // sign-out hostage.
+  try {
+    await Promise.race([
+      Promise.all([unregisterPushToken(), unregisterForIncomingCalls()]).then(() => undefined),
+      timeout,
+    ]);
+  } catch {
+    // best-effort
+  }
   try {
     // Global revoke first; if it stalls, the local-scope call below is
     // storage-only and cannot.

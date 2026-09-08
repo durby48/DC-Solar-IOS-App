@@ -184,7 +184,7 @@ character means every request fails the check with a 403):
 | Where in the Twilio console | URL |
 |---|---|
 | Messaging → Services → DC Solar KC → **Integration** → "Send a webhook", *Request URL*, POST | `https://kjamxfezsathrsbztiln.supabase.co/functions/v1/twilio-inbound?k=<TWILIO_WEBHOOK_SECRET>` |
-| Phone Numbers → the number → **Voice & Fax** → *A call comes in*, Webhook, POST | leave as Twilio's demo, or point at your own IVR — the app never receives inbound calls |
+| Phone Numbers → the number → **Voice & Fax** → *A call comes in*, Webhook, POST | `https://kjamxfezsathrsbztiln.supabase.co/functions/v1/twilio-voice-inbound?k=<TWILIO_WEBHOOK_SECRET>` — rings the app as a real call (once § 8 is done), then the owner's cell, then apologises and pushes "Missed call". Until this is set, callers hear Twilio's demo. |
 
 Outbound status callbacks are set by the functions themselves; there is nothing
 to configure for `twilio-status`.
@@ -319,3 +319,30 @@ undelivered message "delivered". Both are compared in constant time.
 | Messaging Service SID | step 2 | `TWILIO_MESSAGING_SERVICE_SID` |
 | A 40-char random string you invent | step 5 | `TWILIO_WEBHOOK_SECRET` |
 | (already set) | — | `TWILIO_PUBLIC_BASE` |
+
+## 8. Incoming calls ring the app like a real call (CallKit) — added 2026-09-08
+
+The native SDK in build 30 already handles PushKit + CallKit. What it needs
+is a way for Twilio to wake the phone: an **APNs VoIP push credential**.
+
+1. **Apple** — developer.apple.com → Certificates → **+** → *VoIP Services
+   Certificate* → App ID `com.dcsolarkc.fieldapp`. Download it, add it to
+   Keychain on a Mac, export as `.p12`, then:
+   ```
+   openssl pkcs12 -in voip.p12 -nokeys -out voip-cert.pem -legacy
+   openssl pkcs12 -in voip.p12 -nocerts -nodes -out voip-key.pem -legacy
+   ```
+2. **Twilio** — Console → Account → **Push Credentials → Create new**: type
+   **APN**, sandbox **off** (production), paste `voip-cert.pem` and
+   `voip-key.pem` (the parts between the BEGIN/END lines). Copy the `CR…` SID.
+3. **Supabase** — edge-function secret `TWILIO_PUSH_CREDENTIAL_SID = CR…`.
+   No redeploy: `twilio-voice-token` reads it per request and starts minting
+   tokens with `incoming: allow` + the credential; `twilio-voice-inbound`
+   starts ringing the app before the cell.
+4. **The number** — the *A call comes in* webhook from § 3's table.
+5. Each admin opens **Home** on build 30 once (that registers the device; it
+   re-registers on every Home open). Then a customer calling (816) 744-6473
+   rings their iPhone with the customer's name, lock screen included.
+
+Not configured = nothing breaks: the app never registers, callers ring the
+owner's cell, missed calls still get logged and pushed.
