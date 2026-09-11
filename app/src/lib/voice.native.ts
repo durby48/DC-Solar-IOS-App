@@ -321,6 +321,8 @@ export function prepareVoiceAtLaunch(): void {
  * credential not configured) return at once.
  */
 const RETRY_DELAYS_MS = [2000, 6000, 15000];
+const REGISTER_MIN_INTERVAL_MS = 60_000;
+let lastRegisteredAt = 0;
 
 async function registerOnce(): Promise<IncomingRegistration & { identity?: string; retryable?: boolean }> {
   const mod = loadSdk();
@@ -373,6 +375,7 @@ async function registerOnce(): Promise<IncomingRegistration & { identity?: strin
       }
       registeredIdentity = null;
       registeredToken = null;
+      lastRegisteredAt = 0;
     }
     // CallKit shows this instead of the raw From; the TwiML sets displayName
     // to the customer's name when the number is known, else the number.
@@ -380,6 +383,7 @@ async function registerOnce(): Promise<IncomingRegistration & { identity?: strin
     await v.register(token.token);
     registeredToken = token.token;
     registeredIdentity = token.identity;
+    lastRegisteredAt = Date.now();
     return { ok: true, identity: token.identity };
   } catch (e) {
     return {
@@ -405,6 +409,11 @@ let registering: Promise<IncomingRegistration> | null = null;
  */
 export async function registerForIncomingCalls(): Promise<IncomingRegistration> {
   if (registering) return registering;
+  // Home re-runs this on every foreground, and CallKit flips the app
+  // active/inactive several times per call — six registrations in twenty
+  // seconds were recorded on 2026-09-11. A binding is good for far longer
+  // than a minute; skip the round-trip when the last one is that fresh.
+  if (registeredIdentity && Date.now() - lastRegisteredAt < REGISTER_MIN_INTERVAL_MS) return { ok: true };
   registering = (async () => {
     let attempts = 1;
     let result = await registerOnce();
@@ -459,5 +468,6 @@ export async function unregisterForIncomingCalls(): Promise<void> {
   } finally {
     registeredToken = null;
     registeredIdentity = null;
+    lastRegisteredAt = 0;
   }
 }
