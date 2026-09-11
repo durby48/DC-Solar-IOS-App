@@ -43,8 +43,18 @@ function clip(value: Scalar): string | number | boolean | null {
 /** "1.4.2 (30)" — the store version and the native build number. */
 export function appVersionLabel(): string {
   const version = Constants.expoConfig?.version ?? '?';
-  const build = Constants.nativeBuildVersion ?? '?';
-  return `${version} (${build})`;
+  // `Constants.nativeBuildVersion` is deprecated in SDK 57 and came back
+  // empty on build 30 (every row read "1.0.0 (?)"). expo-application is in
+  // node_modules transitively; guarded because a build that did not link it
+  // would throw on the require.
+  let build: string | null = null;
+  try {
+    // deno-lint-ignore no-explicit-any
+    build = (require('expo-application') as { nativeBuildVersion?: string | null }).nativeBuildVersion ?? null;
+  } catch {
+    build = null;
+  }
+  return `${version} (${build ?? Constants.nativeBuildVersion ?? '?'})`;
 }
 
 /** "3 · 932156b5" — runtime + the first 8 chars of the running OTA update. */

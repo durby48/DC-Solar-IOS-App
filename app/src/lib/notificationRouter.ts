@@ -142,6 +142,17 @@ export function navigateToTarget(target: NotificationTarget): void {
   }
 }
 
+/** Root-stack routes that mean "not in the app yet": login and its gates. */
+const PRE_LANDING_ROUTES = new Set(['index', 'set-password', 'sign-up']);
+
+/** True once the root stack's focused route is a real app screen. */
+function hasLanded(navState: ReturnType<typeof useRootNavigationState>): boolean {
+  const routes = navState?.routes;
+  if (!routes || typeof navState.index !== 'number') return false;
+  const name = routes[navState.index]?.name;
+  return typeof name === 'string' && !PRE_LANDING_ROUTES.has(name);
+}
+
 /**
  * Mount ONCE, in the root layout. Listens for taps, reads the launch
  * response, and releases the queue when the app is ready for it.
@@ -193,7 +204,12 @@ export function useNotificationRouting(): void {
     if (Platform.OS === 'web') return;
     if (!pending) return;
     const navReady = Boolean(navState?.key);
-    const landed = pathname !== '/' && pathname !== '';
+    // "Landed" is decided by the ROOT stack's current ROUTE NAME, not the
+    // pathname: Home is `(tabs)/index.tsx`, whose pathname is `/` — the same
+    // string as the login route (the collision lib/signOut.ts documents).
+    // Gating on the pathname left every tap stuck while the person sat on
+    // Home, then fired it the moment they opened another tab (2026-09-11).
+    const landed = hasLanded(navState);
     if (!navReady || !sessionReady || !landed) return;
     const next = pending;
     pending = null;

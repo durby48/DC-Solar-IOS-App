@@ -269,16 +269,20 @@ Deno.serve(async (req) => {
     };
 
     // ---- step: the app dial finished ---------------------------------------------
+    // `answered` is the rare case where the action fires while the child leg
+    // is still up; treating it as unanswered would dial the cell on top of a
+    // live app call.
+    const ANSWERED = new Set(['completed', 'answered']);
     if (step === 'app') {
       const outcome = form.get('DialCallStatus') ?? '';
-      if (outcome === 'completed') return xml('<Response/>');
+      if (ANSWERED.has(outcome)) return xml('<Response/>');
       return dialCell(await resolveRoute());
     }
 
     // ---- step: the cell dial finished --------------------------------------------
     if (step === 'cell') {
       const outcome = form.get('DialCallStatus') ?? '';
-      if (outcome === 'completed') return xml('<Response/>');
+      if (ANSWERED.has(outcome)) return xml('<Response/>');
       return finish(await identify(), outcome === 'busy' ? 'busy' : 'no-answer', await resolveRoute());
     }
 

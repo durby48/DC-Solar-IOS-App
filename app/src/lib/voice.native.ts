@@ -31,6 +31,7 @@
  */
 
 import { router } from 'expo-router';
+import { Platform } from 'react-native';
 
 import type { Call as TwilioCall, CallInvite as TwilioCallInvite, Voice as TwilioVoice } from '@twilio/voice-react-native-sdk';
 
@@ -236,11 +237,70 @@ function attachInviteListener(mod: Sdk, v: TwilioVoice): void {
 let registeredIdentity: string | null = null;
 
 /**
+ * THE PUSHKIT REGISTRY MUST BE CREATED BY US (found 2026-09-11).
+ *
+ * `client_diagnostics` held 166 `voice_register` rows and not one success:
+ * every attempt on Devon's and Isaiah's phones since build 30 failed with
+ * "Failed to initialize PushKit device token". The SDK's native module does
+ * NOT create a `PKPushRegistry` on its own — `TwilioVoiceReactNative.m`'s
+ * `init` sets up CallKit and audio only, and the registry is created solely
+ * by the exported `voice_initializePushRegistry`, i.e. by JavaScript calling
+ * `voice.initializePushRegistry()`. (The 1.x line did this from AppDelegate;
+ * 2.x moved it here precisely so Expo apps need no native code.) Without it
+ * iOS never hands the module a device token, `register()` waits ~3 s and
+ * rejects, and the retry ladder below just repeats a deterministic failure.
+ *
+ * Called once per process, before the first `register()`, and at launch from
+ * the root layout so a VoIP push that wakes a terminated app finds the
+ * registry already listening. iOS only; the method throws on Android.
+ */
+let pushRegistryReady: Promise<boolean> | null = null;
+
+function ensurePushRegistry(v: TwilioVoice): Promise<boolean> {
+  if (pushRegistryReady) return pushRegistryReady;
+  pushRegistryReady = (async () => {
+    if (Platform.OS !== 'ios') return true;
+    try {
+      await v.initializePushRegistry();
+      return true;
+    } catch (e) {
+      reportDiagnostic('voice_register', false, {
+        code: 'push_registry',
+        error: e instanceof Error ? e.message : String(e),
+      });
+      // Let the next register() try again rather than caching the failure.
+      pushRegistryReady = null;
+      return false;
+    }
+  })();
+  return pushRegistryReady;
+}
+
+/**
+ * Launch-time preparation, from the root layout: create the PushKit registry
+ * and attach the invite listener BEFORE anyone opens Home, so an incoming
+ * call that wakes a terminated or backgrounded app — and the answer from the
+ * lock screen — is heard even if Home (which does the Twilio registration)
+ * has not mounted yet. Cheap, idempotent, never throws.
+ */
+export function prepareVoiceAtLaunch(): void {
+  const mod = loadSdk();
+  const v = getVoice();
+  if (!mod || !v) return;
+  try {
+    attachInviteListener(mod, v);
+  } catch {
+    // The listener is re-attached (idempotently) on the first register().
+  }
+  void ensurePushRegistry(v);
+}
+
+/**
  * The SDK's `register()` needs the PushKit device token, which iOS hands
- * the native module asynchronously after launch. On a cold start the first
- * attempt can run before it exists and fail; a short retry ladder covers
- * that without anything else changing. Non-retryable answers (no module,
- * not an admin, credential not configured) return at once.
+ * the native module asynchronously after the registry exists. On a cold
+ * start the first attempt can still run before it arrives and fail; a short
+ * retry ladder covers that. Non-retryable answers (no module, not an admin,
+ * credential not configured) return at once.
  */
 const RETRY_DELAYS_MS = [2000, 6000, 15000];
 
@@ -271,6 +331,15 @@ async function registerOnce(): Promise<IncomingRegistration & { identity?: strin
 
   try {
     attachInviteListener(mod, v);
+    if (!(await ensurePushRegistry(v))) {
+      return {
+        ok: false,
+        code: 'error',
+        message: 'Could not start the PushKit registry.',
+        identity: token.identity,
+        retryable: true,
+      };
+    }
     // Account switch on the same phone: drop the previous person's binding
     // before taking a new one, so this device cannot keep ringing for them.
     if (registeredIdentity && registeredIdentity !== token.identity && registeredToken) {
@@ -319,24 +388,30 @@ let registering: Promise<IncomingRegistration> | null = null;
 export async function registerForIncomingCalls(): Promise<IncomingRegistration> {
   if (registering) return registering;
   registering = (async () => {
+    let attempts = 1;
     let result = await registerOnce();
     for (let i = 0; !result.ok && result.retryable && i < RETRY_DELAYS_MS.length; i++) {
       reportDiagnostic('voice_register', false, {
-        attempt: i + 1,
+        attempt: attempts,
         code: result.code,
         error: result.message,
         identity: result.identity ?? null,
         willRetryInMs: RETRY_DELAYS_MS[i],
       });
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[i]));
+      attempts += 1;
       result = await registerOnce();
     }
-    reportDiagnostic('voice_register', result.ok, {
-      code: result.ok ? 'registered' : result.code,
-      error: result.ok ? null : result.message,
-      identity: result.identity ?? null,
-      attempts: 1 + (result.ok ? 0 : RETRY_DELAYS_MS.length),
-    });
+    // One row per outcome. A missing credential is a configuration state,
+    // not a failure worth a row on every foreground.
+    if (result.ok || result.code !== 'not_configured' || attempts > 1) {
+      reportDiagnostic('voice_register', result.ok, {
+        code: result.ok ? 'registered' : result.code,
+        error: result.ok ? null : result.message,
+        identity: result.identity ?? null,
+        attempts,
+      });
+    }
     const { retryable: _r, identity: _i, ...plain } = result;
     return plain as IncomingRegistration;
   })().finally(() => {
@@ -351,7 +426,11 @@ export async function unregisterForIncomingCalls(): Promise<void> {
   if (!v) return;
   const identity = registeredIdentity;
   try {
-    const token = registeredToken ?? (await fetchVoiceToken().then((t) => (t.ok ? t.token : null)));
+    // A fresh token first: the one we registered with lives an hour, and an
+    // unregister signed with an expired token is rejected — which left the
+    // signed-out person's binding live until Twilio expired it. The stored
+    // token is only the fallback for when the session is already gone.
+    const token = (await fetchVoiceToken().then((t) => (t.ok ? t.token : null)).catch(() => null)) ?? registeredToken;
     if (token) {
       await v.unregister(token);
       reportDiagnostic('voice_unregister', true, { identity, reason: 'sign-out' });

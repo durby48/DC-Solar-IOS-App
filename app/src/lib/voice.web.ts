@@ -135,3 +135,6 @@ export async function startInAppCall(input: StartCallInput): Promise<StartCallRe
   };
   return { ok: true, call: active };
 }
+
+/** Launch-time voice setup is a native concern; the browser is outbound-only. */
+export function prepareVoiceAtLaunch(): void {}

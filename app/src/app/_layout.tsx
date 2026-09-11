@@ -23,6 +23,7 @@ import { colors } from '@/constants/theme';
 import { reportDiagnostic } from '@/lib/diagnostics';
 import { useNotificationRouting } from '@/lib/notificationRouter';
 import { configureNotificationHandler } from '@/lib/notifications';
+import { prepareVoiceAtLaunch } from '@/lib/voice';
 
 /**
  * The last line before a white screen. A JS error anywhere under the root
@@ -128,6 +129,14 @@ export default function RootLayout() {
   // whether the app was open, in the background, or not running at all.
   // One router for every case: lib/notificationRouter.ts.
   useNotificationRouting();
+
+  // Incoming calls: create the PushKit registry and listen for invites from
+  // the very first render, not from Home — a VoIP push that wakes a
+  // terminated app must find both already in place. See lib/voice.native.ts.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    prepareVoiceAtLaunch();
+  }, []);
 
   /**
    * Fonts NEVER block the app.

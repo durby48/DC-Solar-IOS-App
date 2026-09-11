@@ -64,28 +64,30 @@ export function resetToLogin(navigation: Resettable): void {
 
 /** End the session locally and remotely, never hanging the caller. */
 export async function endSession(): Promise<void> {
-  const timeout = new Promise<void>((resolve) => setTimeout(resolve, SIGN_OUT_TIMEOUT_MS));
+  // EACH step gets its own timeout. One shared promise looked simpler, but
+  // the unregister step (two network calls) could use the whole budget, after
+  // which both sign-out races "won" instantly without being awaited — and
+  // the local session could survive long enough for index.tsx to bounce the
+  // person straight back into the tabs (2026-09-11).
+  const withTimeout = (work: Promise<unknown>) =>
+    Promise.race([work.then(() => undefined), new Promise<void>((resolve) => setTimeout(resolve, SIGN_OUT_TIMEOUT_MS))]);
   // This device stops being this person's: no more pushes, no more incoming
-  // calls. Both need the session still alive, so they go first — and they
-  // are raced against the same timeout so a dead network cannot hold the
-  // sign-out hostage.
+  // calls. Both need the session still alive, so they go first — raced
+  // against a timeout so a dead network cannot hold the sign-out hostage.
   try {
-    await Promise.race([
-      Promise.all([unregisterPushToken(), unregisterForIncomingCalls()]).then(() => undefined),
-      timeout,
-    ]);
+    await withTimeout(Promise.all([unregisterPushToken(), unregisterForIncomingCalls()]));
   } catch {
     // best-effort
   }
   try {
     // Global revoke first; if it stalls, the local-scope call below is
     // storage-only and cannot.
-    await Promise.race([supabase.auth.signOut().then(() => undefined), timeout]);
+    await withTimeout(supabase.auth.signOut());
   } catch {
     // Signed out already, or no session to end — the destination is the same.
   }
   try {
-    await Promise.race([supabase.auth.signOut({ scope: 'local' }).then(() => undefined), timeout]);
+    await withTimeout(supabase.auth.signOut({ scope: 'local' }));
   } catch {
     // Same.
   }

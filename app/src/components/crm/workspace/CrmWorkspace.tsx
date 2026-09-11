@@ -134,6 +134,7 @@ export function CrmWorkspace() {
   // the record's other data rather than holding it up. null = loading.
   const [email, setEmail] = useState<RecordEmailResult | null>(null);
   const emailFor = useRef<string | null>(null);
+  const detailFor = useRef<string | null>(null);
 
   const loadTasks = useCallback(async () => {
     const result = await fetchTasks({ all: true });
@@ -180,6 +181,9 @@ export function CrmWorkspace() {
   }, [selectedKey, kind]);
 
   const loadSelected = useCallback(async (record: WorkspaceRecord) => {
+    // Same guard as loadEmail: clicking A then B quickly must not land A's
+    // messages, notes and money under B when A's slower fetch resolves last.
+    detailFor.current = record.key;
     setDetailLoading(true);
     if (record.kind === 'customer') {
       const [thread, noteResult, jobRows] = await Promise.all([
@@ -192,6 +196,7 @@ export function CrmWorkspace() {
         fetchCustomerFinance(record.id, jobIds),
         fetchJobStageHistory(jobIds),
       ]);
+      if (detailFor.current !== record.key) return;
       setMessages(thread);
       setNotes(noteResult.status === 'ok' ? noteResult.notes : []);
       setNotesAvailable(noteResult.status === 'ok');
@@ -205,6 +210,7 @@ export function CrmWorkspace() {
         fetchLeadStatusHistory(record.id),
         fetchLeadAppointments(record.id),
       ]);
+      if (detailFor.current !== record.key) return;
       setMessages(thread);
       setNotes([]);
       setNotesAvailable(true);
@@ -240,11 +246,22 @@ export function CrmWorkspace() {
 
   // A reply, a delivery receipt, a call ending: refresh the list ordering
   // and the open record's timeline. The focus refetch stays the source of
-  // truth.
+  // truth. COALESCED: the subscription fires on every `messages` row change
+  // company-wide, and one outbound text produces queued → sent → delivered
+  // in a few seconds — each of which used to reload the whole workspace
+  // (about fifteen queries). One trailing reload per burst instead.
+  const realtimeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (realtimeTimer.current) clearTimeout(realtimeTimer.current);
+  }, []);
   useCommsRealtime(
     useCallback(() => {
-      void loadList();
-      if (selected) void loadSelected(selected);
+      if (realtimeTimer.current) clearTimeout(realtimeTimer.current);
+      realtimeTimer.current = setTimeout(() => {
+        realtimeTimer.current = null;
+        void loadList();
+        if (selected) void loadSelected(selected);
+      }, 1500);
     }, [loadList, loadSelected, selected]),
   );
 

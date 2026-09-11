@@ -77,3 +77,6 @@ export async function startInAppCall(_input: StartCallInput): Promise<StartCallR
       'Calling straight from the app is not available on this device. The call rings your cell first, then connects them — they still see the DC Solar number.',
   };
 }
+
+/** Launch-time voice setup (PushKit registry + invite listener). Native only; no-op here. */
+export function prepareVoiceAtLaunch(): void {}

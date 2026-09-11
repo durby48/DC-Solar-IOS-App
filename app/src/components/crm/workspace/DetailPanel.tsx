@@ -14,6 +14,7 @@ import { formatPhone } from '@/lib/comms';
 import { updateCustomer, type CustomerFinanceRow, type CustomerJob } from '@/lib/crm';
 import { LEAD_STATUS_LABEL, LEAD_STATUS_ORDER, type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { type CustomerDocument } from '@/lib/customers';
+import { todayISO } from '@/lib/dates';
 import { isUpcoming, type LeadAppointment } from '@/lib/leadAppointments';
 import { updateLead } from '@/lib/leads';
 import { assignLead, setLeadStatus, type LeadStatus } from '@/lib/sales';
@@ -185,7 +186,7 @@ export function DetailPanel({
   const OTHER_JOBS_PREVIEW = 3;
   const nextDay = jobs
     .map((j) => j.scheduled_for)
-    .filter((d): d is string => Boolean(d) && (d as string) >= new Date().toISOString().slice(0, 10))
+    .filter((d): d is string => Boolean(d) && (d as string) >= todayISO())
     .sort()[0];
   const crew = current ? assignments.filter((a) => a.job_id === current.id) : [];
   const docs = finance.filter((f) => f.document_path);
@@ -194,9 +195,11 @@ export function DetailPanel({
   const repName = rep ? (reps.find((r) => r.email.toLowerCase() === rep.toLowerCase())?.name ?? rep) : null;
   const openTasks = tasks.filter((t) => !t.done_at);
   const doneTasks = tasks.filter((t) => t.done_at);
-  const todayISO = new Date().toISOString().slice(0, 10);
-  const upcomingAppts = appointments.filter((a) => isUpcoming(a, todayISO));
-  const pastAppts = appointments.filter((a) => !isUpcoming(a, todayISO)).reverse();
+  // Local calendar day, not UTC: after ~7 PM in Kansas City the UTC date is
+  // already tomorrow, which hid today's appointment and today's job (2026-09-11).
+  const today = todayISO();
+  const upcomingAppts = appointments.filter((a) => isUpcoming(a, today));
+  const pastAppts = appointments.filter((a) => !isUpcoming(a, today)).reverse();
 
   return (
     <ScrollView style={styles.column} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">

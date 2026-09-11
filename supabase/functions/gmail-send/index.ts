@@ -167,18 +167,34 @@ async function googleToken(mailbox: string, sa: ServiceAccount): Promise<string>
 
 const ADDRESS = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/;
 
-/** "a@x.com, Bob <b@y.com>" → ["a@x.com", "Bob <b@y.com>"], every address validated. */
-function parseRecipients(raw: string | undefined): string[] | null {
-  if (!raw || !raw.trim()) return [];
+/**
+ * "a@x.com, Bob <b@y.com>" → ["a@x.com", "\"Bob\" <b@y.com>"], every address
+ * validated and every display name REBUILT — never passed through. A raw part
+ * used to go into the To: line verbatim, so a display name containing a CRLF
+ * could smuggle a Bcc: header (2026-09-11). Non-strings are refused, not thrown.
+ */
+function parseRecipients(raw: unknown): string[] | null {
+  if (raw == null || raw === '') return [];
+  if (typeof raw !== 'string') return null;
+  if (!raw.trim()) return [];
   const parts = raw
     .split(/[,;]/)
     .map((p) => p.trim())
     .filter(Boolean);
+  const out: string[] = [];
   for (const part of parts) {
-    const address = (part.match(/<([^>]+)>/)?.[1] ?? part).trim();
+    const bracket = part.match(/^(.*?)<([^<>]+)>\s*$/);
+    const address = (bracket ? bracket[2] : part).trim();
     if (!ADDRESS.test(address)) return null;
+    const name = bracket
+      ? bracket[1]
+          .replace(/[\r\n"\\]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+      : '';
+    out.push(name ? `${headerValue(`"${name}"`)} <${address}>` : address);
   }
-  return parts;
+  return out;
 }
 
 /** RFC 2047 encode a header value when it is not plain ASCII. */
@@ -199,7 +215,10 @@ function buildRaw(input: {
   references?: string;
 }): string {
   const lines: string[] = [];
-  lines.push(`From: ${input.fromName ? `${headerValue(input.fromName)} <${input.from}>` : input.from}`);
+  // The display name is quoted (a comma in "Durbin, Devon" would otherwise
+  // split the mailbox) and any quote/backslash inside it dropped.
+  const fromName = input.fromName?.replace(/["\\]/g, '').trim();
+  lines.push(`From: ${fromName ? `${headerValue(`"${fromName}"`)} <${input.from}>` : input.from}`);
   lines.push(`To: ${input.to.join(', ')}`);
   if (input.cc.length) lines.push(`Cc: ${input.cc.join(', ')}`);
   lines.push(`Subject: ${headerValue(input.subject)}`);

@@ -488,7 +488,11 @@ Deno.serve(async (req) => {
   if (!message && table === 'tasks' && typeof record?.assigned_to === 'string' && record.assigned_to) {
     const assignee = String(record.assigned_to).toLowerCase();
     const reassigned = op === 'UPDATE' && String(oldRecord?.assigned_to ?? '').toLowerCase() === assignee;
-    const selfAssigned = op === 'INSERT' && String(record.created_by ?? '').toLowerCase() === assignee;
+    // Self-assignment on INSERT is the creator; on UPDATE it is whoever made
+    // the change (`updated_by`, stamped by 2026-09-11_task_ownership.sql).
+    const selfAssigned =
+      (op === 'INSERT' && String(record.created_by ?? '').toLowerCase() === assignee) ||
+      (op === 'UPDATE' && String(record.updated_by ?? '').toLowerCase() === assignee);
     if ((op === 'INSERT' || op === 'UPDATE') && !reassigned && !selfAssigned) {
       const title = typeof record.title === 'string' ? record.title : 'a task';
       const target: Target = { type: 'task', taskId: String(record.id) };
@@ -508,7 +512,9 @@ Deno.serve(async (req) => {
   if (!message && table === 'lead_appointments' && typeof record?.assigned_to === 'string' && record.assigned_to) {
     const assignee = String(record.assigned_to).toLowerCase();
     const reassigned = op === 'UPDATE' && String(oldRecord?.assigned_to ?? '').toLowerCase() === assignee;
-    const selfAssigned = op === 'INSERT' && String(record.created_by ?? '').toLowerCase() === assignee;
+    const selfAssigned =
+      (op === 'INSERT' && String(record.created_by ?? '').toLowerCase() === assignee) ||
+      (op === 'UPDATE' && String(record.updated_by ?? '').toLowerCase() === assignee);
     if ((op === 'INSERT' || op === 'UPDATE') && !reassigned && !selfAssigned) {
       const leads = typeof record.lead_id === 'string' ? await rest(`leads?id=eq.${record.lead_id}&select=name&limit=1`) : null;
       const leadName = (leads?.[0] as { name?: string } | undefined)?.name ?? 'a lead';
