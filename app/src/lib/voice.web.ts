@@ -127,6 +127,9 @@ export async function startInAppCall(input: StartCallInput): Promise<StartCallRe
   });
 
   const active: ActiveCall = {
+    get sid() {
+      return (call.parameters as { CallSid?: string } | undefined)?.CallSid ?? null;
+    },
     mute: (on) => call.mute(on),
     sendDigits: (digits) => call.sendDigits(digits),
     hangUp: () => call.disconnect(),

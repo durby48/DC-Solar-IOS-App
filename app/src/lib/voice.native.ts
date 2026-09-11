@@ -83,10 +83,21 @@ export function inAppCallingSupported(): boolean {
  * Wire one SDK `Call` to our ActiveCall shape and state callback — shared by
  * outgoing calls and answered incoming ones, so both screens behave the same.
  */
-function wrapCall(mod: Sdk, v: TwilioVoice, call: TwilioCall, emit: (state: CallState, detail?: string) => void): ActiveCall {
+function wrapCall(
+  mod: Sdk,
+  v: TwilioVoice,
+  call: TwilioCall,
+  emit: (state: CallState, detail?: string) => void,
+  opts: { farEndAnswersLater?: boolean } = {},
+): ActiveCall {
   const { Call, AudioDevice } = mod;
   call.on(Call.Event.Ringing, () => emit('ringing'));
-  call.on(Call.Event.Connected, () => emit('active'));
+  // OUTGOING calls are dialled with answerOnBridge=false (see
+  // twilio-voice-outbound) so Twilio's ringback plays into this leg — which
+  // means Connected fires the moment Twilio answers US, not when the far end
+  // picks up. Report that as 'ringing'; call.tsx watches the messages row
+  // (child leg `answered` → in-progress) to flip to 'active'.
+  call.on(Call.Event.Connected, () => emit(opts.farEndAnswersLater ? 'ringing' : 'active'));
   call.on(Call.Event.Reconnecting, () => emit('active', 'Reconnecting…'));
   call.on(Call.Event.Reconnected, () => emit('active'));
   call.on(Call.Event.ConnectFailure, (error) => emit('failed', error?.message ?? 'The call failed.'));
@@ -94,6 +105,9 @@ function wrapCall(mod: Sdk, v: TwilioVoice, call: TwilioCall, emit: (state: Call
     error ? emit('failed', error.message ?? 'The call dropped.') : emit('ended'),
   );
   return {
+    get sid() {
+      return call.getSid?.() ?? null;
+    },
     mute: (on) => {
       void call.mute(on);
     },
@@ -146,6 +160,10 @@ export async function startInAppCall(input: StartCallInput): Promise<StartCallRe
       contactHandle: input.name?.trim() || input.to,
       params: {
         To: input.to,
+        // Tells twilio-voice-outbound to answer this leg at once so Twilio's
+        // ringback is audible (the browser keeps answerOnBridge and its own
+        // synthetic ringback).
+        platform: 'native',
         ...(input.customerId ? { customerId: input.customerId } : {}),
         ...(input.contactId ? { contactId: input.contactId } : {}),
       },
@@ -162,7 +180,7 @@ export async function startInAppCall(input: StartCallInput): Promise<StartCallRe
     };
   }
 
-  return { ok: true, call: wrapCall(mod, v, call, emit) };
+  return { ok: true, call: wrapCall(mod, v, call, emit, { farEndAnswersLater: true }) };
 }
 
 // ---------------------------------------------------------------------------

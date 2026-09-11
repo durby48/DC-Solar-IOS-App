@@ -238,7 +238,8 @@ Deno.serve(async (req) => {
         from_number: fromNumber,
         to_number: to,
         body: `In-app call to ${who}`,
-        status: 'in-progress',
+        // 'ringing' until the far leg's answered callback says in-progress.
+        status: 'ringing',
         twilio_sid: callSid,
         sent_by: sentBy,
       });
@@ -246,14 +247,26 @@ Deno.serve(async (req) => {
 
     // --- the dial ---------------------------------------------------------------
     // No <Say> — the person can hear the ringback and does not need narration.
-    // statusCallback on the far leg: its completed event carries the duration
-    // and the outcome (busy / no-answer / failed); twilio-status files it on
-    // this row via ParentCallSid.
+    // statusCallback on the far leg: `answered` flips this row to in-progress
+    // (the app's call screen watches for it), `completed` carries the
+    // duration and the outcome (busy / no-answer / failed); twilio-status
+    // files both on this row via ParentCallSid.
+    //
+    // answerOnBridge — TWO BEHAVIOURS ON PURPOSE (2026-09-11):
+    //   web    "true":  the browser leg stays unanswered until the far end
+    //                   picks up; the web app plays its own ringback locally.
+    //   native "false": the phone leg is answered at once so Twilio's own
+    //                   ringback (`ringTone`) plays INTO the call. With
+    //                   answerOnBridge=true the iPhone heard 30 s of dead
+    //                   silence — carriers here send no early media, and the
+    //                   native SDK has no local ringback (the audio session
+    //                   belongs to the SDK). The client passes `platform`.
+    const native = form.get('platform') === 'native';
     const statusUrl = `${base}/twilio-status?k=${encodeURIComponent(webhookSecret)}`;
     const twiml =
       `<Response>` +
-      `<Dial callerId="${esc(fromNumber)}" answerOnBridge="true" timeout="30">` +
-      `<Number statusCallback="${esc(statusUrl)}" statusCallbackEvent="completed" statusCallbackMethod="POST">${esc(to)}</Number>` +
+      `<Dial callerId="${esc(fromNumber)}" answerOnBridge="${native ? 'false' : 'true'}" ringTone="us" timeout="30">` +
+      `<Number statusCallback="${esc(statusUrl)}" statusCallbackEvent="answered completed" statusCallbackMethod="POST">${esc(to)}</Number>` +
       `</Dial>` +
       `</Response>`;
     return xml(twiml);

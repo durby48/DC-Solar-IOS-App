@@ -1223,6 +1223,23 @@ const CALL_MISSED = new Set(['failed', 'busy', 'no-answer', 'canceled']);
  * every row is a `messages` row with `channel = 'call'` that twilio-call
  * already writes.
  */
+/**
+ * The current Twilio status of ONE call row, by our leg's CallSid. The call
+ * screen polls this while an outgoing phone call is ringing: the far leg's
+ * `answered` callback moves the row 'ringing' → 'in-progress', and that is
+ * the only signal the phone has that the other person picked up (see
+ * lib/voice.native.ts). null = no row yet / not readable.
+ */
+export async function fetchCallStatus(sid: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.from('messages').select('status').eq('twilio_sid', sid).maybeSingle();
+    if (error || !data) return null;
+    return (data as { status?: string | null }).status ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchRecents(limit = 300): Promise<RecentCall[]> {
   try {
     const { data, error } = await supabase

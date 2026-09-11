@@ -1,13 +1,13 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { PulseRing } from '@/components/ui';
 import { colors, fonts, radii, spacing } from '@/constants/theme';
-import { formatDuration, formatPhone, placeBridgeCall } from '@/lib/comms';
+import { fetchCallStatus, formatDuration, formatPhone, placeBridgeCall } from '@/lib/comms';
 import { takeIncomingCall } from '@/lib/incomingCall';
 import { playRingbackTone } from '@/lib/ringback';
 import { inAppCallingSupported, startInAppCall, type ActiveCall, type CallState } from '@/lib/voice';
@@ -175,11 +175,59 @@ export default function CallScreen() {
 
   // Sound like a phone: a ringback tone while we're dialing or the far end
   // is ringing, so "Calling…" never sounds like the app has frozen. Web
-  // only — see lib/ringback.ts for why native skips this.
+  // only — on the phone Twilio plays the ringback into the call itself
+  // (answerOnBridge=false, see twilio-voice-outbound).
   useEffect(() => {
     if (state !== 'connecting' && state !== 'ringing') return undefined;
     return playRingbackTone();
   }, [state]);
+
+  // PHONE, OUTGOING: our leg is answered by Twilio before the other person
+  // picks up (that is how the ringback gets to us), so the SDK cannot tell us
+  // when they actually answer. The far leg's `answered` callback moves the
+  // messages row to in-progress; poll it while ringing and promote to
+  // 'active' then. A hang-up / no-answer still arrives through the SDK.
+  useEffect(() => {
+    if (Platform.OS === 'web' || isIncoming || state !== 'ringing') return undefined;
+    let stopped = false;
+    const tick = async () => {
+      const sid = callRef.current?.sid;
+      if (!sid) return;
+      const status = await fetchCallStatus(sid);
+      if (stopped) return;
+      if (status === 'in-progress') {
+        if (startedAt.current === null) startedAt.current = Date.now();
+        setState('active');
+      }
+    };
+    void tick();
+    const id = setInterval(() => void tick(), 2000);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+  }, [state, isIncoming]);
+
+  // Ended without ever connecting: say why, from the row's final status.
+  useEffect(() => {
+    if (Platform.OS === 'web' || isIncoming || state !== 'ended' || startedAt.current !== null) return undefined;
+    let stopped = false;
+    const sid = callRef.current?.sid;
+    if (!sid) return undefined;
+    // The far leg's completed callback can land a moment after our leg ends.
+    const timer = setTimeout(() => {
+      void fetchCallStatus(sid).then((status) => {
+        if (stopped) return;
+        if (status === 'no-answer') setDetail('No answer.');
+        else if (status === 'busy') setDetail('Line busy.');
+        else if (status === 'failed' || status === 'canceled') setDetail('The call could not be completed.');
+      });
+    }, 1500);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [state, isIncoming]);
 
   // The timer.
   useEffect(() => {

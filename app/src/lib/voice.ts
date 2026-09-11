@@ -24,6 +24,8 @@ export { fetchVoiceToken } from './voiceToken';
 export type CallState = 'connecting' | 'ringing' | 'active' | 'ended' | 'failed';
 
 export interface ActiveCall {
+  /** Twilio CallSid of OUR leg (the `messages.twilio_sid` the row is keyed on); null until known. */
+  readonly sid: string | null;
   mute(on: boolean): void;
   /** DTMF, for "press 1 for…" menus. */
   sendDigits(digits: string): void;
