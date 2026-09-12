@@ -21,6 +21,55 @@
 *Prior entry, 2026-08-03 (Mac session: email scanner now LOGS transactions into finance_entries — DEPLOYED (notify v7 via Management API) and backfilled (13 entries since 7/24: 1 deposit $4,715 + 12 expenses $720.01, none job-matched — Chase alerts don't name jobs). Expense rows got a job picker in the edit card (assign to DC-26### or Company), shipped as an OTA update (commit 12db267) — this doubles as the pending OTA-adoption test on build 27: Devon should confirm it lands (close + reopen the app twice). ⚠️ Devon pasted the service-role key, sb_secret key, and a Supabase PAT into the session chat — rotate all three when convenient.)*
 *New Claude Code session? Read this file and [PLAN.md](PLAN.md) first — they replace all prior context.*
 
+## START HERE (state as of 2026-09-12, evening)
+
+The dated paragraphs above are the change log. This section is the current state; if they disagree, this wins.
+
+**Where the code is**
+
+| Machine | Repo path | Notes |
+|---|---|---|
+| Devon's Windows PC | `C:\Durbin Enterprises\dev\DC-Solar-IOS-App` | Moved OUT of OneDrive 2026-09-12. OneDrive Files-On-Demand tags synced files as cloud reparse points, Node reports them as symlinks, Metro drops them and `expo export` dies; a `node_modules` junction did not survive either (OneDrive restores its cloud copy). Never put the repo or `node_modules` back under `C:\Users\devon\OneDrive`. Secrets: `C:\Durbin Enterprises\config\secrets\` (PAT, test-account passwords, README). |
+| Devon's Mac | `~/Desktop/DC Solar LLC/DC-Solar-IOS-App` | see "Mac workstation" below |
+| Carson's PC | `C:\Users\carso\Documents\DC-Solar-IOS-App-main\DC-Solar-IOS-App-main` | see "Carson's Windows workstation" below |
+
+Two developers push to `main` (Devon's sessions and Carson's). **Always `git pull --ff-only` before anything.**
+
+**How to ship**
+
+- JS/TS change → `git push` (Vercel builds app.dcsolarkc.com from `main`) AND `npx eas-cli update --channel production --environment production --non-interactive --message "…"` from `app/`. Web never reaches the phones by itself.
+- Native change (new native dep, app.json, entitlements) → bump `runtimeVersion` in `app.json`, `npx eas-cli build --platform ios --profile production --auto-submit --non-interactive`. **Current runtime is `4` (build 31, 2026-09-12).** Build-30 phones stay on the last runtime-3 update until they install build 31 from TestFlight.
+- Before either: `npx tsc --noEmit` and `npx expo export --platform web` from `app/`, both clean.
+- After a dependency change: `npx -y npm@10 install --package-lock-only` (EAS builders use npm 10).
+- Migrations: write the file to `supabase/migrations/`, apply with `scripts\db\query.ps1 -TokenFile <PAT file> -File <migration>` (Windows: the `-TokenFile` is required; the script's default path is the Mac layout), prove RLS by impersonation in a rolled-back transaction (CLAUDE.md shows how).
+- Edge functions: `POST /v1/projects/kjamxfezsathrsbztiln/functions/deploy?slug=<name>` multipart (`metadata` JSON with `verify_jwt` + `file`). The Management API `/secrets` endpoint returns hashes, not values.
+
+**Shape of the app (since the 2026-09-12 overhaul)**
+
+- Tabs: Home · CRM · Pipeline · Operations · Menu. Home = five colour-edged hub tiles (`lib/hub.ts`: CRM / Pipeline / Operations / Human Resources / Systems Management, `hubColors` in `constants/theme.ts`). Every role sees the same layout; admin-only doors are drawn locked and `lib/adminGate.ts` explains "contact your administrator" on tap and on deep links (17 admin screens mount `useAdminOnlyScreen()`). RLS remains the only real barrier.
+- Palette: clean white base (`surfaceAlt #F6F7FA`, `surface` white) with vivid hub colours; `cream`/`sun` survive only for the login art and the action button.
+- CRM ↔ Pipeline are cross-linked (job → customer, card → customer, live stage control on records, Jobs lens in the web workspace). Email is a full Gmail client on `gmail.modify` (`gmail-inbox` v20). Phone → Contacts is open to crew; texts/calls/keypad are admin. Hours logs many employees in one save (`LogHoursSheet`). Clock-in offers today's jobs + "Company office". Financials has Expenses and Receivables ledgers. Dropbox: one folder per job, every photo mirrored, folders follow renames. Contacts import from the iPhone (build 31+).
+
+**Open for Devon (nothing else is blocked on code)**
+
+1. App Store Connect → Pricing and Availability → untick "Make available on Mac with Apple silicon" (silences Apple's ITMS-90863 warning about `Testing.framework`; it is an Xcode 16 toolchain artefact).
+2. Rotate `TWILIO_WEBHOOK_SECRET` when convenient (it was echoed into a session transcript on 2026-09-11; the Twilio signature gate still protects the endpoints): new value → edge-function secret, then the `?k=` on the Messaging Service inbound webhook, the number's voice webhook and the TwiML App URL.
+3. Cloudflare Turnstile keys on the website (`dcsolarkc` repo/Vercel) — the quote form runs on honeypot + rate limit until then.
+4. Carson's website test lead "Carson / Testing" (2026-09-07) is still an open lead + task; delete or keep.
+5. Judge the Receivables "Outstanding" tile (Σ max(invoiced − paid, 0) over Pending Payment jobs) and the clock-in default (first scheduled job, else Company office).
+
+**Never verified on a device or in a signed-in browser** (no iPhone here; browser sign-in needs Devon to type a test password — `C:\Durbin Enterprises\config\secrets\test-accounts.txt` has `test-crew` (viewer) and `test-operator` (admin)): the whole overhaul as crew (locked tiles + alert), Gmail compose autosave, the CRM Jobs lens, ClockCard picker/switcher, contacts import, Receivables edit/delete, Phone Back/Home bar, a real Dropbox folder MOVE on renumber. First person to sign in on build 31 is the real test; `client_diagnostics` records JS crashes and notification/voice events per device.
+
+**Small follow-ups nobody has claimed**
+
+- `docs/CONTACTS.md` still says editing is contact-only (customers/crew editing was added later the same day).
+- `messages/thread.tsx` and `crm/[id].tsx` still hint "update the contact in Messages settings".
+- `shadows.hero` in `theme.ts` is unused since the Home header lost its band.
+- Outbound email attachments, HTML email rendering, swipe actions on email rows.
+- Dropbox: folder rename is DB-proven but no real move has happened yet; watch `dropbox_job_folders.last_error` after the first renumber.
+- `.claude/launch.json` is machine-specific (Devon's now points at `scripts/dev-web.cmd` / `dev-native.cmd`); expect it to flip between machines.
+
+
 ## What this is
 
 Employee field-ops app for DC Solar LLC (solar installation, Kansas City). One Expo codebase (`app/`) ships iOS (TestFlight) + web. Backend is the **same Supabase project the dcsolarkc.com website/ops console uses** — one database for everything. Owner: Devon Durbin (devonsd311@gmail.com), not a professional developer, mostly on Windows.
@@ -29,10 +78,11 @@ Employee field-ops app for DC Solar LLC (solar installation, Kansas City). One E
 
 - `app/` — the Expo app (SDK 57, TypeScript, expo-router, src/ layout). All app work happens here.
 - `OVERHAUL.md` — the 2026-08-04 front-end overhaul: what changed, what's still blocked, and the two architecture corrections behind the artwork feature (Claude can't generate images; the generator runs as an edge function, not on the Windows PC).
-- `supabase/migrations/` — 30 SQL files (26–28 = 2026-08-07 investment/sales + 2026-08-09 company_settings; 29–30 = 2026-08-18 employee_of_month + marketing, applied 2026-08-18 via Management API). Earlier status note: **ALL 25 APPLIED — 1–18 audited against the live DB 2026-08-04 via the Management API (every table, column, function, trigger and policy present); #19 (job_artwork) and #20 (job metrics + customer photos) and #21 (critter guard flag) applied and verified.** Migrations no longer need Devon to paste them: sessions with the PAT run them via the Management API `database/query` endpoint (still write the file to this folder for the record).
+- `supabase/migrations/` — dated SQL files, ALL APPLIED through `2026-09-12_dropbox_rename_and_merge_contacts.sql` (sessions apply them via the Management API; the file is the record). `supabase/functions/` — the Deno edge functions, deployed the same way.
 - `PLAN.md` — original build plan + phases; still the roadmap.
 - `HANDOFF.md` — this file. Keep it updated at the end of every session.
-- NOT in git: `app/.env` (recreate — see below), `data/` (local business-data exports; the DB is the source of truth), `website/` (separate repo: github.com/durby48/dcsolarkc).
+- NOT in git: `app/.env` (recreate — see below), `app/node_modules`, `data/` (local business-data exports; the DB is the source of truth), `website/` (separate repo: github.com/durby48/dcsolarkc).
+- `docs/` — one setup/design doc per integration (TWILIO, GMAIL, CRM_EMAIL, DROPBOX, CONTACTS, NOTIFICATIONS, LEAD_INTAKE, AUTOMATION, CARD_FORGE, MARKETING, PDF_RENDERING, SOCIAL_LOGIN). Read the matching one before touching an integration.
 
 ## Accounts & IDs
 
@@ -50,6 +100,20 @@ Employee field-ops app for DC Solar LLC (solar installation, Kansas City). One E
 - **⚠️ Metro minifier must keep function names** (`app/metro.config.js`, added 2026-07-27): terser's name-mangling white-screened the production WEB build with zero console errors — React Navigation reads a screen component's function name (lowercase first letter = render function) and mangled names broke rendering. `keep_fnames`/`keep_classnames` fixes it; dev builds never show the problem, so test web changes against a real `expo export`. Applies to iOS bundles too (slightly larger, harmless).
 - **Hours tab (2026-08-03, OTA):** 5th tab, admin-only (`(tabs)/hours.tsx`, `lib/payroll.ts`). Per-employee payroll view from employee_hours + completed time_entries: YTD hours, period hours, pay (hours × stamped rate, roster fallback; `*` marks missing-rate understatement), expandable per-job rows with a **Paid before | This period** split for carry-over jobs. Period pager: "Before Jul 18" bucket (paid via old spreadsheet), catch-up period 7/18–8/3, then clean biweekly periods from 8/4 — all computed in `lib/payroll.ts` constants, no DB table. **Pay cycle (added 2026-08-04):** a period is SUBMITTED the Wednesday after it closes and PAID the Friday after — the period ending Mon 8/3 is submitted Wed 8/5 and paid Fri 8/7. `PayrollPeriod.submitOn`/`payOn` + `payrollState()` drive a status chip (current / closed-not-submitted / submitted / paid) and a Submit|Payday row, so a closed-but-unpaid period no longer misreports as "Paid". First payroll run off this tab: 172.9 h / $5,692.33 (8/3). NOTE: DC-26011's removal hours predate app tracking and were never logged against the job, so its "Paid before" shows "—"; Devon can backfill via the job screen's admin hours if wanted.
 - **Web app (reworked 2026-08-03):** LIVE at **https://app.dcsolarkc.com** (SSL issued; DNS CNAME `app` → `name.vercel-dns.com` added by Devon in Squarespace) and https://dc-solar-app.vercel.app. Vercel project `dc-solar-app` now lives under the Pro team **devon-durbins-projects** (login devonsd311@gmail.com) and is **connected to the GitHub repo — every push to `main` auto-builds and deploys the web app.** Build settings (set 2026-08-03 via dashboard): Root Directory `app`, Build Command `npx expo export --platform web`, Output Directory `dist`, framework Other; env vars EXPO_PUBLIC_SUPABASE_URL/KEY on Production+Preview. Icon fonts verified serving (the old CLI-deploy `.vercelignore` hack is NOT needed for git builds). The manual `vercel deploy` workflow in Windows-setup step 7 is OBSOLETE — just push to main. Same Supabase/auth/RLS as iOS; native-only features degrade gracefully on web.
+
+## Devon's Windows workstation (verified 2026-09-12)
+
+Repo at `C:Durbin EnterprisesdevDC-Solar-IOS-App` (see START HERE for why it left OneDrive). Everything needed to ship is wired:
+
+| Capability | State | How it's wired |
+|---|---|---|
+| Typecheck / web export | ✅ both pass | Node v24 (winget: pass `--source winget`), npm 12; `npm ci` in `app/` |
+| Git push | ✅ | Git Credential Manager; `core.autocrlf=false` on the clone |
+| EAS (OTA + builds) | ✅ logged in as `durby` | `npx eas-cli whoami`; builds 30 and 31 and every OTA since 2026-09-11 went from here |
+| Supabase admin (DDL, deploys, RLS probes) | ✅ | PAT in `C:Durbin Enterprisesconfigsecretssupabase-access-token.txt`; `scriptsdbquery.ps1 -TokenFile <that file>` (the `-TokenFile` is required on this PC) |
+| Service-role key | ❌ not on this PC | only needed for the Plaid/reconcile scripts |
+| Test logins | ✅ | `test-crew` (viewer) / `test-operator` (admin) passwords in `secrets	est-accounts.txt` — Claude will not type them; Devon signs in on the Browser pane when a crew-eye check is wanted |
+| Browser preview | ✅ | `.claude/launch.json` → `scripts/dev-web.cmd` (port 8082) / `dev-native.cmd` (8081); PowerShell's execution policy blocks `npx.ps1`, hence the .cmd wrappers |
 
 ## Mac workstation (verified end-to-end 2026-08-04)
 
@@ -115,7 +179,7 @@ Built local-first: each migration was proven inside a rolled-back transaction (`
 4. Dev: `npx expo start` → scan QR with Expo Go on iPhone (same Wi-Fi), or press `w` for web.
 5. **Ship (NEW WORKFLOW since build 26 — OTA updates):** JS/TS-only changes ship with `npx eas-cli update --channel production --environment production --non-interactive --message "<what changed>"` (the `--environment` flag is REQUIRED in non-interactive mode) — reaches installed apps (build ≥26) on next launch, costs NO build quota. Full native builds (`npx eas-cli build --platform ios --profile production --auto-submit --non-interactive`) are needed ONLY when native things change: new native dependency, app.json/plugins/entitlements, expo-updates config, widget code, SDK upgrade. Version bump (1.0.0 → 1.0.x) changes the runtimeVersion → needs a build. Quota note (2026-07-27): Devon nearly exhausted the free plan's monthly builds; OTA exists precisely to stop that. Do NOT create extra Expo accounts to dodge quota.
 6. Verify before shipping: `npx tsc --noEmit` and `npx expo export --platform web` must both pass.
-7. Ship web (added 2026-07-27 — do this with every iOS build so app.dcsolarkc.com stays in lockstep): from `app/`, after a fresh `npx expo export --platform web`: `Copy-Item .vercel dist -Recurse -Force; Copy-Item public\.vercelignore dist\.vercelignore -Force; cd dist; npx vercel deploy --prod --yes`. The Vercel project link lives at `app/.vercel` (gitignored — recreate with `npx vercel link --yes --project dc-solar-app`); `app/public/vercel.json` (cleanUrls + dynamic-route rewrites) rides into every export automatically. ⚠️ The `.vercelignore` copy is REQUIRED (expo's public-dir copy skips dotfiles): it re-includes `assets/node_modules/**` — Vercel otherwise silently drops the @expo/vector-icons font and every icon on the web renders as tofu ("emojis not rendering", found 2026-07-31).
+7. Ship web: nothing to do — Vercel builds app.dcsolarkc.com from every push to `main` (root `app`, `npx expo export --platform web`, output `dist`). The old manual `vercel deploy` steps are obsolete.
 
 ## People / logins
 
@@ -230,14 +294,14 @@ All 6 employees have Supabase auth logins; shared temp password `DCSolarKC2026` 
 
 ## State / near-term TODO
 
-0. **Notifications go-live — DONE 2026-07-27: APNs push key uploaded (3V8AND3562), `notify` deployed + secret set, tested end-to-end (`{"sent":1}`). REMAINING (Devon): Gmail labels/filters (in progress), Apps Script + 5-min trigger, optional payment webhook — see `docs/NOTIFICATIONS_SETUP.md` steps 3–5. NOTIFY_SECRET lives in the edge function's secrets + (soon) the Apps Script properties.**
-0b. **Property artwork go-live (2026-08-04):** Devon creates a Google API key with Street View Static API + Generative Language API enabled, sets it as the `GOOGLE_API_KEY` secret on the `property-art` function, then hits "Generate from address" on each job. Watch the first one closely — those two API calls have never run.
-1. Confirm migration 7 ran; Devon then fixes his known finance-entry mistakes with the new edit UI.
-2. Devon to set each job's real stage (all defaulted to "Pending Estimate", completed → "Complete").
-3. Crew TestFlight invites: create an External Testing group in App Store Connect, add the 5 crew emails (first external build needs ~1 day beta review).
-4. Next feature phases (see PLAN.md): ~~Twilio number + A2P~~ ✅ live 2026-09-06; Phone section Phase 4 (in-app VoIP — spike says YELLOW, see the top entry; needs Twilio API Key + Secret, TwiML App SID, iOS VoIP Push Credential from Devon, and bumps `runtimeVersion` to 3 = a full build that freezes build-29 phones); receipts→reimbursement report, admin company dashboard, Gusto data into the Employees screen, migrate the home-PC CRM (Cloudflare tunnel) into Supabase and retire it.
-5. Known cosmetic debt: app icon is the skyline wordmark on cream (as requested); Android side untouched; no push notifications yet.
-6. **Never-run-on-device (Phone section):** `expo-clipboard` paste on the keypad, long-press 0 for +, the nested tab bar's safe-area on a notched phone, multi-select image picker → MMS on iOS. Web-verified only. When Phase 4 lands, add: CallKit incoming UI, VoIP push wake, audio routing (speaker/Bluetooth/earpiece), call-in-progress interruptions — none testable in the simulator or on web.
+The live list is in **START HERE** at the top (open items for Devon, unverified surfaces, unclaimed follow-ups). Longer-range ideas still on the table, none started:
+
+- Receipts → reimbursement report; Gusto data into the Employees screen; migrate the home-PC CRM (Cloudflare tunnel) into Supabase and retire it (PLAN.md Phase 5).
+- Appointment reminders and any customer-facing automatic texting/emailing (docs/AUTOMATION.md — needs Devon's approval of wording, timing and consent rules first).
+- Team-wide email visibility (today each admin sees only their own mapped mailbox), a third mapped mailbox (one line in both `MAILBOXES` maps), outbound attachments.
+- Google/Outlook OAuth for the customer portal (Microsoft needs an Entra app registration by Devon).
+- Property artwork: keys are set and generation works; remaining jobs are generated from each job's "Property artwork" card as Devon gets to them.
+- Cosmetic: app icon is the skyline wordmark on cream; Android untouched.
 
 ## Conventions for future sessions
 
