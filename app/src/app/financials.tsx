@@ -17,6 +17,7 @@ import { formatMoney } from '@/components/financials/format';
 import { MirrorTiles } from '@/components/financials/MirrorTiles';
 import { OverviewTiles, type OverviewMonth } from '@/components/financials/OverviewTiles';
 import { PnlSheet, type PnlRow } from '@/components/financials/PnlSheet';
+import { ReceivablesLedger } from '@/components/financials/ReceivablesLedger';
 import { AppText, Button, Card, EmptyState, SectionHeader, SkeletonList } from '@/components/ui';
 import { colors, hubColors, spacing } from '@/constants/theme';
 import { useAdminOnlyScreen } from '@/lib/adminGate';
@@ -25,6 +26,7 @@ import { deleteFinanceEntry, updateFinanceEntry } from '@/lib/documents';
 import {
   fetchFinancials,
   groupExpensesByMonth,
+  outstandingReceivables,
   recordExpense,
   type FinancialsData,
   type LedgerEntry,
@@ -59,6 +61,8 @@ import { isValidISODate } from '@/lib/time';
  *   CashPositionPanel  bank balance reconciled down to profit retained
  *   PnlSheet           the collapsible per-job P&L, overhead and capital
  *   ExpenseLedger      the add-expense form, the month headers and the rows
+ *   ReceivablesLedger  the expense ledger's twin for money IN (2026-09-12):
+ *                      every deposit by month, tiles, add/edit/delete
  *
  * Nothing about WHAT is shown moved: the same queries, the same admin gate,
  * the same arithmetic, the same Company-overhead warning. Only the drawing
@@ -519,6 +523,16 @@ export default function FinancialsScreen() {
     };
   }, [data]);
 
+  /**
+   * "Outstanding" on the Receivables tiles: invoiced − paid over the jobs the
+   * Pipeline mirror counts as Actively Invoiced. Hidden (null) when the
+   * mirror itself could not load, so the two can never disagree on screen.
+   */
+  const outstanding = useMemo(
+    () => (data && totals ? outstandingReceivables(jobsFull, data.allEntries) : null),
+    [data, totals, jobsFull],
+  );
+
   // Totals across every PROJECT (top row of the P&L sheet). Overhead excluded.
   const pnlTotals = useMemo(() => {
     const t = { revenue: 0, expenses: 0, hours: 0, labor: 0, profit: 0 };
@@ -838,6 +852,21 @@ export default function FinancialsScreen() {
           />
         }
         ListHeaderComponent={header}
+        ListFooterComponent={
+          loaded && role?.isAdmin && data ? (
+            <ReceivablesLedger
+              entries={data.paymentEntries}
+              paidYtd={data.paidYtd}
+              paidThisMonth={data.paidThisMonth}
+              outstanding={outstanding}
+              jobs={jobsFull}
+              jobOptions={jobOptions}
+              companyJobId={companyJobId}
+              jobLabels={jobLabels}
+              onChanged={load}
+            />
+          ) : null
+        }
         renderSectionHeader={({ section }) => (
           <MonthHeader
             label={section.label}

@@ -14,10 +14,13 @@ import {
 } from 'react-native';
 
 import { ContactEditor } from '@/components/contacts/ContactEditor';
+import { CustomerEditor } from '@/components/contacts/CustomerEditor';
 import { deviceContactsSupported } from '@/components/contacts/deviceContacts';
+import { EditorSheet } from '@/components/contacts/EditorSheet';
+import { MyCellEditor } from '@/components/contacts/MyCellEditor';
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { Chip } from '@/components/ui';
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
 import {
   NOT_CONFIGURED_VOICE,
   fetchCommsSettings,
@@ -58,14 +61,31 @@ import { inAppCallingSupported } from '@/lib/voice';
  * hiding a customer because somebody typed their number wrong is worse than
  * showing that they can't be dialled.
  *
- * CONTACTS ARE ADDED, EDITED AND IMPORTED HERE. The editor (name, company,
- * title, phone, email, tags, customer link) opens inline under the row; the
- * import button hands off to /contacts/import, which reads the iPhone's
- * address book and lets Devon tick the ones that belong. Both admin-only;
- * the Phone section itself is admin-only, but the buttons check anyway.
+ * EVERY ROW IS EDITABLE FROM HERE (2026-09-12, the owner's ask: "edit the
+ * contact card from directly within the contacts section"). An admin sees
+ * an "Edit" pill on the right of every row that has something to edit, and
+ * the same Edit inside the expanded card. What opens depends on the source:
+ *
+ *   contact   → `ContactEditor` (name, company, title, phone, email, tags,
+ *               customer link, notes) in a bottom sheet.
+ *   customer  → `CustomerEditor` (name, phone, email, address, notes) — the
+ *               same fields and the same `updateCustomer` as the record.
+ *   lead      → the lead's own screen, /leads/[id], where its editor lives.
+ *   crew      → only YOUR OWN cell number (`staff_profiles` is self-write);
+ *               another person's row is read-only.
+ *
+ * The crew (non-admins) get the read-only card — Call / Text / Record — and
+ * no Edit anywhere; RLS refuses the write regardless.
  */
 
 type Filter = 'all' | DirectorySource | `tag:${string}`;
+
+/** What the sheet is editing, or null when closed. */
+type Editor =
+  | { kind: 'new' }
+  | { kind: 'contact'; contact: CompanyContact }
+  | { kind: 'customer'; id: string; name: string }
+  | { kind: 'myCell' };
 
 const SOURCE_FILTERS: { key: Filter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -102,9 +122,7 @@ export default function ContactsScreen() {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [callingKey, setCallingKey] = useState<string | null>(null);
   const [note, setNote] = useState<{ kind: 'ok' | 'error' | 'info'; text: string } | null>(null);
-
-  // The editor: 'new' under the header, or a contact id under its row.
-  const [editorFor, setEditorFor] = useState<'new' | string | null>(null);
+  const [editor, setEditor] = useState<Editor | null>(null);
 
   const load = useCallback(async () => {
     const [rows, contactRows, s, p] = await Promise.all([
@@ -179,6 +197,47 @@ export default function ContactsScreen() {
 
   const keyOf = (entry: DirectoryEntry) => `${entry.source}:${entry.id}`;
 
+  /**
+   * Is this crew row me? `phone_directory()` names a crew row
+   * `coalesce(employees.display_name, employees.email)` and carries no
+   * email, so the match is on that same string from my own role row.
+   */
+  const isMe = (entry: DirectoryEntry) =>
+    entry.source === 'crew' &&
+    role !== null &&
+    entry.displayName === (role.displayName?.trim() || role.email);
+
+  /** The editor a row opens, or null when there is nothing to edit here. */
+  const editorFor = (entry: DirectoryEntry): Editor | 'lead' | null => {
+    if (!isAdmin) return null;
+    switch (entry.source) {
+      case 'contact': {
+        const contact = contacts.get(entry.id);
+        return contact ? { kind: 'contact', contact } : null;
+      }
+      case 'customer':
+        return { kind: 'customer', id: entry.id, name: entry.displayName };
+      case 'lead':
+        return 'lead';
+      case 'crew':
+        return isMe(entry) ? { kind: 'myCell' } : null;
+      default:
+        return null;
+    }
+  };
+
+  const openEditor = (entry: DirectoryEntry) => {
+    const target = editorFor(entry);
+    if (!target) return;
+    setNote(null);
+    if (target === 'lead') {
+      router.push({ pathname: '/leads/[id]', params: { id: entry.id } } as never);
+      return;
+    }
+    setOpenKey(null);
+    setEditor(target);
+  };
+
   const call = async (entry: DirectoryEntry) => {
     if (!entry.phoneE164 || callingKey) return;
     if (voiceReady && inAppCallingSupported()) {
@@ -195,7 +254,7 @@ export default function ContactsScreen() {
         kind: 'error',
         text: !voiceReady
           ? NOT_CONFIGURED_VOICE
-          : 'Twilio rings your cell first — tap Call on the Keypad once to save it, or add it in Messages settings.',
+          : 'Twilio rings your cell first — tap Call on the Keypad once and it asks for your number.',
       });
       return;
     }
@@ -245,7 +304,7 @@ export default function ContactsScreen() {
   };
 
   const onSaved = async (text: string) => {
-    setEditorFor(null);
+    setEditor(null);
     setNote({ kind: 'ok', text });
     await load();
   };
@@ -256,31 +315,17 @@ export default function ContactsScreen() {
     const dialable = Boolean(item.phoneE164);
     const filedUnder = item.customerId ? customerNames.get(item.customerId) : undefined;
     const hasRecord = item.source === 'customer' || item.source === 'lead' || Boolean(filedUnder);
-    const contact = item.source === 'contact' ? contacts.get(item.id) : undefined;
+    const editable = editorFor(item) !== null;
+    const mine = isMe(item);
     const meta = [
       SOURCE_LABEL[item.source],
+      mine ? 'you' : null,
       item.title,
       item.subtitle,
       filedUnder ? `at ${filedUnder}` : null,
     ]
       .filter((part) => part && part.trim().length > 0)
       .join(' · ');
-
-    if (editorFor === item.id && contact) {
-      return (
-        <ContactEditor
-          contact={contact}
-          defaultCustomer={
-            contact.customerId
-              ? { id: contact.customerId, name: customerNames.get(contact.customerId) ?? 'Customer' }
-              : null
-          }
-          tagSuggestions={tagChips}
-          onSaved={() => void onSaved('Saved.')}
-          onCancel={() => setEditorFor(null)}
-        />
-      );
-    }
 
     return (
       <View>
@@ -302,7 +347,7 @@ export default function ContactsScreen() {
               {dialable
                 ? formatPhone(item.phoneE164)
                 : item.source === 'crew'
-                  ? 'No cell number saved in Messages settings'
+                  ? 'No cell number saved'
                   : 'No usable US number on the record'}
             </Text>
             {item.tags.length ? (
@@ -313,7 +358,19 @@ export default function ContactsScreen() {
               </View>
             ) : null}
           </View>
-          <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={colors.inkSoft} />
+          {editable ? (
+            <Pressable
+              onPress={() => openEditor(item)}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={`Edit ${item.displayName}`}
+              style={({ pressed }) => [styles.editPill, pressed && styles.pressed]}>
+              <Ionicons name="create-outline" size={14} color={hubColors.crm.fg} />
+              <Text style={styles.editPillText}>Edit</Text>
+            </Pressable>
+          ) : (
+            <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={colors.inkSoft} />
+          )}
         </Pressable>
 
         {open ? (
@@ -360,30 +417,40 @@ export default function ContactsScreen() {
             {!dialable ? (
               <Text style={styles.hint}>
                 {item.source === 'crew'
-                  ? 'They add it themselves under Messages settings → My cell number.'
-                  : item.source === 'contact'
-                    ? 'Edit the number on this contact to make it dialable.'
+                  ? mine
+                    ? 'Add your cell number with Edit — it is the phone we ring first.'
+                    : 'They add it themselves: their first Call on the Keypad asks for it.'
+                  : editable
+                    ? 'Tap Edit and fix the number to make it dialable.'
                     : 'Fix the phone number on their record and it will dial from here.'}
               </Text>
             ) : null}
-            {item.source === 'contact' && isAdmin ? (
+            {isAdmin && (editable || item.source === 'contact') ? (
               <View style={styles.manageRow}>
-                <Pressable
-                  onPress={() => {
-                    setOpenKey(null);
-                    setEditorFor(item.id);
-                  }}
-                  disabled={!contact}
-                  style={({ pressed }) => [styles.manage, pressed && styles.pressed]}>
-                  <Ionicons name="create-outline" size={14} color={colors.ocean} />
-                  <Text style={styles.manageText}>Edit</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => void archive(item)}
-                  style={({ pressed }) => [styles.manage, pressed && styles.pressed]}>
-                  <Ionicons name="archive-outline" size={14} color={colors.inkSoft} />
-                  <Text style={[styles.manageText, styles.manageTextMuted]}>Remove from contacts</Text>
-                </Pressable>
+                {editable ? (
+                  <Pressable
+                    onPress={() => openEditor(item)}
+                    style={({ pressed }) => [styles.manage, pressed && styles.pressed]}>
+                    <Ionicons name="create-outline" size={14} color={colors.ocean} />
+                    <Text style={styles.manageText}>
+                      {item.source === 'lead'
+                        ? 'Edit lead'
+                        : item.source === 'customer'
+                          ? 'Edit customer'
+                          : mine
+                            ? 'Edit my cell number'
+                            : 'Edit contact'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {item.source === 'contact' ? (
+                  <Pressable
+                    onPress={() => void archive(item)}
+                    style={({ pressed }) => [styles.manage, pressed && styles.pressed]}>
+                    <Ionicons name="archive-outline" size={14} color={colors.inkSoft} />
+                    <Text style={[styles.manageText, styles.manageTextMuted]}>Remove from contacts</Text>
+                  </Pressable>
+                ) : null}
               </View>
             ) : null}
           </View>
@@ -438,12 +505,13 @@ export default function ContactsScreen() {
           ))}
         </View>
       ) : null}
-      {isAdmin && editorFor !== 'new' ? (
+      {isAdmin ? (
         <View style={styles.buttonRow}>
           <Pressable
             onPress={() => {
               setOpenKey(null);
-              setEditorFor('new');
+              setNote(null);
+              setEditor({ kind: 'new' });
             }}
             style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}>
             <Ionicons name="add" size={16} color={colors.ocean} />
@@ -459,16 +527,6 @@ export default function ContactsScreen() {
           ) : null}
         </View>
       ) : null}
-      {editorFor === 'new' ? (
-        <ContactEditor
-          tagSuggestions={tagChips}
-          onSaved={() => {
-            setFilter('contact');
-            void onSaved('Contact added.');
-          }}
-          onCancel={() => setEditorFor(null)}
-        />
-      ) : null}
       {note ? (
         <Text
           style={[
@@ -481,6 +539,65 @@ export default function ContactsScreen() {
     </View>
   );
 
+  const sheetTitle =
+    editor?.kind === 'new'
+      ? 'New contact'
+      : editor?.kind === 'contact'
+        ? 'Edit contact'
+        : editor?.kind === 'customer'
+          ? 'Edit customer'
+          : editor?.kind === 'myCell'
+            ? 'My cell number'
+            : '';
+
+  const closeEditor = () => setEditor(null);
+
+  const editorSheet = (
+    <EditorSheet visible={editor !== null} title={sheetTitle} onClose={closeEditor}>
+      {editor?.kind === 'new' ? (
+        <ContactEditor
+          flat
+          accent={hubColors.crm.fg}
+          tagSuggestions={tagChips}
+          onSaved={() => {
+            setFilter('contact');
+            void onSaved('Contact added.');
+          }}
+          onCancel={closeEditor}
+        />
+      ) : editor?.kind === 'contact' ? (
+        <ContactEditor
+          flat
+          accent={hubColors.crm.fg}
+          contact={editor.contact}
+          defaultCustomer={
+            editor.contact.customerId
+              ? {
+                  id: editor.contact.customerId,
+                  name: customerNames.get(editor.contact.customerId) ?? 'Customer',
+                }
+              : null
+          }
+          tagSuggestions={tagChips}
+          onSaved={() => void onSaved('Saved.')}
+          onCancel={closeEditor}
+        />
+      ) : editor?.kind === 'customer' ? (
+        <CustomerEditor
+          customerId={editor.id}
+          onSaved={(name) => void onSaved(`${name} updated.`)}
+          onCancel={closeEditor}
+        />
+      ) : editor?.kind === 'myCell' ? (
+        <MyCellEditor
+          initial={profile?.cellPhone ?? null}
+          onSaved={() => void onSaved('Your cell number is saved.')}
+          onCancel={closeEditor}
+        />
+      ) : null}
+    </EditorSheet>
+  );
+
   if (loading) {
     return (
       <View style={[styles.screen, styles.center]}>
@@ -490,36 +607,39 @@ export default function ContactsScreen() {
   }
 
   return (
-    <SectionList
-      style={styles.screen}
-      contentContainerStyle={styles.container}
-      sections={sections}
-      keyExtractor={(item) => keyOf(item)}
-      renderItem={renderEntry}
-      renderSectionHeader={({ section }) => (
-        <Text style={styles.sectionTitle}>{section.title}</Text>
-      )}
-      ListHeaderComponent={header}
-      ItemSeparatorComponent={() => <View style={styles.separator} />}
-      stickySectionHeadersEnabled={false}
-      keyboardShouldPersistTaps="handled"
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.ocean} />
-      }
-      ListEmptyComponent={
-        <View style={styles.emptyCard}>
-          <Ionicons name="people-outline" size={22} color={colors.inkSoft} />
-          <Text style={styles.emptyTitle}>
-            {search || filter !== 'all' ? 'Nobody matches' : 'No contacts yet'}
-          </Text>
-          <Text style={styles.emptyBody}>
-            {search || filter !== 'all'
-              ? 'Try a different filter or a shorter search.'
-              : 'Customers, leads, the crew and company contacts all show up here once they have a record.'}
-          </Text>
-        </View>
-      }
-    />
+    <>
+      <SectionList
+        style={styles.screen}
+        contentContainerStyle={styles.container}
+        sections={sections}
+        keyExtractor={(item) => keyOf(item)}
+        renderItem={renderEntry}
+        renderSectionHeader={({ section }) => (
+          <Text style={styles.sectionTitle}>{section.title}</Text>
+        )}
+        ListHeaderComponent={header}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        stickySectionHeadersEnabled={false}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.ocean} />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyCard}>
+            <Ionicons name="people-outline" size={22} color={colors.inkSoft} />
+            <Text style={styles.emptyTitle}>
+              {search || filter !== 'all' ? 'Nobody matches' : 'No contacts yet'}
+            </Text>
+            <Text style={styles.emptyBody}>
+              {search || filter !== 'all'
+                ? 'Try a different filter or a shorter search.'
+                : 'Customers, leads, the crew and company contacts all show up here once they have a record.'}
+            </Text>
+          </View>
+        }
+      />
+      {editorSheet}
+    </>
   );
 }
 
@@ -583,6 +703,16 @@ const styles = StyleSheet.create({
   rowPhone: { color: colors.ocean, fontSize: 12, fontWeight: '700' },
   rowPhoneMissing: { color: colors.slateDeep, fontStyle: 'italic', fontWeight: '600' },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, paddingTop: 4 },
+  editPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: hubColors.crm.bg,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs + 1,
+  },
+  editPillText: { color: hubColors.crm.fg, fontSize: 12, fontWeight: '800' },
 
   sheet: {
     backgroundColor: colors.surface,

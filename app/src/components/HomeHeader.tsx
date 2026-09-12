@@ -12,25 +12,27 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppText, GradientSurface } from '@/components/ui';
-import { accentCycle, colors, radii, spacing } from '@/constants/theme';
+import { AppText } from '@/components/ui';
+import { accentCycle, colors, hubColors, radii, spacing, type HubKey } from '@/constants/theme';
 import { formatFullDate } from '@/lib/dates';
 import * as haptics from '@/lib/haptics';
 import { clearMyAvatar, fetchMyProfile, uploadMyAvatar } from '@/lib/profile';
 import { useRole } from '@/lib/role';
 
 /**
- * The olive band at the top of Home: who you are, what day it is, and a
- * greeting that changes with the clock.
+ * The top of Home: who you are, what day it is, and a greeting that changes
+ * with the clock.
  *
- * It paints THROUGH the status bar (it adds the top inset itself rather than
- * sitting inside a `SafeAreaView`), because the point of the band is that the
- * brand colour runs to the very top of the phone and the clock card then
- * floats over its lower edge. That is also why it is a scroll child rather
- * than `Screen`'s `header` slot — a negatively-offset card overlapping a
- * fixed header gets clipped by the scroll container on web.
+ * 2026-09-13: no longer the olive band. Devon asked for the header and the
+ * clock bar to take "the same color scheme you updated on the app", so it is
+ * now the app's cool surface with ink text and ONE accent — a slim stripe of
+ * the five hub colours, in Home order, under the greeting. The clock card no
+ * longer overlaps it; it sits below like every other card.
  *
- * Cream text only. See the olive contrast rules in `constants/theme`.
+ * It still adds the top inset itself rather than sitting inside a
+ * `SafeAreaView`: it is the first scroll child on a screen with `edges={[]}`,
+ * so the surface runs up under the status bar (dark glyphs — the root
+ * `<StatusBar style="dark" />` is right for this surface now).
  *
  * THE AVATAR IS THE PROFILE PICTURE CONTROL. Tapping it opens a small panel
  * under the greeting rather than a modal: this band is already the top of the
@@ -140,14 +142,14 @@ export function HomeHeader() {
   }, []);
 
   return (
-    <GradientSurface gradient="olive" style={[styles.band, { paddingTop: insets.top + spacing.lg }]}>
+    <View style={[styles.band, { paddingTop: insets.top + spacing.lg }]}>
       <View style={styles.row}>
         <View style={styles.text}>
-          <AppText variant="display" color={colors.textOnDark} numberOfLines={2}>
+          <AppText variant="display" color={colors.ink} numberOfLines={2}>
             {greeting()}
             {firstName ? `, ${firstName}` : ''}
           </AppText>
-          <AppText variant="body" color={colors.oliveSoft}>
+          <AppText variant="body" color={colors.textSecondary}>
             {formatFullDate(new Date())}
           </AppText>
         </View>
@@ -172,7 +174,22 @@ export function HomeHeader() {
           onClose={() => setOpen(false)}
         />
       ) : null}
-    </GradientSurface>
+
+      <HubStripe />
+    </View>
+  );
+}
+
+/** The five Home hubs, in Home order — the header's one accent. */
+const STRIPE: readonly HubKey[] = ['crm', 'pipeline', 'operations', 'hr', 'systems'];
+
+function HubStripe() {
+  return (
+    <View style={styles.stripe} pointerEvents="none" accessibilityElementsHidden>
+      {STRIPE.map((key) => (
+        <View key={key} style={[styles.stripeSegment, { backgroundColor: hubColors[key].fg }]} />
+      ))}
+    </View>
   );
 }
 
@@ -236,7 +253,7 @@ function Avatar({
     </View>
   ) : (
     <View style={[styles.avatar, styles.avatarBlank]}>
-      <Ionicons name="person" size={22} color={colors.textOnDark} />
+      <Ionicons name="person" size={22} color={colors.textSecondary} />
     </View>
   );
 
@@ -248,7 +265,7 @@ function Avatar({
           label on the Pressable below is what announces that. */}
       {busy ? (
         <View style={[styles.avatar, styles.avatarBusy]}>
-          <ActivityIndicator color={colors.textOnDark} size="small" />
+          <ActivityIndicator color={colors.white} size="small" />
         </View>
       ) : null}
     </View>
@@ -351,7 +368,7 @@ function PanelRow({
         pressed && !disabled && styles.panelRowPressed,
       ]}>
       <View style={[styles.panelIcon, danger && styles.panelIconDanger]}>
-        <Ionicons name={icon} size={15} color={danger ? colors.danger : colors.olive} />
+        <Ionicons name={icon} size={15} color={danger ? colors.danger : hubColors.hr.fg} />
       </View>
       <Text style={[styles.panelLabel, danger && styles.panelLabelDanger]}>{label}</Text>
     </Pressable>
@@ -363,9 +380,19 @@ const AVATAR = 48;
 const styles = StyleSheet.create({
   band: {
     paddingHorizontal: spacing.lg,
-    // Deep enough that the clock card can overlap it and still leave olive
-    // showing above and beside the card's shoulders.
-    paddingBottom: spacing.xxl,
+    paddingBottom: spacing.md,
+    backgroundColor: colors.surfaceAlt,
+    gap: spacing.md,
+  },
+  /** Five equal segments, one per hub, in a pill. */
+  stripe: {
+    flexDirection: 'row',
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  stripeSegment: {
+    flex: 1,
   },
   row: {
     flexDirection: 'row',
@@ -391,11 +418,11 @@ const styles = StyleSheet.create({
     width: AVATAR,
     height: AVATAR,
     borderRadius: AVATAR / 2,
-    backgroundColor: colors.oliveLine,
+    backgroundColor: colors.surfaceSunk,
   },
   avatarBlank: {
     // A tinted well rather than a solid circle: nothing is being identified.
-    backgroundColor: colors.oliveLine,
+    backgroundColor: colors.surfaceSunk,
   },
   avatarBusy: {
     position: 'absolute',
@@ -403,12 +430,11 @@ const styles = StyleSheet.create({
     left: 0,
     width: AVATAR,
     height: AVATAR,
-    backgroundColor: 'rgba(58,70,31,0.55)',
+    backgroundColor: 'rgba(61,53,46,0.55)',
   },
   pressed: { opacity: 0.7 },
 
   panel: {
-    marginTop: spacing.md,
     backgroundColor: colors.surfaceSunk,
     borderRadius: radii.md,
     padding: spacing.sm,
@@ -430,13 +456,13 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     padding: spacing.sm,
   },
-  panelRowPressed: { backgroundColor: colors.oliveSoft },
+  panelRowPressed: { backgroundColor: hubColors.hr.bg },
   panelRowDisabled: { opacity: 0.55 },
   panelIcon: {
     width: 28,
     height: 28,
     borderRadius: radii.sm,
-    backgroundColor: colors.oliveSoft,
+    backgroundColor: hubColors.hr.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },

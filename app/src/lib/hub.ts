@@ -118,7 +118,6 @@ export const HUB_ITEMS: readonly HubItem[] = [
   { key: 'email', title: 'Email', icon: 'mail', href: '/inbox', hub: 'crm', tone: 3, gate: 'admin', subtitle: 'The business mailbox' },
   // href cast until the dev server regenerates typed routes for /phone.
   { key: 'phone', title: 'Phone', icon: 'call', href: '/phone' as never, hub: 'crm', tone: 7, gate: 'admin', badge: 'unread', subtitle: 'Texts, calls, contacts' },
-  { key: 'jobs-board', title: 'Jobs Board', icon: 'grid', href: '/pipeline', hub: 'crm', tone: 'pipeline', gate: 'all', subtitle: 'The pipeline, by customer' },
 
   // ---- Pipeline ----
   { key: 'pipeline', title: 'Pipeline', icon: 'layers', href: '/pipeline', hub: 'pipeline', tone: 'pipeline', gate: 'all' },

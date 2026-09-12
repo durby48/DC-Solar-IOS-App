@@ -7,7 +7,9 @@
  */
 
 import { loadedLaborCost } from '@/lib/laborCost';
+import { isCompanyJob, stageOrDefault } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
+import type { Job } from '@/lib/types';
 
 const COMPANY = 'dc-solar';
 
@@ -70,6 +72,13 @@ export interface LedgerEntry {
    * point the money layer at the document layer.
    */
   document_meta?: { pdf_state?: string | null } | null;
+  /**
+   * `finance_entries.extracted` — provenance. The email scanner stamps
+   * `source: 'email-scanner'` on every row it logs from a Chase alert, which
+   * is how the Receivables ledger marks a deposit as bank-confirmed. Typed
+   * loosely: the edge function owns the shape.
+   */
+  extracted?: { source?: string | null; [key: string]: unknown } | null;
 }
 
 /** One completed payroll run, as the Financials views consume it. */
@@ -116,6 +125,14 @@ export interface FinancialsData {
   contractedYtd: number;
   /** Every expense entry, newest first (null dates last). */
   expenseEntries: LedgerEntry[];
+  /**
+   * Every payment (money in), newest first — the Receivables ledger. Same
+   * rows `paid` / `paidThisMonth` are summed from, so the tiles and the list
+   * can never disagree.
+   */
+  paymentEntries: LedgerEntry[];
+  /** Payments dated in the current calendar year. */
+  paidYtd: number;
   /** EVERY finance entry (all types), newest first — feeds the pipeline
    *  mirror card (via fetchCompanyTotals) and the ledger drill-downs. */
   allEntries: LedgerEntry[];
@@ -141,7 +158,7 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       supabase
         .from('finance_entries')
         .select(
-          'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path, paid_from_bank, revision, document_meta',
+          'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path, paid_from_bank, revision, document_meta, extracted',
         )
         .eq('company', COMPANY),
       // Wages live here, not in finance_entries. Fetched alongside so `net`
@@ -231,14 +248,18 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
     const thisYear = thisMonth.slice(0, 4);
     let paid = 0;
     let paidThisMonth = 0;
+    let paidYtd = 0;
     let expenses = 0;
     let expensesThisMonth = 0;
     let contractedYtd = 0;
     const expenseEntries: LedgerEntry[] = [];
+    const paymentEntries: LedgerEntry[] = [];
     for (const row of rows) {
       if (row.type === 'payment') {
         paid += row.amount;
         if ((row.occurred_on ?? '').startsWith(thisMonth)) paidThisMonth += row.amount;
+        if ((row.occurred_on ?? '').startsWith(thisYear)) paidYtd += row.amount;
+        paymentEntries.push(row);
       }
       if (row.type === 'invoice' && (row.occurred_on ?? '').startsWith(thisYear)) {
         contractedYtd += row.amount;
@@ -250,6 +271,7 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       }
     }
     expenseEntries.sort(byDateDesc);
+    paymentEntries.sort(byDateDesc);
     const allEntries = [...rows].sort(byDateDesc);
 
     // Runs land in the month their PAYDAY falls in — the same month the
@@ -273,6 +295,8 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       expensesThisMonth,
       contractedYtd,
       expenseEntries,
+      paymentEntries,
+      paidYtd,
       allEntries,
     };
   } catch {
@@ -311,7 +335,11 @@ function monthLabel(key: string): string {
   return name ? `${name} ${year}` : key;
 }
 
-/** Group newest-first expenses into month sections (undated last). */
+/**
+ * Group newest-first entries into month sections (undated last). Named for
+ * the expense ledger it was written for; the Receivables ledger feeds it
+ * payment rows and gets the identical month shape, which is the point.
+ */
 export function groupExpensesByMonth(entries: LedgerEntry[]): ExpenseMonth[] {
   const months = new Map<string, ExpenseMonth>();
   for (const entry of entries) {
@@ -369,4 +397,90 @@ export async function recordExpense(params: {
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not save the expense.' };
   }
+}
+
+/**
+ * Insert a deposit — a `payment` row, money in — from the Financials tab
+ * (admin-only per RLS).
+ *
+ * Column-for-column the shape `recordPayment` in lib/documents.ts writes from
+ * a job's Invoices card, plus two fields spelled out so nothing depends on a
+ * database default: `status: 'recorded'` (what `recordExpense`, the contract
+ * value row and the email scanner all write) and `paid_from_bank: true`. A
+ * deposit lands in the bank by definition — the Cash Position panel treats
+ * that column as "moved bank money" and there is no out-of-pocket deposit.
+ *
+ * A deposit must belong to a job: the Company container is allowed (it is a
+ * job) but the ledger flags it as a misfiling, because the container earns
+ * no revenue.
+ */
+export async function recordDeposit(params: {
+  amount: number;
+  /** Who paid — defaults to 'Customer' like the job-card flow when blank. */
+  counterparty: string | null;
+  description: string | null;
+  occurredOn: string; // YYYY-MM-DD
+  jobId: string;
+  customerId: string | null;
+}): Promise<RecordExpenseResult> {
+  try {
+    const { error } = await supabase.from('finance_entries').insert({
+      company: COMPANY,
+      type: 'payment',
+      direction: 'in',
+      amount: params.amount,
+      currency: 'USD',
+      counterparty: params.counterparty ?? 'Customer',
+      description: params.description ?? 'Payment received',
+      occurred_on: params.occurredOn,
+      status: 'recorded',
+      job_id: params.jobId,
+      customer_id: params.customerId,
+      paid_from_bank: true,
+    });
+    if (error) return { ok: false, message: error.message };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not save the deposit.' };
+  }
+}
+
+/** The "Outstanding" receivables tile, with the jobs behind it. */
+export interface OutstandingReceivables {
+  /** Σ per job of (invoiced − paid), floored at zero, over Pending Payment jobs. */
+  total: number;
+  /** How many Pending Payment jobs still have a balance. */
+  jobs: number;
+}
+
+/**
+ * Invoiced minus paid across the jobs that are actively invoiced.
+ *
+ * Not a new formula — two existing ones composed. The job set and the
+ * invoice bucket are exactly the Pipeline mirror's "Actively Invoiced"
+ * (`fetchCompanyTotals`: invoice-type rows on jobs whose stage is Pending
+ * Payment; the Company container excluded). The per-job paid figure is the
+ * one `/ledger/paid` draws its "X of Y paid" line from. Each job is floored
+ * at zero so an over-payment on one job can't hide a balance on another.
+ */
+export function outstandingReceivables(jobs: Job[], entries: LedgerEntry[]): OutstandingReceivables {
+  const invoicedByJob = new Map<string, number>();
+  const paidByJob = new Map<string, number>();
+  for (const e of entries) {
+    if (!e.job_id) continue;
+    if (e.type === 'invoice') invoicedByJob.set(e.job_id, (invoicedByJob.get(e.job_id) ?? 0) + e.amount);
+    else if (e.type === 'payment') paidByJob.set(e.job_id, (paidByJob.get(e.job_id) ?? 0) + e.amount);
+  }
+  let total = 0;
+  let count = 0;
+  for (const job of jobs) {
+    if (isCompanyJob(job)) continue;
+    if (stageOrDefault(job.stage, job.status) !== 'Pending Payment') continue;
+    const due = (invoicedByJob.get(job.id) ?? 0) - (paidByJob.get(job.id) ?? 0);
+    if (due > 0.005) {
+      total += due;
+      count += 1;
+    }
+  }
+  return { total, jobs: count };
 }

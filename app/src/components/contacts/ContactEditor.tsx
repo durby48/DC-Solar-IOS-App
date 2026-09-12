@@ -15,6 +15,9 @@ import { createContact, updateContact, type CompanyContact } from '@/lib/contact
  * Saves through `createContact` / `updateContact`; RLS decides — a crew
  * member who reaches this form (they should not; the buttons are admin-only)
  * sees the one-line refusal rather than a stack trace.
+ *
+ * `flat` drops the card chrome and the "Edit contact" heading for a host that
+ * already frames it — the Contacts tab's `EditorSheet`.
  */
 export function ContactEditor({
   contact = null,
@@ -22,6 +25,7 @@ export function ContactEditor({
   lockedCustomer = false,
   tagSuggestions = [],
   accent = colors.ocean,
+  flat = false,
   onSaved,
   onCancel,
 }: {
@@ -32,6 +36,8 @@ export function ContactEditor({
   lockedCustomer?: boolean;
   tagSuggestions?: readonly string[];
   accent?: string;
+  /** No card background / heading: the host draws the frame and the title. */
+  flat?: boolean;
   onSaved: (id: string) => void;
   onCancel: () => void;
 }) {
@@ -87,8 +93,8 @@ export function ContactEditor({
   };
 
   return (
-    <View style={styles.form}>
-      <Text style={styles.title}>{contact ? 'Edit contact' : 'New contact'}</Text>
+    <View style={flat ? styles.formFlat : styles.form}>
+      {flat ? null : <Text style={styles.title}>{contact ? 'Edit contact' : 'New contact'}</Text>}
       <TextInput
         value={name}
         onChangeText={setName}
@@ -163,6 +169,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     ...shadows.card,
   },
+  formFlat: { gap: spacing.sm },
   title: { color: colors.ink, fontSize: 15, fontWeight: '800' },
   label: { color: colors.inkSoft, fontSize: 11, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
   input: {

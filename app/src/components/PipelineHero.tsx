@@ -1,7 +1,7 @@
 import { Image, type ImageProps } from 'expo-image';
 import { useIsFocused } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -14,7 +14,7 @@ import Animated, {
 
 import { Ticker } from '@/components/Ticker';
 import { CountUp } from '@/components/ui';
-import { accentCycle, colors, radii, shadows, spacing } from '@/constants/theme';
+import { accentCycle, colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
 import { useMotion } from '@/lib/motion';
 import { fetchCompanyMetrics, type CompanyMetrics } from '@/lib/metrics';
 
@@ -40,6 +40,15 @@ import { fetchCompanyMetrics, type CompanyMetrics } from '@/lib/metrics';
  *
  * No video library: playing real video would need a native dependency and
  * therefore a full App Store build. This ships over the air.
+ *
+ * ── 2026-09-13 desktop fix ────────────────────────────────────────────────
+ * Devon: "On the web version, the gif of the handy man worker is not legible.
+ * It's so zoomed in." The stage was a 150px-tall band the full width of the
+ * card, and `cover` on a 1200px-wide browser turned a 900×391 frame into an
+ * 8:1 crop — a slice of hard hat. On a wide web window (`WIDE_BREAKPOINT`)
+ * the frames now sit in a centred box that keeps the art's own 900:391
+ * aspect at up to `WIDE_STAGE_HEIGHT` tall, on the white ground with the
+ * Pipeline hub's blue edge. Nothing about the phone rendering changed.
  *
  * ── 2026-08-22 rewrite ────────────────────────────────────────────────────
  * This component was the app's biggest performance sink and all three causes
@@ -87,6 +96,13 @@ const CHARACTERS = [
 ];
 
 const ROTATE_MS = 2 * 60 * 60 * 1000;
+
+/** The frames are 900×391 (`assets/images/installer-*.jpg`). */
+const FRAME_ASPECT = 900 / 391;
+/** A desktop browser: the board layout's own threshold in `(tabs)/pipeline`. */
+const WIDE_BREAKPOINT = 900;
+/** Tallest the centred desktop box gets; its width follows from the aspect. */
+const WIDE_STAGE_HEIGHT = 220;
 
 /** Which character is on shift right now. Clock-derived, so it's shared. */
 function currentCharacter(now: number): number {
@@ -173,6 +189,8 @@ export function PipelineHero() {
   const { enabled } = useMotion();
   const focused = useIsFocused();
   const progress = useSharedValue(PAUSED);
+  const { width } = useWindowDimensions();
+  const wide = Platform.OS === 'web' && width >= WIDE_BREAKPOINT;
 
   useEffect(() => {
     let cancelled = false;
@@ -225,14 +243,24 @@ export function PipelineHero() {
       ]
     : [];
 
+  const frames = CHARACTERS[character].map((source, i) => (
+    <Frame key={`${character}-${i}`} source={source} index={i} progress={progress} />
+  ));
+
   return (
-    <View style={styles.card}>
-      <View style={styles.stage}>
-        {CHARACTERS[character].map((source, i) => (
-          <Frame key={`${character}-${i}`} source={source} index={i} progress={progress} />
-        ))}
-        <View style={styles.stageFade} />
-      </View>
+    <View style={[styles.card, wide && styles.cardWide]}>
+      {wide ? (
+        // The frames are `absoluteFill`, so the aspect box is their parent:
+        // the whole 900×391 drawing shows, centred, never cropped.
+        <View style={styles.stageWide}>
+          <View style={styles.frameBoxWide}>{frames}</View>
+        </View>
+      ) : (
+        <View style={styles.stage}>
+          {frames}
+          <View style={styles.stageFade} />
+        </View>
+      )}
 
       {tiles.length > 0 ? (
         <Ticker
@@ -265,6 +293,26 @@ const styles = StyleSheet.create({
   stage: {
     height: 150,
     backgroundColor: colors.skySoft,
+  },
+  /** Desktop: the hub-blue edge is the card's accent on the white page. */
+  cardWide: {
+    borderWidth: 1.5,
+    borderColor: hubColors.pipeline.fg,
+  },
+  stageWide: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.white,
+  },
+  frameBoxWide: {
+    height: WIDE_STAGE_HEIGHT,
+    aspectRatio: FRAME_ASPECT,
+    maxWidth: '100%',
+    borderRadius: radii.sm,
+    overflow: 'hidden',
+    backgroundColor: hubColors.pipeline.bg,
   },
   // Softens the bottom edge of the artwork into the metric band.
   stageFade: {

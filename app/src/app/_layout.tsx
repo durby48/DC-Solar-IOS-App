@@ -191,7 +191,7 @@ export default function RootLayout() {
           <Stack.Screen name="job/[id]" options={{ title: 'Job' }} />
           {/* The phone app: a nested Tabs navigator. This header (title +
               back arrow) is the only one it shows; the tabs hide theirs. */}
-          <Stack.Screen name="phone" options={{ title: 'Phone' }} />
+          <Stack.Screen name="phone" options={{ title: 'Phone', headerShown: true, headerBackVisible: true }} />
           {/* One conversation / the recipient picker, pushed over the tabs
               the way a phone's Messages app does it. Titles are set by the
               screens (the person's name). */}

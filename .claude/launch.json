@@ -3,20 +3,14 @@
   "configurations": [
     {
       "name": "expo",
-      "runtimeExecutable": "cmd.exe",
-      "runtimeArgs": [
-        "/c",
-        "cd /d \"C:\\Users\\devon\\OneDrive\\Desktop\\DC Solar LLC\\DC-Solar-IOS-App\\app\" && npx expo start --port 8081"
-      ],
+      "runtimeExecutable": "C:\\Durbin Enterprises\\dev\\DC-Solar-IOS-App\\scripts\\dev-native.cmd",
+      "runtimeArgs": [],
       "port": 8081
     },
     {
       "name": "expo-web",
-      "runtimeExecutable": "cmd.exe",
-      "runtimeArgs": [
-        "/c",
-        "cd /d \"C:\\Users\\devon\\OneDrive\\Desktop\\DC Solar LLC\\DC-Solar-IOS-App\\app\" && npx expo start --web --port 8082"
-      ],
+      "runtimeExecutable": "C:\\Durbin Enterprises\\dev\\DC-Solar-IOS-App\\scripts\\dev-web.cmd",
+      "runtimeArgs": [],
       "port": 8082
     }
   ]

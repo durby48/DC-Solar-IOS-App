@@ -1,5 +1,4 @@
 import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
-import { setStatusBarStyle } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -41,8 +40,9 @@ import { resetToLogin, signOutAndLeave } from '@/lib/signOut';
 /**
  * Home — the hub the app opens to.
  *
- * The olive band with the greeting, the clock card floating over its lower
- * edge, today's work, and then the FIVE HUBS (2026-09-12 overhaul): CRM,
+ * The greeting header (white surface, five-colour hub stripe — 2026-09-13,
+ * no longer an olive band), the clock card under it, today's work, and then
+ * the FIVE HUBS (2026-09-12 overhaul): CRM,
  * Pipeline, Operations, Human Resources, Systems Management. Each hub is one
  * colour-edged tile in its own hue (`hubColors`), and every role sees all
  * five — Systems Management is drawn LOCKED for the crew and explains itself
@@ -86,21 +86,8 @@ export default function HomeScreen() {
     };
   }, []);
 
-  /**
-   * Light status-bar glyphs while Home is on screen.
-   *
-   * The root layout sets `<StatusBar style="dark" />` globally, which is right
-   * for every light page in the app — but Home's olive header runs under the
-   * status bar, and dark glyphs on #4D5C2B are close to invisible. Flipping it
-   * imperatively on focus (and back on blur) keeps that global default for
-   * everyone else. `setStatusBarStyle` is a no-op on web.
-   */
-  useFocusEffect(
-    useCallback(() => {
-      setStatusBarStyle('light');
-      return () => setStatusBarStyle('dark');
-    }, []),
-  );
+  // The root layout's `<StatusBar style="dark" />` suits the header now that
+  // it is a light surface; the olive-era flip to light glyphs on focus is gone.
 
   useFocusEffect(
     useCallback(() => {
@@ -187,8 +174,6 @@ export default function HomeScreen() {
       <HomeHeader />
 
       <View style={[styles.body, compact && styles.bodyCompact]}>
-        {/* The one surface allowed to float. It overlaps the olive band by
-            design — see shadows.hero in constants/theme. */}
         <ClockCard style={styles.clock} />
 
         <FadeInUp index={0}>
@@ -322,12 +307,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm + 2,
     paddingHorizontal: spacing.xl,
   },
-  /**
-   * Pulls the clock card up over the header band. The band's own
-   * `paddingBottom: xxl` is what leaves olive showing above and beside it.
-   */
+  /** Sits under the header like any other card — no overlap trick any more. */
   clock: {
-    marginTop: -spacing.xl,
+    marginTop: spacing.xs,
   },
   todayCard: {
     marginTop: spacing.xs,
