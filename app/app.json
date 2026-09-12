@@ -59,6 +59,12 @@
       "expo-sharing",
       "expo-notifications",
       "@bacons/apple-targets",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "DC Solar reads your contacts only when you choose Import from iPhone, so you can pick which people to add to the company directory or to a crew member's contact info."
+        }
+      ],
       "expo-apple-authentication",
       [
         "expo-video",
@@ -108,7 +114,7 @@
         }
       }
     },
-    "runtimeVersion": "4",
+    "runtimeVersion": "5",
     "updates": {
       "url": "https://u.expo.dev/c1bf33f2-33a6-4730-9fb3-4b98405c2c82"
     }

@@ -20,7 +20,7 @@
     "expo-blur": "~57.0.2",
     "expo-clipboard": "~57.0.1",
     "expo-constants": "~57.0.7",
-    "expo-contacts": "~57.0.5",
+    "expo-contacts": "57.0.4",
     "expo-device": "~57.0.1",
     "expo-document-picker": "~57.0.1",
     "expo-file-system": "~57.0.1",
@@ -68,12 +68,5 @@
     "web": "expo start --web",
     "lint": "expo lint"
   },
-  "private": true,
-  "expo": {
-    "autolinking": {
-      "exclude": [
-        "expo-contacts"
-      ]
-    }
-  }
+  "private": true
 }

@@ -10,6 +10,8 @@ import {
   View,
 } from 'react-native';
 
+import { CrewContactEditor } from '@/components/contacts/CrewContactEditor';
+import { EditorSheet } from '@/components/contacts/EditorSheet';
 import { EmptyState } from '@/components/ui';
 import { colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
 import { useAdminOnlyScreen } from '@/lib/adminGate';
@@ -88,6 +90,10 @@ export default function EmployeesScreen() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   /** Paystub rows per employee, fetched the first time a row is expanded. */
   const [docs, setDocs] = useState<Map<string, DocsState>>(new Map());
+  /** The crew member whose contact info is open in the sheet. */
+  const [editing, setEditing] = useState<EmployeeRow | null>(null);
+  /** Bumped after a save so the list re-reads the new name. */
+  const [reloadKey, setReloadKey] = useState(0);
 
   /**
    * Load one employee's paystubs on demand. Admins read the whole company
@@ -147,7 +153,7 @@ export default function EmployeesScreen() {
     return () => {
       cancelled = true;
     };
-  }, [gate.state, isAdmin]);
+  }, [gate.state, isAdmin, reloadKey]);
 
   /** The expanded row: what this employee actually has on file. */
   const renderDocs = (employee: EmployeeRow) => {
@@ -221,7 +227,20 @@ export default function EmployeesScreen() {
             color={colors.inkSoft}
           />
         </Pressable>
-        {expanded ? <View style={styles.expandArea}>{renderDocs(employee)}</View> : null}
+        {expanded ? (
+          <View style={styles.expandArea}>
+            {/* Build 33: crew contact info — the same editor the Contacts tab
+                opens in edit mode, including "Import from iPhone Contacts". */}
+            <Pressable
+              onPress={() => setEditing(employee)}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.contactButton, pressed && styles.rowPressed]}>
+              <Ionicons name="call-outline" size={16} color={colors.ocean} />
+              <Text style={styles.contactButtonText}>Edit contact info</Text>
+            </Pressable>
+            {renderDocs(employee)}
+          </View>
+        ) : null}
       </View>
     );
   };
@@ -275,6 +294,21 @@ export default function EmployeesScreen() {
           </>
         )}
       </ScrollView>
+      <EditorSheet
+        visible={editing !== null}
+        title={editing ? `Contact info · ${editing.display_name ?? editing.email}` : ''}
+        onClose={() => setEditing(null)}>
+        {editing ? (
+          <CrewContactEditor
+            employeeId={editing.id}
+            onSaved={() => {
+              setEditing(null);
+              setReloadKey((k) => k + 1);
+            }}
+            onCancel={() => setEditing(null)}
+          />
+        ) : null}
+      </EditorSheet>
     </>
   );
 }
@@ -384,6 +418,17 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     gap: spacing.sm,
   },
+  contactButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    alignSelf: 'flex-start',
+    backgroundColor: colors.surfaceSunk,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  contactButtonText: { color: colors.ocean, fontSize: 13, fontWeight: '800' },
   docsCard: {
     gap: spacing.xs,
     backgroundColor: colors.skySoft,

@@ -1,9 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   FlatList,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -41,9 +43,14 @@ import { fetchContactTags, importContacts, tagLabel, type ImportSummary } from '
  * RLS on `contacts` refuses the write regardless. WEB gets one sentence:
  * there is no address book to read in a browser.
  *
- * `expo-contacts` is native. This screen works on build 31 and later; an
- * older binary running newer JS reads "unsupported" from the loader and
- * says so, rather than crashing.
+ * `expo-contacts` is native. Build 33 re-enabled it (pinned to 57.0.4 — see
+ * HANDOFF: 57.0.5 links Testing.framework and crashed build 31 at launch). A
+ * binary without the module reads "unsupported" from the loader and says so.
+ *
+ * PERMISSIONS (Build 33): asked only when "Read my contacts" is tapped. A
+ * denial shows an Open Settings button, and coming back to the app re-reads
+ * automatically; iOS 18 "limited" access lists only the shared contacts and
+ * says how to share more. Manual entry never depends on any of this.
  */
 
 type Step = 'pick' | 'settings' | 'done';
@@ -56,6 +63,9 @@ export default function ImportContactsScreen() {
   const [step, setStep] = useState<Step>('pick');
   const [reading, setReading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
+  const [denied, setDenied] = useState(false);
+  const [limited, setLimited] = useState(false);
+  const sentToSettings = useRef(false);
   const [device, setDevice] = useState<DeviceContact[] | null>(null);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
@@ -75,7 +85,9 @@ export default function ImportContactsScreen() {
     setReadError(null);
     const answer = await readDeviceContacts();
     setReading(false);
+    setDenied(answer.status === 'denied');
     if (answer.status === 'ok') {
+      setLimited(answer.limited);
       setDevice(answer.contacts);
       if (answer.contacts.length === 0) setReadError('Your phone has no contacts to show.');
       return;
@@ -83,12 +95,24 @@ export default function ImportContactsScreen() {
     setDevice([]);
     setReadError(
       answer.status === 'denied'
-        ? 'Contacts access was declined. Turn it on in Settings → DC Solar → Contacts, then try again.'
+        ? 'Contacts access is off for DC Solar. Turn it on in Settings → DC Solar → Contacts — this screen reads again when you come back. Contacts can always be added by hand.'
         : answer.status === 'unsupported'
-          ? 'The address-book import is switched off in this build: the contacts module in build 31 crashed the app at launch, so it is out until Expo ships a fixed version. Contacts can still be added by hand.'
+          ? 'This version of the app cannot read the iPhone address book. Install the latest build from TestFlight, or add contacts by hand.'
           : answer.message,
     );
   };
+
+  // Back from Settings after a denial or a limited grant: read again.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active' && sentToSettings.current) {
+        sentToSettings.current = false;
+        void read();
+      }
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filtered = useMemo(() => {
     if (!device) return [];
@@ -298,12 +322,38 @@ export default function ImportContactsScreen() {
             )}
           </Pressable>
           {!deviceContactsSupported() ? (
-            <Text style={styles.hint}>Address-book import is temporarily off (see the note above).</Text>
-          ) : null}
+            <Text style={styles.hint}>This version of the app cannot read the address book — update from TestFlight.</Text>
+          ) : (
+            <Text style={styles.hint}>
+              iOS asks for Contacts access the first time. Only the people you tick are saved; the rest of your
+              address book never leaves the phone.
+            </Text>
+          )}
           {readError ? <Text style={styles.error}>{readError}</Text> : null}
+          {denied ? (
+            <Pressable
+              onPress={() => {
+                sentToSettings.current = true;
+                void Linking.openSettings();
+              }}
+              style={({ pressed }) => [styles.primary, pressed && styles.pressed]}>
+              <Text style={styles.primaryText}>Open Settings</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : (
         <>
+          {limited ? (
+            <Pressable
+              onPress={() => {
+                sentToSettings.current = true;
+                void Linking.openSettings();
+              }}>
+              <Text style={styles.hint}>
+                Only the contacts you chose to share with DC Solar are listed. Tap here to share more in Settings.
+              </Text>
+            </Pressable>
+          ) : null}
           <View style={styles.searchRow}>
             <Ionicons name="search" size={16} color={colors.inkSoft} />
             <TextInput
@@ -339,6 +389,16 @@ export default function ImportContactsScreen() {
             </View>
           </View>
           {readError ? <Text style={styles.error}>{readError}</Text> : null}
+          {denied ? (
+            <Pressable
+              onPress={() => {
+                sentToSettings.current = true;
+                void Linking.openSettings();
+              }}
+              style={({ pressed }) => [styles.primary, pressed && styles.pressed]}>
+              <Text style={styles.primaryText}>Open Settings</Text>
+            </Pressable>
+          ) : null}
         </>
       )}
     </View>

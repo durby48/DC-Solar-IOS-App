@@ -34,9 +34,16 @@ export interface DeviceContact {
 }
 
 export type DeviceContactsResult =
-  | { status: 'ok'; contacts: DeviceContact[] }
-  /** The person said no, or Settings has it off. */
-  | { status: 'denied' }
+  /**
+   * `limited` (iOS 18+): the person chose "Select contacts", so only the ones
+   * they shared are visible. More can be shared from Settings.
+   */
+  | { status: 'ok'; contacts: DeviceContact[]; limited: boolean }
+  /**
+   * The person said no, or Settings has it off. `canAskAgain` false means iOS
+   * will not show the prompt again — only Settings can turn it back on.
+   */
+  | { status: 'denied'; canAskAgain: boolean }
   /** Web, or a binary without the native module. */
   | { status: 'unsupported' }
   | { status: 'error'; message: string };

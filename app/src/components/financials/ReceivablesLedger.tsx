@@ -417,28 +417,29 @@ function ReceivablesTiles({
           : `${outstanding.jobs} invoiced ${outstanding.jobs === 1 ? 'job' : 'jobs'} still owe`,
     });
   }
-  const third = tiles.length === 3;
-
+  // Build 33: three tiles used to share one row at a third each, which on a
+  // phone broke "Outstanding" mid-word and floated its note over the amount.
+  // The two "received" tiles keep a row of halves; the tile that carries a
+  // note (Outstanding) takes the full width below them, with its note laid
+  // out inside the tile. Every value stays the live figure.
   return (
     <View style={styles.grid}>
       {tiles.map((tile, index) => (
-        <FadeInUp key={tile.label} index={index} style={[styles.cell, third && styles.cellThird]}>
+        <FadeInUp
+          key={tile.label}
+          index={index}
+          style={[styles.cell, tile.note ? styles.cellFull : null]}>
           <View style={styles.tileWrap}>
             <StatTile
               label={tile.label}
               value={tile.value}
               prefix="$"
               tone={tile.tone}
-              compact={third}
+              note={tile.note}
               countUp
               edge
               style={styles.tile}
             />
-            {tile.note ? (
-              <AppText variant="caption" color={colors.textSecondary} style={styles.note}>
-                {tile.note}
-              </AppText>
-            ) : null}
           </View>
         </FadeInUp>
       ))}
@@ -693,20 +694,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xs,
     paddingBottom: spacing.sm,
   },
-  cellThird: {
-    width: '33.333%',
+  cellFull: {
+    width: '100%',
   },
   tileWrap: {
     alignSelf: 'stretch',
   },
   tile: {
     minWidth: 0,
-  },
-  note: {
-    position: 'absolute',
-    bottom: spacing.xs + 2,
-    right: spacing.sm,
-    fontSize: 10,
   },
   formCard: {
     marginBottom: spacing.md,

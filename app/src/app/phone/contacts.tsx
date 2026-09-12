@@ -3,6 +3,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Platform,
   Pressable,
   RefreshControl,
@@ -14,6 +15,7 @@ import {
 } from 'react-native';
 
 import { ContactEditor } from '@/components/contacts/ContactEditor';
+import { CrewContactEditor } from '@/components/contacts/CrewContactEditor';
 import { CustomerEditor } from '@/components/contacts/CustomerEditor';
 import { deviceContactsSupported } from '@/components/contacts/deviceContacts';
 import { EditorSheet } from '@/components/contacts/EditorSheet';
@@ -61,21 +63,27 @@ import { inAppCallingSupported } from '@/lib/voice';
  * hiding a customer because somebody typed their number wrong is worse than
  * showing that they can't be dialled.
  *
- * EVERY ROW IS EDITABLE FROM HERE (2026-09-12, the owner's ask: "edit the
- * contact card from directly within the contacts section"). An admin sees
- * an "Edit" pill on the right of every row that has something to edit, and
- * the same Edit inside the expanded card. What opens depends on the source:
+ * ONE EDIT CONTROL (Build 33). Rows carry Text and Call icons, not an edit
+ * pill. An admin taps the single Edit at the top; the list enters edit mode,
+ * every editable row shows a pencil, and tapping a row opens its editor.
+ * Done leaves edit mode. What opens depends on the source:
  *
  *   contact   → `ContactEditor` (name, company, title, phone, email, tags,
  *               customer link, notes) in a bottom sheet.
  *   customer  → `CustomerEditor` (name, phone, email, address, notes) — the
  *               same fields and the same `updateCustomer` as the record.
  *   lead      → the lead's own screen, /leads/[id], where its editor lives.
- *   crew      → only YOUR OWN cell number (`staff_profiles` is self-write);
- *               another person's row is read-only.
+ *   crew      → `CrewContactEditor` (name + cell number, or import both from
+ *               the iPhone) through the admin-only `set_crew_contact()`.
  *
- * The crew (non-admins) get the read-only card — Call / Text / Record — and
- * no Edit anywhere; RLS refuses the write regardless.
+ * TEXT / CALL. For an admin they use the company line (the in-app thread and
+ * a Twilio bridge call, so customers only ever see the DC Solar number). The
+ * crew have no company-line access, so for them the icons hand the number to
+ * the iPhone's own Messages / Phone. No number → the icons are dimmed.
+ *
+ * ADD CONTACT offers "Enter manually" or "Import from iPhone" (the
+ * multi-select import at /contacts/import, which de-duplicates by the phone's
+ * contact id and then by number). The crew get the read-only list, no Edit.
  */
 
 type Filter = 'all' | DirectorySource | `tag:${string}`;
@@ -85,6 +93,7 @@ type Editor =
   | { kind: 'new' }
   | { kind: 'contact'; contact: CompanyContact }
   | { kind: 'customer'; id: string; name: string }
+  | { kind: 'crew'; employeeId: string; name: string }
   | { kind: 'myCell' };
 
 const SOURCE_FILTERS: { key: Filter; label: string }[] = [
@@ -123,6 +132,10 @@ export default function ContactsScreen() {
   const [callingKey, setCallingKey] = useState<string | null>(null);
   const [note, setNote] = useState<{ kind: 'ok' | 'error' | 'info'; text: string } | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
+  /** Build 33: the one Edit control. Rows open their editor only in this mode. */
+  const [editMode, setEditMode] = useState(false);
+  /** "Add contact" → the manual / iPhone choice. */
+  const [addMenu, setAddMenu] = useState(false);
 
   const load = useCallback(async () => {
     const [rows, contactRows, s, p] = await Promise.all([
@@ -220,7 +233,7 @@ export default function ContactsScreen() {
       case 'lead':
         return 'lead';
       case 'crew':
-        return isMe(entry) ? { kind: 'myCell' } : null;
+        return { kind: 'crew', employeeId: entry.id, name: entry.displayName };
       default:
         return null;
     }
@@ -240,6 +253,11 @@ export default function ContactsScreen() {
 
   const call = async (entry: DirectoryEntry) => {
     if (!entry.phoneE164 || callingKey) return;
+    if (!isAdmin) {
+      // No company-line access for the crew: the iPhone's own Phone app.
+      void Linking.openURL(`tel:${entry.phoneE164}`);
+      return;
+    }
     if (voiceReady && inAppCallingSupported()) {
       const callParams: Record<string, string> = { to: entry.phoneE164, name: entry.displayName };
       if (entry.source === 'customer') callParams.customerId = entry.id;
@@ -286,6 +304,11 @@ export default function ContactsScreen() {
   /** The conversation screen, like tapping "message" on a phone contact. */
   const openThread = (entry: DirectoryEntry) => {
     if (!entry.phoneE164) return;
+    if (!isAdmin) {
+      // Company texts are admin-only; the crew text from their own Messages.
+      void Linking.openURL(`sms:${entry.phoneE164}`);
+      return;
+    }
     const params: Record<string, string> = { phone: entry.phoneE164, name: entry.displayName };
     if (entry.source === 'customer') params.customerId = entry.id;
     else if (entry.source === 'contact') params.contactId = entry.id;
@@ -331,10 +354,21 @@ export default function ContactsScreen() {
       <View>
         <Pressable
           onPress={() => {
-            setOpenKey(open ? null : key);
             setNote(null);
+            if (editMode) {
+              openEditor(item);
+              return;
+            }
+            setOpenKey(open ? null : key);
           }}
-          style={({ pressed }) => [styles.row, !dialable && styles.rowMuted, pressed && styles.rowPressed]}>
+          disabled={editMode && !editable}
+          accessibilityHint={editMode ? (editable ? 'Opens the editor' : 'Not editable') : 'Shows more actions'}
+          style={({ pressed }) => [
+            styles.row,
+            !dialable && !editMode && styles.rowMuted,
+            editMode && !editable && styles.rowMuted,
+            pressed && styles.rowPressed,
+          ]}>
           <CustomerAvatar customer={{ id: item.id, name: item.displayName }} size={36} url={null} />
           <View style={styles.rowBody}>
             <Text style={[styles.rowName, !dialable && styles.textMuted]} numberOfLines={1}>
@@ -358,18 +392,40 @@ export default function ContactsScreen() {
               </View>
             ) : null}
           </View>
-          {editable ? (
-            <Pressable
-              onPress={() => openEditor(item)}
-              hitSlop={6}
-              accessibilityRole="button"
-              accessibilityLabel={`Edit ${item.displayName}`}
-              style={({ pressed }) => [styles.editPill, pressed && styles.pressed]}>
-              <Ionicons name="create-outline" size={14} color={hubColors.crm.fg} />
-              <Text style={styles.editPillText}>Edit</Text>
-            </Pressable>
+          {editMode ? (
+            editable ? (
+              <View style={styles.editPill} accessibilityElementsHidden>
+                <Ionicons name="create-outline" size={14} color={hubColors.crm.fg} />
+                <Text style={styles.editPillText}>Edit</Text>
+              </View>
+            ) : null
           ) : (
-            <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={colors.inkSoft} />
+            <View style={styles.quickActions}>
+              <Pressable
+                onPress={() => openThread(item)}
+                disabled={!dialable}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={dialable ? `Text ${item.displayName}` : `No number to text for ${item.displayName}`}
+                accessibilityState={{ disabled: !dialable }}
+                style={({ pressed }) => [styles.quickButton, !dialable && styles.quickDisabled, pressed && styles.pressed]}>
+                <Ionicons name="chatbubble-outline" size={18} color={dialable ? colors.ocean : colors.textMuted} />
+              </Pressable>
+              <Pressable
+                onPress={() => void call(item)}
+                disabled={!dialable || callingKey !== null}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={dialable ? `Call ${item.displayName}` : `No number to call for ${item.displayName}`}
+                accessibilityState={{ disabled: !dialable, busy: callingKey === key }}
+                style={({ pressed }) => [styles.quickButton, !dialable && styles.quickDisabled, pressed && styles.pressed]}>
+                {callingKey === key ? (
+                  <ActivityIndicator color={hubColors.hr.fg} size="small" />
+                ) : (
+                  <Ionicons name="call-outline" size={18} color={dialable ? hubColors.hr.fg : colors.textMuted} />
+                )}
+              </Pressable>
+            </View>
           )}
         </Pressable>
 
@@ -417,40 +473,24 @@ export default function ContactsScreen() {
             {!dialable ? (
               <Text style={styles.hint}>
                 {item.source === 'crew'
-                  ? mine
-                    ? 'Add your cell number with Edit — it is the phone we ring first.'
-                    : 'They add it themselves: their first Call on the Keypad asks for it.'
+                  ? isAdmin
+                    ? 'Tap Edit at the top, then this row, to add their cell number.'
+                    : mine
+                      ? 'Your first Call on the Keypad asks for your cell number.'
+                      : 'An admin can add their cell number.'
                   : editable
-                    ? 'Tap Edit and fix the number to make it dialable.'
+                    ? 'Tap Edit at the top, then this row, to fix the number.'
                     : 'Fix the phone number on their record and it will dial from here.'}
               </Text>
             ) : null}
-            {isAdmin && (editable || item.source === 'contact') ? (
+            {isAdmin && item.source === 'contact' ? (
               <View style={styles.manageRow}>
-                {editable ? (
-                  <Pressable
-                    onPress={() => openEditor(item)}
-                    style={({ pressed }) => [styles.manage, pressed && styles.pressed]}>
-                    <Ionicons name="create-outline" size={14} color={colors.ocean} />
-                    <Text style={styles.manageText}>
-                      {item.source === 'lead'
-                        ? 'Edit lead'
-                        : item.source === 'customer'
-                          ? 'Edit customer'
-                          : mine
-                            ? 'Edit my cell number'
-                            : 'Edit contact'}
-                    </Text>
-                  </Pressable>
-                ) : null}
-                {item.source === 'contact' ? (
-                  <Pressable
-                    onPress={() => void archive(item)}
-                    style={({ pressed }) => [styles.manage, pressed && styles.pressed]}>
-                    <Ionicons name="archive-outline" size={14} color={colors.inkSoft} />
-                    <Text style={[styles.manageText, styles.manageTextMuted]}>Remove from contacts</Text>
-                  </Pressable>
-                ) : null}
+                <Pressable
+                  onPress={() => void archive(item)}
+                  style={({ pressed }) => [styles.manage, pressed && styles.pressed]}>
+                  <Ionicons name="archive-outline" size={14} color={colors.inkSoft} />
+                  <Text style={[styles.manageText, styles.manageTextMuted]}>Remove from contacts</Text>
+                </Pressable>
               </View>
             ) : null}
           </View>
@@ -506,26 +546,78 @@ export default function ContactsScreen() {
         </View>
       ) : null}
       {isAdmin ? (
-        <View style={styles.buttonRow}>
+        <View style={styles.toolbar}>
           <Pressable
             onPress={() => {
               setOpenKey(null);
               setNote(null);
-              setEditor({ kind: 'new' });
+              setEditMode(false);
+              setAddMenu((was) => !was);
             }}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: addMenu }}
             style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}>
             <Ionicons name="add" size={16} color={colors.ocean} />
             <Text style={styles.addButtonText}>Add contact</Text>
           </Pressable>
-          {showImport ? (
-            <Pressable
-              onPress={() => router.push('/contacts/import' as never)}
-              style={({ pressed }) => [styles.addButton, pressed && styles.pressed]}>
-              <Ionicons name="phone-portrait-outline" size={16} color={colors.ocean} />
-              <Text style={styles.addButtonText}>Import from phone</Text>
-            </Pressable>
-          ) : null}
+          <Pressable
+            onPress={() => {
+              setOpenKey(null);
+              setNote(null);
+              setAddMenu(false);
+              setEditMode((was) => !was);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={editMode ? 'Done editing contacts' : 'Edit contacts'}
+            style={({ pressed }) => [styles.editToggle, editMode && styles.editToggleOn, pressed && styles.pressed]}>
+            <Text style={[styles.editToggleText, editMode && styles.editToggleTextOn]}>
+              {editMode ? 'Done' : 'Edit'}
+            </Text>
+          </Pressable>
         </View>
+      ) : null}
+      {isAdmin && addMenu ? (
+        <View style={styles.addMenu}>
+          <Pressable
+            onPress={() => {
+              setAddMenu(false);
+              setEditor({ kind: 'new' });
+            }}
+            style={({ pressed }) => [styles.addOption, pressed && styles.pressed]}>
+            <Ionicons name="create-outline" size={18} color={colors.ocean} />
+            <View style={styles.addOptionBody}>
+              <Text style={styles.addOptionTitle}>Enter manually</Text>
+              <Text style={styles.addOptionHint}>Type in one contact.</Text>
+            </View>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setAddMenu(false);
+              if (showImport) {
+                router.push('/contacts/import' as never);
+                return;
+              }
+              setNote({
+                kind: 'info',
+                text:
+                  Platform.OS === 'web'
+                    ? 'Importing from an iPhone works in the phone app, not on the web.'
+                    : 'This version of the app cannot read the iPhone address book — install the latest build from TestFlight, or enter the contact manually.',
+              });
+            }}
+            style={({ pressed }) => [styles.addOption, styles.addOptionDivided, pressed && styles.pressed]}>
+            <Ionicons name="phone-portrait-outline" size={18} color={colors.ocean} />
+            <View style={styles.addOptionBody}>
+              <Text style={styles.addOptionTitle}>Import from iPhone</Text>
+              <Text style={styles.addOptionHint}>
+                Pick one or many from your iPhone contacts. Asks for Contacts access the first time.
+              </Text>
+            </View>
+          </Pressable>
+        </View>
+      ) : null}
+      {editMode ? (
+        <Text style={styles.editHint}>Tap a contact to edit it. Tap Done when you are finished.</Text>
       ) : null}
       {note ? (
         <Text
@@ -546,9 +638,11 @@ export default function ContactsScreen() {
         ? 'Edit contact'
         : editor?.kind === 'customer'
           ? 'Edit customer'
-          : editor?.kind === 'myCell'
-            ? 'My cell number'
-            : '';
+          : editor?.kind === 'crew'
+            ? `Crew · ${editor.name}`
+            : editor?.kind === 'myCell'
+              ? 'My cell number'
+              : '';
 
   const closeEditor = () => setEditor(null);
 
@@ -585,6 +679,12 @@ export default function ContactsScreen() {
       ) : editor?.kind === 'customer' ? (
         <CustomerEditor
           customerId={editor.id}
+          onSaved={(name) => void onSaved(`${name} updated.`)}
+          onCancel={closeEditor}
+        />
+      ) : editor?.kind === 'crew' ? (
+        <CrewContactEditor
+          employeeId={editor.employeeId}
           onSaved={(name) => void onSaved(`${name} updated.`)}
           onCancel={closeEditor}
         />
@@ -661,7 +761,34 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, color: colors.ink, fontSize: 15, fontWeight: '500', paddingVertical: 4 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-  buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  toolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs },
+  editToggle: {
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm - 1,
+  },
+  editToggleOn: { backgroundColor: colors.sun, borderColor: colors.sun },
+  editToggleText: { color: colors.textPrimary, fontSize: 13, fontWeight: '800' },
+  editToggleTextOn: { color: colors.textOnAction },
+  editHint: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  addMenu: { backgroundColor: colors.surface, borderRadius: radii.md, borderWidth: 1, borderColor: colors.line },
+  addOption: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md },
+  addOptionDivided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  addOptionBody: { flex: 1, gap: 2 },
+  addOptionTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  addOptionHint: { color: colors.textSecondary, fontSize: 12, fontWeight: '500' },
+  quickActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  quickButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceSunk,
+  },
+  quickDisabled: { opacity: 0.5 },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',

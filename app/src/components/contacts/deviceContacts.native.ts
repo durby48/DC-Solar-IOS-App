@@ -85,8 +85,14 @@ export async function readDeviceContacts(): Promise<DeviceContactsResult> {
   const mod = loadLegacy();
   if (!mod) return { status: 'unsupported' };
   try {
+    // Asked here and only here — when the person taps an import action, never
+    // at launch. iOS shows its prompt once; after a "Don't Allow" this returns
+    // denied with canAskAgain false and the UI points at Settings instead.
     const permission = await mod.requestPermissionsAsync();
-    if (permission.status !== 'granted') return { status: 'denied' };
+    if (permission.status !== 'granted') {
+      return { status: 'denied', canAskAgain: permission.canAskAgain !== false };
+    }
+    const limited = (permission as { accessPrivileges?: string }).accessPrivileges === 'limited';
 
     const fields = [
       mod.Fields.ID,
@@ -129,7 +135,7 @@ export async function readDeviceContacts(): Promise<DeviceContactsResult> {
     }
 
     contacts.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
-    return { status: 'ok', contacts };
+    return { status: 'ok', contacts, limited };
   } catch (e) {
     return { status: 'error', message: e instanceof Error ? e.message : 'Could not read your contacts.' };
   }

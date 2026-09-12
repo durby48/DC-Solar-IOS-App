@@ -41,7 +41,7 @@
  * shape. Secrets: GEMINI_API_KEY (AI Studio — a Maps key returns 403
  * API_KEY_SERVICE_BLOCKED; see the property-art header for that whole story).
  *
- * Cost: text generation on gemini-2.5-flash is fractions of a cent per card.
+ * Cost: text generation on gemini-3.6-flash is fractions of a cent per card.
  * The expensive half is `generateArt`, which is ~4¢ a card through card-art,
  * and is therefore OFF unless asked for.
  */
@@ -56,8 +56,14 @@ const CORS_HEADERS = {
 
 const COMPANY = 'dc-solar';
 const SET_CODE = 'DCS26';
-/** Text model. The image model lives in card-art and is a different price. */
-const TEXT_MODEL = 'gemini-2.5-flash';
+/**
+ * Text model for writing cards (job sync, prompt drafts, art prompts) — the ONE
+ * place it is named. Build 33 (2026-09-12) moved it from gemini-2.5-flash to
+ * gemini-3.6-flash. The image model lives in card-art and stays an image model
+ * (gemini-3.6-flash is text-only). `GEMINI_TEXT_MODEL` overrides it without a
+ * redeploy of code — set it as an edge-function secret if a model is retired.
+ */
+const TEXT_MODEL = Deno.env.get('GEMINI_TEXT_MODEL')?.trim() || 'gemini-3.6-flash';
 /** Never sync more than this in one call — see the `more` flag in the reply. */
 const SYNC_LIMIT = 25;
 /**
@@ -603,11 +609,14 @@ class GeminiError extends Error {}
 /**
  * One JSON-returning text call.
  *
- * `thinkingBudget: 0` matters twice: gemini-2.5-flash thinks by default, which
- * costs tokens nobody asked for, and a thinking budget plus a tight output cap
- * is the classic way to get an empty candidate back with finishReason
- * MAX_TOKENS. If a future model rejects the field the call is retried once
- * without it rather than failing the whole sync.
+ * Thinking is turned down to `thinkingLevel: 'minimal'`: Gemini 3 thinks by
+ * default (423 thought tokens for a two-field card in the Build 33 probe),
+ * which costs tokens nobody asked for, and thinking plus a tight output cap is
+ * the classic way to get an empty candidate back with finishReason MAX_TOKENS.
+ * The Gemini-2.5 knob `thinkingBudget: 0` is REJECTED by gemini-3.6-flash with
+ * a bare 400 "Request contains an invalid argument." — no mention of thinking —
+ * so ANY 400 on the first attempt is retried once with no thinking config
+ * before the sync is failed.
  */
 async function askGemini(apiKey: string, prompt: string): Promise<Record<string, unknown>> {
   const call = async (withThinking: boolean) => {
@@ -616,7 +625,7 @@ async function askGemini(apiKey: string, prompt: string): Promise<Record<string,
       temperature: 1.0,
       maxOutputTokens: 2048,
     };
-    if (!withThinking) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    if (!withThinking) generationConfig.thinkingConfig = { thinkingLevel: 'minimal' };
     return await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent?key=${apiKey}`,
       {
@@ -632,12 +641,10 @@ async function askGemini(apiKey: string, prompt: string): Promise<Record<string,
 
   let res = await call(false);
   if (res.status === 400) {
-    const detail = await res.text();
-    if (/thinking/i.test(detail)) {
-      res = await call(true);
-    } else {
-      throw new GeminiError(`Gemini rejected the request (400): ${detail.slice(0, 300)}`);
-    }
+    // The config knob is the likeliest thing a model rejects; retry without
+    // it. A second 400 is a real problem and falls through to the error below.
+    await res.body?.cancel();
+    res = await call(true);
   }
   if (!res.ok) {
     const detail = (await res.text()).slice(0, 300);

@@ -210,6 +210,7 @@ export function TradingCard({
       <View style={{ paddingHorizontal: px(8), paddingVertical: px(3) }}>
         {card.ability ? (
           <Text
+            numberOfLines={fullArt ? 4 : 5}
             style={{
               fontFamily: fonts.bold,
               fontSize: px(8.6),
@@ -222,6 +223,7 @@ export function TradingCard({
         ) : null}
         {card.flavor ? (
           <Text
+            numberOfLines={3}
             style={{
               fontFamily: fonts.body,
               fontStyle: 'italic',
@@ -338,13 +340,21 @@ export function TradingCard({
           </Text>
         </LinearGradient>
 
-        {/* art window (base layout only — full-art already filled the frame) */}
+        {/* art window (base layout only — full-art already filled the frame).
+            Build 33: the card is a fixed 2.5 × 3.5 in, so a FIXED 1.42 in art
+            window plus a long synced ability/flavor pushed the stats row out of
+            the bottom of the card, where the frame's overflow clipped it. The
+            window now starts at 1.42 in and SHRINKS (down to 0.8 in) to make
+            room for the text, so the card keeps its proportions and nothing
+            below the art is cut off. The text is capped too, as a backstop. */}
         {fullArt ? (
           <View style={{ flex: 1 }} />
         ) : (
           <View
             style={{
               height: inch(1.42),
+              flexShrink: 1,
+              minHeight: inch(0.8),
               borderBottomWidth: px(2),
               borderBottomColor: palette.frame,
               overflow: 'hidden',

@@ -482,6 +482,69 @@ export async function fetchMyStaffProfile(): Promise<StaffProfile | null> {
   }
 }
 
+/** A crew member's contact information as an admin edits it (Build 33). */
+export interface CrewContact {
+  employeeId: string;
+  email: string;
+  displayName: string | null;
+  cellPhone: string | null;
+}
+
+/**
+ * One crew member's name and cell number, for the admin crew-contact editor.
+ * Admins can read both tables (`emp_admin_select`, `sp_admin_select`); a crew
+ * member reading anyone but themselves gets null from RLS.
+ */
+export async function fetchCrewContact(employeeId: string): Promise<CrewContact | null> {
+  try {
+    const { data: employee, error } = await supabase
+      .from('employees')
+      .select('id, email, display_name')
+      .eq('id', employeeId)
+      .maybeSingle();
+    if (error || !employee) return null;
+    const email = String(employee.email);
+    const { data: profile } = await supabase
+      .from('staff_profiles')
+      .select('cell_phone')
+      .eq('company', COMPANY)
+      .ilike('email', email)
+      .maybeSingle();
+    return {
+      employeeId: String(employee.id),
+      email,
+      displayName: (employee.display_name as string | null) ?? null,
+      cellPhone: ((profile as { cell_phone?: string | null } | null)?.cell_phone as string | null) ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save a crew member's name and cell number through `set_crew_contact()`
+ * (migration 2026-09-12_crew_contact_rpc.sql): SECURITY DEFINER, admin-checked,
+ * touches only `employees.display_name` and `staff_profiles.cell_phone`.
+ * A blank name keeps the existing one; a blank phone clears the number. It
+ * never creates a crew member, so importing from the iPhone cannot duplicate one.
+ */
+export async function saveCrewContact(
+  employeeId: string,
+  input: { displayName: string | null; cellPhone: string | null },
+): Promise<CommsResult> {
+  try {
+    const { error } = await supabase.rpc('set_crew_contact', {
+      p_employee_id: employeeId,
+      p_display_name: input.displayName?.trim() || null,
+      p_cell_phone: input.cellPhone?.trim() || null,
+    });
+    if (error) return { ok: false, message: error.message || 'Could not save that crew member.' };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not save that crew member.' };
+  }
+}
+
 /**
  * Save my cell number. Upserts my own row — the database trigger lowercases
  * the email, which is what keeps the (company, email) primary key from

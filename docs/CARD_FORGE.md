@@ -266,7 +266,7 @@ a drafted card, so a hallucinated street address cannot survive `draft` either.
 
 | | Per card | 25 cards |
 |---|---|---|
-| Text (`gemini-2.5-flash`, this function) | fractions of a cent | pennies |
+| Text (`gemini-3.6-flash`, this function — `GEMINI_TEXT_MODEL` overrides) | fractions of a cent | pennies |
 | Art (`gemini-3.1-flash-image`, via `card-art`) | **~4¢** | **~$1** |
 
 `generateArt` is **off unless asked for**, and it runs *after* the cards are
@@ -274,11 +274,10 @@ committed, on a 90-second budget. Whatever the budget cuts off comes back
 `art: "skipped"` and can be redrawn one card at a time from the card screen —
 nothing is lost, because `card-art` is the thing that draws the art either way.
 
-Thinking is disabled on the text model (`thinkingBudget: 0`). That halves the
-cost and, more importantly, removes the classic gemini-2.5 failure where the
-model spends its whole output budget thinking and returns an empty candidate. If
-a future model rejects the field, the call is retried once without it rather
-than failing the sync.
+Thinking is turned down on the text model (`thinkingLevel: 'minimal'`, Build 33). Gemini 3 thinks by
+default, which costs tokens and can spend the whole output budget before any JSON
+is written. `gemini-3.6-flash` rejects the old 2.5 knob (`thinkingBudget: 0`) with a bare
+400, so any 400 is retried once with no thinking config rather than failing the sync.
 
 ---
 

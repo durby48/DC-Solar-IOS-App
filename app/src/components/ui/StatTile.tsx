@@ -34,8 +34,15 @@ export function StatTile({
   countUp = true,
   compact = false,
   edge = false,
+  note,
   style,
 }: {
+  /**
+   * One supporting line under the number ("3 invoiced jobs still owe"). It is
+   * laid out IN the tile, so it grows the tile instead of sitting on top of
+   * the figure the way an absolutely-positioned caption did (Build 33).
+   */
+  note?: string;
   label: string;
   value: number;
   /** Unit glued after the number: 'h', '%', ' kW'. */
@@ -74,6 +81,11 @@ export function StatTile({
         duration={countUp ? undefined : 0}
         style={[styles.value, compact ? styles.valueCompact : null]}
       />
+      {note ? (
+        <AppText variant="caption" color={colors.textSecondary} numberOfLines={2}>
+          {note}
+        </AppText>
+      ) : null}
     </View>
   );
 }
