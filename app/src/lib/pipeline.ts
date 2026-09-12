@@ -10,6 +10,7 @@ import { fetchArtworkUrls } from '@/lib/artwork';
 import { fetchJobs, type FetchStatus } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
 import { fetchForecastModel, type ForecastModel } from '@/lib/forecast';
+import { loadedLaborCost } from '@/lib/laborCost';
 import { type Job } from '@/lib/types';
 import { isCompanyJob, stageOrDefault, type Stage } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
@@ -275,7 +276,14 @@ export interface CompanyTotals {
  * each job's invoice entries by pipeline stage; Avg Profit averages per-job
  * profit % over Complete jobs only, where labor = the job's employee_hours
  * (hours × rate) plus completed time_entries (duration × the employee's
- * pay_rate, matched by email case-insensitively; unknown rates skipped).
+ * pay_rate, matched by email case-insensitively; unknown rates skipped),
+ * loaded with the employer payroll-tax burden (fetchLaborHoursByJob).
+ *
+ * NOTE (audit 2026-09-12): the `*Ytd` figures and `paid` carry no date
+ * window — they are all-time, bucketed by the job's CURRENT stage. Every row
+ * is dated 2026 today so the label holds, but on 2027-01-01 these will keep
+ * counting 2026 work; the drill-downs in app/ledger/[view].tsx share the same
+ * all-time meaning, so a window has to be added to both together.
  * At most 4 queries; pass prefetched finance rows to reuse the per-card
  * fetch. Returns null on any fetch failure (non-admin / offline) so the
  * header hides.
@@ -394,9 +402,10 @@ export async function fetchCompanyTotals(
   }
 }
 
-/** Per-job worked hours + labor cost (hours × roster rates). */
+/** Per-job worked hours + fully-loaded labor cost (see lib/laborCost.ts). */
 export interface JobLaborHours {
   hours: number;
+  /** Gross wages × the employer payroll-tax burden — what the job really cost. */
   labor: number;
 }
 
@@ -405,6 +414,12 @@ export interface JobLaborHours {
  * stored rate) plus completed time_entries (duration × the employee's
  * roster pay_rate; unknown rates count toward hours but not labor).
  * Null on any fetch failure (non-admin / offline). Three queries.
+ *
+ * 2026-09-12: labor is now LOADED (× EMPLOYER_COST_MULTIPLIER), matching the
+ * job detail page (lib/data.ts) and the company headline, which subtracts
+ * actual payroll withdrawals. Until now every pipeline-card profit %, the
+ * per-job P&L sheet and Avg Profit priced labor at gross wages only, so each
+ * job looked 10.6% of its wages more profitable than the bank says it was.
  */
 export async function fetchLaborHoursByJob(): Promise<Map<string, JobLaborHours> | null> {
   try {
@@ -453,6 +468,9 @@ export async function fetchLaborHoursByJob(): Promise<Map<string, JobLaborHours>
       const rate = row.employee ? rateByEmail.get(row.employee.toLowerCase()) : undefined;
       bumpJob(row.job_id, hours, rate != null ? hours * rate : 0);
     }
+    // Gross → loaded, once per job (the multiplier is linear, so applying it
+    // after summing equals applying it per row).
+    for (const entry of map.values()) entry.labor = loadedLaborCost(entry.labor);
     return map;
   } catch {
     return null;

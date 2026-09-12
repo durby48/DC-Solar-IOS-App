@@ -73,23 +73,61 @@ export async function fetchCompanySettings(): Promise<CompanySettings | null> {
  * paid hours from unpaid, and guessing would silently distort the cash
  * position. `laborMap` on the Financials screen cannot answer this: it is
  * keyed by job with no dates.
+ *
+ * 2026-09-12: completed clock-in/out `time_entries` after the marker are now
+ * included, priced at the roster pay_rate — the same two sources and the same
+ * Kansas City day bucketing as `laborUnpaidEstimate` in lib/financials.ts.
+ * Before this only hand-logged `employee_hours` counted, so "Less wages
+ * worked, unpaid" understated the accrual by every clocked shift and could
+ * never agree with the Labor tile on the same screen.
  */
 export async function fetchUnpaidWages(
   payrollThrough: string | null,
 ): Promise<number> {
   if (!payrollThrough) return 0;
-  const { data, error } = await supabase
-    .from('employee_hours')
-    .select('hours, rate')
-    .eq('company', COMPANY)
-    .gt('occurred_on', payrollThrough);
-  if (error || !data) return 0;
+  const [hoursRes, timeRes, employeesRes] = await Promise.all([
+    supabase
+      .from('employee_hours')
+      .select('hours, rate')
+      .eq('company', COMPANY)
+      .gt('occurred_on', payrollThrough),
+    supabase
+      .from('time_entries')
+      .select('employee, clock_in, clock_out')
+      .eq('company', COMPANY)
+      .not('clock_out', 'is', null)
+      .gt('clock_in', `${payrollThrough}T00:00:00-05:00`),
+    supabase.from('employees').select('email, pay_rate').eq('is_test', false),
+  ]);
+  if (hoursRes.error || !hoursRes.data) return 0;
+  let gross = hoursRes.data.reduce(
+    (sum, row) => sum + Number(row.hours ?? 0) * Number(row.rate ?? 0),
+    0,
+  );
+
+  const rateByEmail = new Map<string, number>();
+  for (const row of (employeesRes.data ?? []) as { email: string | null; pay_rate: unknown }[]) {
+    if (row.email && row.pay_rate != null) rateByEmail.set(row.email.toLowerCase(), Number(row.pay_rate));
+  }
+  for (const row of (timeRes.data ?? []) as {
+    employee: string | null;
+    clock_in: string | null;
+    clock_out: string | null;
+  }[]) {
+    if (!row.clock_in || !row.clock_out) continue;
+    const ms = new Date(row.clock_out).getTime() - new Date(row.clock_in).getTime();
+    if (!Number.isFinite(ms) || ms <= 0) continue;
+    // The query's timestamp bound is only a coarse prefilter; the real test
+    // is the shift's Kansas City calendar day, like lib/financials.ts.
+    const day = new Date(row.clock_in).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+    if (day <= payrollThrough) continue;
+    const rate = rateByEmail.get((row.employee ?? '').toLowerCase());
+    if (rate != null) gross += (ms / 3_600_000) * rate;
+  }
   // Loaded, not gross: the payroll withdrawal Gusto makes is gross wages PLUS
   // the employer taxes, so this is the amount that will actually leave the
   // account (within pennies of every 2026 run).
-  return loadedLaborCost(
-    data.reduce((sum, row) => sum + Number(row.hours ?? 0) * Number(row.rate ?? 0), 0),
-  );
+  return loadedLaborCost(gross);
 }
 
 /** Record a freshly reconciled balance. Admin-only per RLS. */

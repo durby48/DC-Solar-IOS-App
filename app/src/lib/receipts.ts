@@ -269,6 +269,12 @@ export async function approveReceipt(
         status: 'recorded',
         job_id: receipt.job_id,
         counterparty: receipt.method,
+        // A receipt the crew paid out of pocket did NOT leave the bank account:
+        // the cash position (app/financials.tsx) keys "Less owed for
+        // out-of-pocket" and the bank auto-adjust off this column, not the
+        // description marker. Approval never set it before 2026-09-12, so
+        // twelve reimbursable receipts were counted as bank money (audit).
+        paid_from_bank: !receipt.needs_reimbursed,
         extracted: {
           source: 'field-app-receipt',
           category: receipt.category,

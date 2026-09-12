@@ -18,6 +18,8 @@ import { MirrorTiles } from '@/components/financials/MirrorTiles';
 import { OverviewTiles, type OverviewMonth } from '@/components/financials/OverviewTiles';
 import { PnlSheet, type PnlRow } from '@/components/financials/PnlSheet';
 import { ReceivablesLedger } from '@/components/financials/ReceivablesLedger';
+import { CompanyAssets } from '@/components/financials/CompanyAssets';
+import { StockChart } from '@/components/financials/StockChart';
 import { AppText, Button, Card, EmptyState, SectionHeader, SkeletonList } from '@/components/ui';
 import { colors, hubColors, spacing } from '@/constants/theme';
 import { useAdminOnlyScreen } from '@/lib/adminGate';
@@ -48,6 +50,15 @@ import {
 } from '@/lib/pipeline';
 import { useRole } from '@/lib/role';
 import { isValidISODate } from '@/lib/time';
+import { useFinanceRealtime } from '@/lib/financeRealtime';
+import {
+  buildValuationSeries,
+  fetchCompanyAssets,
+  fetchCompanyLiabilities,
+  fetchDailyGrossWages,
+  type CompanyAsset,
+  type CompanyLiability,
+} from '@/lib/valuation';
 
 /**
  * Financials — every dollar the company has taken in, paid out, or is still
@@ -81,6 +92,11 @@ export default function FinancialsScreen() {
   const [laborMap, setLaborMap] = useState<Map<string, JobLaborHours> | null>(null);
   const [settings, setSettings] = useState<CompanySettings | null>(null);
   const [unpaidWages, setUnpaidWages] = useState(0);
+  // Inputs to the stock chart's Value line (lib/valuation.ts): the owner's
+  // vehicles/tools/loans, and gross wages per day for the labor accrual.
+  const [assets, setAssets] = useState<CompanyAsset[]>([]);
+  const [liabilities, setLiabilities] = useState<CompanyLiability[]>([]);
+  const [dailyGross, setDailyGross] = useState<Map<string, number> | null>(null);
   // Collapsible sections: the per-job P&L sheet and each expense month.
   const [pnlOpen, setPnlOpen] = useState(false);
   const [openMonths, setOpenMonths] = useState<Set<string>>(new Set());
@@ -120,14 +136,20 @@ export default function FinancialsScreen() {
 
   const load = useCallback(async () => {
     if (role?.isAdmin) {
-      const [financials, { jobs }, labor] = await Promise.all([
+      const [financials, { jobs }, labor, assetRows, liabilityRows, gross] = await Promise.all([
         fetchFinancials(),
         fetchPipelineJobs(),
         fetchLaborHoursByJob(),
+        fetchCompanyAssets(),
+        fetchCompanyLiabilities(),
+        fetchDailyGrossWages(),
       ]);
       const companySettings = await fetchCompanySettings();
       setSettings(companySettings);
       setUnpaidWages(await fetchUnpaidWages(companySettings?.payrollThrough ?? null));
+      setAssets(assetRows ?? []);
+      setLiabilities(liabilityRows ?? []);
+      setDailyGross(gross);
       setData(financials);
       setLaborMap(labor);
       // Same math as the Pipeline header, fed by the same rows we just got.
@@ -162,6 +184,11 @@ export default function FinancialsScreen() {
       load();
     }, [load]),
   );
+
+  // Live: any change to finance_entries / payroll_runs / company_settings /
+  // company_assets / company_liabilities refetches (debounced), so the stock
+  // chart is never stale while the screen is open.
+  useFinanceRealtime(load, Boolean(role?.isAdmin));
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -212,22 +239,38 @@ export default function FinancialsScreen() {
    * adjustment to zero.
    */
   const bankAdjustment = useMemo(() => {
-    const anchorAt = settings?.anchorAt;
-    if (!anchorAt || !data) return { total: 0, count: 0 };
-    const isChase = (e: LedgerEntry) =>
-      (e.counterparty ?? '').trim().toLowerCase() === 'chase' ||
-      /account ending in/i.test(e.description ?? '');
-    const isBankExpense = (e: LedgerEntry) => e.type === 'expense' && e.paid_from_bank;
+    if (!data || !settings) return { total: 0, count: 0 };
+    // 2026-09-12 audit fix. The old version keyed on the ROW's created_at vs
+    // the anchor's updated_at and only counted Chase-scanner rows and
+    // manually-toggled bank expenses — so a deposit typed into the app, a
+    // payroll withdrawal, or any row entered late for an earlier date never
+    // moved the balance, and the display drifted thousands from Chase. Now:
+    // the balance is the statement figure AS OF `bank_balance_as_of`, and
+    // every bank-moving row DATED after that day adjusts it — payments in,
+    // expenses that left the account (`paid_from_bank`), owner capital in/out,
+    // and payroll runs by payday. Out-of-pocket receipts are excluded here and
+    // shown under "owed" instead. Without an as-of date, fall back to the old
+    // timestamp rule so an un-dated anchor still behaves.
+    const asOf = settings.bankBalanceAsOf;
+    const anchorAt = settings.anchorAt;
     let total = 0;
     let count = 0;
+    const after = (e: LedgerEntry) =>
+      asOf ? (e.occurred_on ?? '') > asOf : Boolean(anchorAt && e.created_at && e.created_at > anchorAt);
     for (const e of data.allEntries) {
-      if (!e.created_at || e.created_at <= anchorAt) continue;
-      if (!isChase(e) && !isBankExpense(e)) continue;
+      if (!after(e)) continue;
       const inflow = e.type === 'payment' || (e.type === 'investment' && e.direction !== 'out');
-      const outflow = e.type === 'expense' || (e.type === 'investment' && e.direction === 'out');
+      const outflow =
+        (e.type === 'expense' && e.paid_from_bank) || (e.type === 'investment' && e.direction === 'out');
       if (!inflow && !outflow) continue;
       total += inflow ? e.amount : -e.amount;
       count += 1;
+    }
+    for (const run of data.laborRuns) {
+      if (asOf ? run.payday > asOf : false) {
+        total -= run.totalWithdrawn;
+        count += 1;
+      }
     }
     return { total, count };
   }, [settings, data]);
@@ -533,6 +576,27 @@ export default function FinancialsScreen() {
     [data, totals, jobsFull],
   );
 
+  /**
+   * The stock chart's three daily series since 2026-07-01, rebuilt from the
+   * rows above on every load (never stored). Formulas: docs/VALUATION.md.
+   */
+  const valuation = useMemo(
+    () =>
+      data
+        ? buildValuationSeries({
+            entries: data.allEntries,
+            runs: data.laborRuns,
+            dailyGross,
+            jobs: jobsFull,
+            avgProfitPct: totals?.avgProfitPct ?? null,
+            settings,
+            assets,
+            liabilities,
+          })
+        : null,
+    [data, dailyGross, jobsFull, totals, settings, assets, liabilities],
+  );
+
   // Totals across every PROJECT (top row of the P&L sheet). Overhead excluded.
   const pnlTotals = useMemo(() => {
     const t = { revenue: 0, expenses: 0, hours: 0, labor: 0, profit: 0 };
@@ -727,6 +791,16 @@ export default function FinancialsScreen() {
         placeholder('Financials are not available right now.')
       ) : (
         <>
+          {valuation ? (
+            <StockChart
+              series={{
+                revenue: valuation.revenue,
+                profit: valuation.profit,
+                value: valuation.value,
+              }}
+              breakdown={valuation.breakdown}
+            />
+          ) : null}
           <OverviewTiles
             month={overviewMonth}
             canPrev={overviewYm > earliestYm}
@@ -854,17 +928,20 @@ export default function FinancialsScreen() {
         ListHeaderComponent={header}
         ListFooterComponent={
           loaded && role?.isAdmin && data ? (
-            <ReceivablesLedger
-              entries={data.paymentEntries}
-              paidYtd={data.paidYtd}
-              paidThisMonth={data.paidThisMonth}
-              outstanding={outstanding}
-              jobs={jobsFull}
-              jobOptions={jobOptions}
-              companyJobId={companyJobId}
-              jobLabels={jobLabels}
-              onChanged={load}
-            />
+            <View>
+              <ReceivablesLedger
+                entries={data.paymentEntries}
+                paidYtd={data.paidYtd}
+                paidThisMonth={data.paidThisMonth}
+                outstanding={outstanding}
+                jobs={jobsFull}
+                jobOptions={jobOptions}
+                companyJobId={companyJobId}
+                jobLabels={jobLabels}
+                onChanged={load}
+              />
+              <CompanyAssets assets={assets} liabilities={liabilities} onChanged={load} />
+            </View>
           ) : null
         }
         renderSectionHeader={({ section }) => (

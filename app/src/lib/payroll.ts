@@ -18,9 +18,21 @@
  * after) show a per-job split of hours already paid vs. this period.
  */
 
+import { todayISO } from '@/lib/dates';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
+
+/**
+ * Calendar day of a clock-in, in Kansas City time (2026-09-12). Payroll
+ * periods are local days, and `clock_in.slice(0, 10)` was the UTC day — an
+ * evening clock-in after 7 pm CDT landed on tomorrow's date, which at a
+ * period boundary moved the shift into the wrong payroll. lib/financials.ts
+ * already buckets this way; the two now agree.
+ */
+function localDay(timestamp: string): string {
+  return new Date(timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+}
 
 /** Everything before this date was paid/reconciled outside the app. */
 const FIRST_PERIOD_START = '2026-07-18';
@@ -70,7 +82,8 @@ function nextDayOfWeek(afterIso: string, targetDow: number): string {
 }
 
 export function payrollState(period: PayrollPeriod, todayIso?: string): PayrollState {
-  const today = todayIso ?? new Date().toISOString().slice(0, 10);
+  // Local date, not UTC (2026-09-12): a period "closed" 7 hours early before.
+  const today = todayIso ?? todayISO();
   if (period.pre) return 'paid';
   if (today <= period.end) return 'current';
   if (period.submitOn && today < period.submitOn) return 'awaiting-submit';
@@ -116,7 +129,7 @@ function rangeLabel(start: string, end: string): string {
  * containing today, oldest first (the current period is always last).
  */
 export function listPayrollPeriods(todayIso?: string): PayrollPeriod[] {
-  const today = todayIso ?? new Date().toISOString().slice(0, 10);
+  const today = todayIso ?? todayISO();
   const preEnd = isoFromMs(dayMs(FIRST_PERIOD_START) - DAY_MS);
   const periods: PayrollPeriod[] = [
     {
@@ -256,7 +269,7 @@ export async function fetchHoursData(): Promise<HoursData | null> {
       const email = row.employee?.toLowerCase() ?? null;
       entries.push({
         name: (email ? nameByEmail.get(email) : null) ?? row.employee ?? 'Unassigned',
-        date: row.clock_in.slice(0, 10),
+        date: localDay(row.clock_in),
         hours: ms / 3_600_000,
         rate: email ? (rateByEmail.get(email) ?? null) : null,
         jobId: row.job_id,
@@ -387,6 +400,8 @@ export interface PayrollRun {
   gross_wages: number;
   total_withdrawn: number;
   receipt_id: string | null;
+  /** regular = scheduled crew period; off_cycle = a correction / transition run. */
+  kind: 'regular' | 'off_cycle';
 }
 
 /** Recorded runs keyed by period_end. Empty map on any error. */
@@ -395,7 +410,7 @@ export async function fetchPayrollRuns(): Promise<Map<string, PayrollRun>> {
   try {
     const { data, error } = await supabase
       .from('payroll_runs')
-      .select('id, period_start, period_end, payday, gross_wages, total_withdrawn, receipt_id')
+      .select('id, period_start, period_end, payday, gross_wages, total_withdrawn, receipt_id, kind')
       .eq('company', COMPANY);
     if (error || !data) return runs;
     for (const row of data as Record<string, unknown>[]) {
@@ -407,6 +422,7 @@ export async function fetchPayrollRuns(): Promise<Map<string, PayrollRun>> {
         gross_wages: Number(row.gross_wages) || 0,
         total_withdrawn: Number(row.total_withdrawn) || 0,
         receipt_id: (row.receipt_id as string | null) ?? null,
+        kind: row.kind === 'off_cycle' ? 'off_cycle' : 'regular',
       };
       runs.set(run.period_end, run);
     }
@@ -431,6 +447,8 @@ export async function recordPayrollRun(params: {
   grossWages: number;
   totalWithdrawn: number;
   receiptId: string | null;
+  /** Defaults to regular; off-cycle corrections never advance "paid through". */
+  kind?: 'regular' | 'off_cycle';
 }): Promise<RecordRunResult> {
   try {
     const { error } = await supabase.from('payroll_runs').upsert(
@@ -442,8 +460,9 @@ export async function recordPayrollRun(params: {
         gross_wages: params.grossWages,
         total_withdrawn: params.totalWithdrawn,
         receipt_id: params.receiptId,
+        kind: params.kind ?? 'regular',
       },
-      { onConflict: 'company,period_end' },
+      { onConflict: 'company,period_end,kind' },
     );
     if (error) return { ok: false, message: error.message };
 
@@ -455,9 +474,16 @@ export async function recordPayrollRun(params: {
       .maybeSingle();
     const current = (settings?.payroll_through as string | null) ?? '';
     if (params.periodEnd > current) {
+      // `updated_at` is deliberately NOT touched (fixed 2026-09-12): the
+      // Financials screen reads it as the moment the bank balance was
+      // anchored, and every ledger row created after it auto-adjusts the
+      // displayed balance. Stamping it here silently re-anchored the balance
+      // without a new figure, dropping every bank transaction booked between
+      // the last real anchor and this run from the adjustment. Only
+      // saveBankBalance (lib/cashPosition.ts) may move it.
       const { error: settingsError } = await supabase
         .from('company_settings')
-        .update({ payroll_through: params.periodEnd, updated_at: new Date().toISOString() })
+        .update({ payroll_through: params.periodEnd })
         .eq('company', COMPANY);
       if (settingsError) {
         return {

@@ -6,6 +6,7 @@
  * so the screen can degrade to a friendly placeholder.
  */
 
+import { todayISO } from '@/lib/dates';
 import { loadedLaborCost } from '@/lib/laborCost';
 import { isCompanyJob, stageOrDefault } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
@@ -89,6 +90,8 @@ export interface LaborRun {
   /** Everything that left the bank for the run: net pay + all taxes. */
   totalWithdrawn: number;
   receiptId: string | null;
+  /** regular = scheduled crew period (advances paid-through); off_cycle = a correction run. */
+  kind: 'regular' | 'off_cycle';
 }
 
 /** Company money overview + the full expense ledger. */
@@ -178,7 +181,7 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       // periods is the money that ACTUALLY left the bank, to the penny.
       supabase
         .from('payroll_runs')
-        .select('period_start, period_end, payday, total_withdrawn, receipt_id')
+        .select('period_start, period_end, payday, total_withdrawn, receipt_id, kind')
         .eq('company', COMPANY),
     ]);
     if (error || !data) return null;
@@ -193,6 +196,7 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       payday: string;
       total_withdrawn: unknown;
       receipt_id: string | null;
+      kind?: string | null;
     }[];
     const laborRuns: LaborRun[] = runRows
       .map((r) => ({
@@ -201,9 +205,12 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
         payday: r.payday,
         totalWithdrawn: num(r.total_withdrawn),
         receiptId: r.receipt_id ?? null,
+        kind: (r.kind === 'off_cycle' ? 'off_cycle' : 'regular') as 'regular' | 'off_cycle',
       }))
       .sort((a, b) => b.payday.localeCompare(a.payday));
-    const paidThrough = laborRuns.reduce((max, r) => (r.periodEnd > max ? r.periodEnd : max), '');
+    // Only REGULAR runs advance "paid through": an off-cycle correction for
+    // one person must not mark the whole crew's period as paid (2026-09-12).
+    const paidThrough = laborRuns.reduce((max, r) => (r.kind === 'regular' && r.periodEnd > max ? r.periodEnd : max), '');
     const laborPaid = laborRuns.reduce((sum, r) => sum + r.totalWithdrawn, 0);
 
     let unpaidGross = 0;
@@ -244,7 +251,11 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       amount: num(row.amount),
     })) as LedgerEntry[];
 
-    const thisMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+    // Local calendar month, not UTC (fixed 2026-09-12): `toISOString()` rolls
+    // into the next month at 7 pm Kansas City time on the last day of a
+    // month, so "Received this month" / "Labor this month" briefly disagreed
+    // with the Overview pager, which has always used `todayISO()`.
+    const thisMonth = todayISO().slice(0, 7); // YYYY-MM
     const thisYear = thisMonth.slice(0, 4);
     let paid = 0;
     let paidThisMonth = 0;
