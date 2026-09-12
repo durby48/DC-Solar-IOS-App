@@ -766,9 +766,6 @@ async function ensureJobFolder(
     .eq('job_id', job.id)
     .maybeSingle();
   const existing = existingRow as JobFolderRow | null;
-  if (existing?.status === 'ready' && existing.dropbox_folder_id) {
-    return { ok: true, error: null, path: existing.path_display };
-  }
 
   let customerName: string | null = null;
   if (job.customer_id) {
@@ -781,6 +778,52 @@ async function ensureJobFolder(
   }
 
   const path = `${JOBS_ROOT}/${jobFolderName(job, customerName)}`;
+
+  // RENAME ON CHANGE (2026-09-12). "Ensure" means "the folder exists AT THE
+  // EXPECTED PATH": when the folder already exists but the job was
+  // renumbered, renamed, or moved to another customer, the folder is MOVED
+  // (files/move_v2 — contents come along) rather than a second one created.
+  // The update trigger on jobs/customers re-queues the row and nudges this
+  // action; the retry cron covers a failed move the same as a failed create.
+  if (existing?.dropbox_folder_id && existing.path_lower) {
+    if (existing.path_lower === path.toLowerCase()) {
+      if (existing.status !== 'ready') {
+        await markFolder(admin, job.id, { status: 'ready', last_error: null }, false);
+      }
+      return { ok: true, error: null, path: existing.path_display ?? path };
+    }
+    const moved = await dropboxCall(token, 'files/move_v2', {
+      from_path: existing.path_lower,
+      to_path: path,
+      autorename: false,
+      allow_ownership_transfer: false,
+    });
+    if (moved.ok) {
+      const meta = (moved.body.metadata as Record<string, unknown> | undefined) ?? {};
+      await markFolder(
+        admin,
+        job.id,
+        {
+          status: 'ready',
+          dropbox_folder_id: typeof meta.id === 'string' ? meta.id : existing.dropbox_folder_id,
+          path_lower: typeof meta.path_lower === 'string' ? meta.path_lower : path.toLowerCase(),
+          path_display: typeof meta.path_display === 'string' ? meta.path_display : path,
+          last_error: null,
+        },
+        false,
+      );
+      return { ok: true, error: null, path: typeof meta.path_display === 'string' ? meta.path_display : path };
+    }
+    if (!moved.text.includes('from_lookup/not_found')) {
+      // A folder already sits at the new name, or Dropbox refused: leave the
+      // old folder where it is and say why. Nothing is duplicated or lost.
+      const error = dropboxErrorMessage('files/move_v2', moved);
+      await markFolder(admin, job.id, { status: 'failed', last_error: error }, true);
+      return { ok: false, error, permanent: isPermanentDropboxError(moved) };
+    }
+    // The old folder is gone from Dropbox (deleted by hand): fall through and
+    // create a fresh one at the expected path.
+  }
 
   try {
     let metadata: Record<string, unknown> | null = null;

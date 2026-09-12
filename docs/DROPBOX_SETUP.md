@@ -214,6 +214,30 @@ files with the placeholder substituted. The `cron` schema is not readable by
 
 ---
 
+## Renames (2026-09-12, later the same day)
+
+The folder is named `<job_number> - <customer name>`, so it has to follow the
+job. `ensure_job_folder` means "the folder exists AT THE EXPECTED PATH": when
+the row already has a Dropbox folder id and the expected path differs, the
+function calls `files/move_v2` (contents come along) instead of creating a
+second folder. Two triggers feed it (migration
+`2026-09-12_dropbox_rename_and_merge_contacts.sql`):
+
+- `jobs_dropbox_folder_rename_trg` — AFTER UPDATE OF job_number, name,
+  customer_id: re-queues that job's row and nudges the function.
+- `customers_dropbox_folder_rename_trg` — AFTER UPDATE OF name: re-queues
+  every non-internal job of that customer.
+
+A move that Dropbox refuses (typically a folder already sitting at the new
+name) leaves the old folder in place, records the reason in
+`dropbox_job_folders.last_error`, and is retried by the 15-minute cron. If
+the old folder was deleted by hand in Dropbox, a fresh one is created at the
+expected path. Merging two customers (`crm_merge_customers`) re-points the
+jobs and therefore moves their folders under the kept customer's name.
+
+Status after the first backfill (2026-09-12): 36 job folders `ready`,
+102 photos `mirrored`, 0 failed.
+
 ## Original setup — the library sync (kept for reference)
 
 Cost **$0** (a free Dropbox Basic account); about 15 minutes, all Devon's.
