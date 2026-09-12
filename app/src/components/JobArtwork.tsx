@@ -103,7 +103,7 @@ export function JobArtwork({ job }: { job: Job }) {
             <AppText variant="bodyStrong">
               {url ? 'Cartoon of this property' : 'Placeholder illustration'}
             </AppText>
-            <AppText variant="caption" color={colors.textMuted}>
+            <AppText variant="caption" color={colors.textSecondary}>
               {row?.status === 'failed'
                 ? (row.error ?? 'Last attempt failed.')
                 : url

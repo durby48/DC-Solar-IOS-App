@@ -242,7 +242,7 @@ export function LogHoursSheet({
                     <Ionicons
                       name={on ? 'checkbox' : 'square-outline'}
                       size={22}
-                      color={on ? hr.fg : colors.borderStrong}
+                      color={on ? hr.fg : colors.textMuted}
                     />
                     <AppText
                       variant={on ? 'bodyStrong' : 'body'}

@@ -383,11 +383,17 @@ const styles = StyleSheet.create({
   step: {
     marginTop: spacing.xs,
   },
+  // The QR is black modules on a transparent SVG, so it needs a WHITE tile
+  // with a quiet zone — the one place on the dark palette that stays white.
+  // The border is the quiet zone: RN draws the image inside it.
   qr: {
-    width: 200,
-    height: 200,
+    width: 216,
+    height: 216,
     alignSelf: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: colors.white,
+    borderWidth: spacing.sm,
+    borderColor: colors.white,
+    borderRadius: radii.sm,
   },
   keyBox: {
     backgroundColor: colors.surfaceSunk,

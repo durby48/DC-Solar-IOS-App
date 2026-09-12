@@ -345,12 +345,14 @@ export default function ChecklistScreen() {
                         />
                         <AppText
                           variant="bodyStrong"
-                          color={missing ? colors.danger : colors.textPrimary}
+                          color={missing ? colors.coralDeep : colors.textPrimary}
                           style={styles.itemName}>
                           {item.name}
                         </AppText>
+                        {/* coralDeep on the danger-tinted row: terracotta text on
+                            its own tint is only 4.1:1. The icon keeps danger. */}
                         {missing ? (
-                          <AppText variant="section" color={colors.danger}>
+                          <AppText variant="section" color={colors.coralDeep}>
                             Missing
                           </AppText>
                         ) : null}

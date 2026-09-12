@@ -435,7 +435,7 @@ function ReceivablesTiles({
               style={styles.tile}
             />
             {tile.note ? (
-              <AppText variant="caption" color={colors.textMuted} style={styles.note}>
+              <AppText variant="caption" color={colors.textSecondary} style={styles.note}>
                 {tile.note}
               </AppText>
             ) : null}

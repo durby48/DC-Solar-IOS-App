@@ -173,10 +173,12 @@ export function Dialpad({
         disabled={!canCall}
         accessibilityLabel="Call"
         style={({ pressed }) => [styles.callButton, !canCall && styles.callDisabled, pressed && canCall && styles.pressed]}>
+        {/* Dark glyph on the green pastel; muted glyph on the dark disabled disc
+            (the keypad's default state — fewer than three digits typed). */}
         {callBusy ? (
-          <ActivityIndicator color={colors.textInverse} />
+          <ActivityIndicator color={canCall ? colors.textInverse : colors.textMuted} />
         ) : (
-          <Ionicons name="call" size={28} color={colors.textInverse} />
+          <Ionicons name="call" size={28} color={canCall ? colors.textInverse : colors.textMuted} />
         )}
       </Pressable>
     </View>

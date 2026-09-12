@@ -236,7 +236,7 @@ function PipelineCard({
             color={
               (stage === 'Complete' && completedOn) || next
                 ? colors.accentPrimary
-                : colors.textMuted
+                : colors.textSecondary
             }>
             {nextLabel}
           </AppText>
@@ -272,7 +272,7 @@ function PipelineCard({
             <>
               <View style={styles.statRow}>
                 <View style={styles.stat}>
-                  <AppText variant="section" color={colors.textMuted} style={styles.statLabel}>
+                  <AppText variant="section" color={colors.textSecondary} style={styles.statLabel}>
                     Overhead
                   </AppText>
                   <AppText variant="numeric">
@@ -280,7 +280,7 @@ function PipelineCard({
                   </AppText>
                 </View>
                 <View style={styles.stat}>
-                  <AppText variant="section" color={colors.textMuted} style={styles.statLabel}>
+                  <AppText variant="section" color={colors.textSecondary} style={styles.statLabel}>
                     Hours logged
                   </AppText>
                   <AppText variant="numeric">{labor ? formatHours(labor.hours) : '—'}</AppText>
@@ -301,13 +301,13 @@ function PipelineCard({
           {company ? null : (
             <View style={styles.statRow}>
               <View style={styles.stat}>
-                <AppText variant="section" color={colors.textMuted} style={styles.statLabel}>
+                <AppText variant="section" color={colors.textSecondary} style={styles.statLabel}>
                   Modules
                 </AppText>
                 <AppText variant="numeric">{modules ?? '—'}</AppText>
               </View>
               <View style={styles.stat}>
-                <AppText variant="section" color={colors.textMuted} style={styles.statLabel}>
+                <AppText variant="section" color={colors.textSecondary} style={styles.statLabel}>
                   Est. hours
                 </AppText>
                 <AppText variant="numeric">
@@ -337,7 +337,7 @@ function PipelineCard({
                   ['Paid', formatCurrency(money.paid)],
                 ] as [string, string][]).map(([label, value]) => (
                   <View key={label} style={styles.moneyCell}>
-                    <AppText variant="section" color={colors.textMuted} style={styles.statLabel}>
+                    <AppText variant="section" color={colors.textSecondary} style={styles.statLabel}>
                       {label}
                     </AppText>
                     <AppText variant="bodyStrong" style={styles.numeric}>
@@ -352,7 +352,7 @@ function PipelineCard({
                 </AppText>
               ) : null}
               <View style={styles.profitRowNew}>
-                <AppText variant="section" color={colors.textMuted} style={styles.statLabel}>
+                <AppText variant="section" color={colors.textSecondary} style={styles.statLabel}>
                   Profit
                 </AppText>
                 <AppText

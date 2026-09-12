@@ -507,7 +507,9 @@ const styles = StyleSheet.create({
   bubbleOut: { backgroundColor: colors.skySoft },
   bubbleText: { color: colors.ink, fontSize: 15, fontWeight: '500', lineHeight: 21 },
   bubbleMeta: { color: colors.inkSoft, fontSize: 11, fontWeight: '600' },
-  bubbleError: { color: colors.danger, fontSize: 12, fontWeight: '700' },
+  // coralDeep, not danger: this only ever appears on the tinted outbound
+  // bubble, where terracotta falls under 4.5:1.
+  bubbleError: { color: colors.coralDeep, fontSize: 12, fontWeight: '700' },
   bubbleImage: {
     width: 200,
     height: 150,

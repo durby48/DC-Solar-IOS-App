@@ -64,7 +64,7 @@ export function ThreadRow({
           <Ionicons
             name={selected ? 'checkbox' : 'square-outline'}
             size={20}
-            color={selected ? hubColors.crm.fg : colors.borderStrong}
+            color={selected ? hubColors.crm.fg : colors.textMuted}
           />
         </Pressable>
       ) : null}
@@ -80,7 +80,7 @@ export function ThreadRow({
         <Ionicons
           name={item.starred ? 'star' : 'star-outline'}
           size={18}
-          color={item.starred ? colors.amber : colors.borderStrong}
+          color={item.starred ? colors.amber : colors.textMuted}
         />
       </Pressable>
       <Pressable
@@ -128,9 +128,11 @@ const styles = StyleSheet.create({
   who: { flex: 1, color: colors.inkSoft, fontSize: 14, fontWeight: '600' },
   strong: { color: colors.ink, fontWeight: '800' },
   draftTag: { color: colors.danger, fontWeight: '800' },
-  count: { color: colors.textMuted, fontSize: 11, fontWeight: '800' },
-  time: { color: colors.textMuted, fontSize: 11, fontWeight: '700' },
+  // inkSoft rather than textMuted: these also sit on the tinted active /
+  // selected rows, where textMuted drops under 4.5:1.
+  count: { color: colors.inkSoft, fontSize: 11, fontWeight: '800' },
+  time: { color: colors.inkSoft, fontSize: 11, fontWeight: '700' },
   timeUnread: { color: hubColors.crm.fg },
   subject: { color: colors.ink, fontSize: 14, fontWeight: '600' },
-  snippet: { color: colors.textMuted, fontSize: 13, fontWeight: '500' },
+  snippet: { color: colors.inkSoft, fontSize: 13, fontWeight: '500' },
 });

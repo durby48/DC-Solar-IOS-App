@@ -716,7 +716,7 @@ export function MediaLightbox({
                 ]}>
                 <AppText
                   variant="button"
-                  color={confirmArchive ? colors.white : colors.danger}>
+                  color={confirmArchive ? colors.textInverse : colors.danger}>
                   {confirmArchive ? 'Tap again to archive' : 'Archive'}
                 </AppText>
               </Pressable>

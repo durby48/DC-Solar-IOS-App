@@ -174,7 +174,18 @@ export function PnlSheet({
               <AppText variant="section" color={colors.ink}>
                 All jobs
               </AppText>
-              <AppText variant="bodyStrong" color={pctColor(totals.pct)} style={styles.figure}>
+              {/* The deeper pastels here, not pctColor's success/danger: this row
+                  sits on the sunLight tint, where those fall under 4.5:1. */}
+              <AppText
+                variant="bodyStrong"
+                color={
+                  totals.pct === null
+                    ? colors.textPrimary
+                    : totals.pct >= 0
+                      ? colors.mintDeep
+                      : colors.coralDeep
+                }
+                style={styles.figure}>
                 {pctLabel(totals.pct)}
               </AppText>
             </View>

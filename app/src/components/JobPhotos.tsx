@@ -324,7 +324,7 @@ export function JobPhotos({ jobId }: { jobId: string }) {
                 styles.webButton,
                 pressed && styles.addButtonPressed,
               ]}>
-              <Ionicons name="images" size={18} color={colors.ink} />
+              <Ionicons name="images" size={18} color={colors.textOnAction} />
               <Text style={styles.addButtonText}>Library</Text>
             </Pressable>
           </View>
@@ -423,7 +423,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   confirmStripText: {
-    color: colors.white,
+    color: colors.textInverse,
     fontSize: 10,
     fontWeight: '800',
     textAlign: 'center',

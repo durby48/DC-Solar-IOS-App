@@ -202,7 +202,7 @@ function BoardCard({
 
   return (
     <Card padded={false}>
-      <PropertyArt seed={job.id} imageUrl={artUrl} radius={radii.md} scrim={0.8} />
+      <PropertyArt seed={job.id} imageUrl={artUrl} radius={radii.md} scrim={0.92} />
       <AnimatedPressable
         onPress={open}
         haptic="tapLight"

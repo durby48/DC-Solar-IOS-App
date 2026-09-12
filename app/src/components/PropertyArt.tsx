@@ -189,7 +189,7 @@ export function PropertyArt({
   seed,
   imageUrl,
   radius,
-  scrim = 0.62,
+  scrim = 0.85,
 }: {
   /** Stable per-job seed — pass the job id. */
   seed: string;
@@ -198,8 +198,11 @@ export function PropertyArt({
   radius: number;
   /**
    * Darkness over the art, 0–1 — the art itself stays daylight, so the card's
-   * light text needs a charcoal wash to sit on. The default suits a
-   * full-width phone card; the web board passes more because its type is
+   * light text needs a charcoal wash to sit on. It has to be heavier than the
+   * old white wash was: 0.85 over the pale art lands the ground near #3B,
+   * which gives `textSecondary` 5:1 and `textPrimary` 9:1; at 0.62 the ground
+   * was a mid grey that muted captions read on at under 2:1. The default suits
+   * a full-width phone card; the web board passes more because its type is
    * smaller and denser.
    */
   scrim?: number;
@@ -234,7 +237,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(30,26,23,0.62)',
+    backgroundColor: 'rgba(30,26,23,0.85)',
   },
   topScrim: {
     position: 'absolute',

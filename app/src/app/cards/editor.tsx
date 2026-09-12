@@ -930,8 +930,8 @@ function ToggleRow({
       <Switch
         value={value}
         onValueChange={onValueChange}
-        trackColor={{ false: colors.border, true: colors.oliveMid }}
-        thumbColor={colors.surface}
+        trackColor={{ false: colors.borderStrong, true: colors.oliveMid }}
+        thumbColor={colors.white}
         accessibilityLabel={title}
       />
     </View>

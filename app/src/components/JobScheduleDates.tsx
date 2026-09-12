@@ -328,7 +328,7 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
                             value={editDraftTime ?? new Date()}
                             mode="time"
                             display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                            themeVariant="light"
+                            themeVariant="dark"
                             onChange={(event, selected) => {
                               if (Platform.OS !== 'ios') setEditPickerOpen(false);
                               if (event.type === 'set' && selected) {
@@ -446,7 +446,7 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
                   }
                   mode={pickerMode}
                   display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  themeVariant="light"
+                  themeVariant="dark"
                   onChange={(event, selected) => {
                     if (Platform.OS !== 'ios') setPickerMode(null);
                     if (event.type === 'set' && selected) {

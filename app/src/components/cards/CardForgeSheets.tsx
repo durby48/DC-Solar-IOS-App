@@ -474,8 +474,8 @@ export function SyncJobsSheet({
           value={generateArt}
           onValueChange={setGenerateArt}
           disabled={busy}
-          trackColor={{ false: colors.border, true: colors.oliveMid }}
-          thumbColor={colors.surface}
+          trackColor={{ false: colors.borderStrong, true: colors.oliveMid }}
+          thumbColor={colors.white}
           accessibilityLabel="Also generate artwork"
         />
       </View>

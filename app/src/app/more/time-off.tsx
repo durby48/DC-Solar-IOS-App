@@ -399,7 +399,7 @@ export default function TimeOffScreen() {
                           }
                           mode="date"
                           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                          themeVariant="light"
+                          themeVariant="dark"
                           onChange={(event, selected) => {
                             if (Platform.OS !== 'ios') setPickerMode(null);
                             if (event.type === 'set' && selected) {

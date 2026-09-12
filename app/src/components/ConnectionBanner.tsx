@@ -114,7 +114,9 @@ const styles = StyleSheet.create({
   body: { color: 'rgba(30,26,23,0.85)', fontSize: 11, lineHeight: 15, fontWeight: '600' },
   bodyDark: { color: colors.textOnAction },
   retry: {
-    backgroundColor: 'rgba(0,0,0,0.16)',
+    // A LIGHT well: darkening the terracotta pulls the dark Retry label under
+    // 4:1; a white wash lifts it to 7:1 and reads as a button on both fills.
+    backgroundColor: 'rgba(255,255,255,0.22)',
     borderRadius: radii.pill,
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: spacing.xs,

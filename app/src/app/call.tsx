@@ -367,7 +367,7 @@ export default function CallScreen() {
                     <ActivityIndicator color={colors.textOnAction} size="small" />
                   ) : (
                     <>
-                      <Ionicons name="call" size={16} color={colors.ink} />
+                      <Ionicons name="call" size={16} color={colors.textOnAction} />
                       <Text style={styles.bridgeButtonText}>Ring my cell, then connect them</Text>
                     </>
                   )}

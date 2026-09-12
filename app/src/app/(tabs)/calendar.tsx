@@ -296,7 +296,7 @@ export default function CalendarScreen() {
 
   const note = (message: string) => (
     <Card tone="sunk">
-      <AppText variant="body" color={colors.textMuted}>
+      <AppText variant="body" color={colors.textSecondary}>
         {message}
       </AppText>
     </Card>
