@@ -16,6 +16,7 @@
  * implementations share one contract.
  */
 
+import { requireOptionalNativeModule } from 'expo-modules-core';
 import { Platform } from 'react-native';
 
 import type { DeviceContact, DeviceContactsResult } from './deviceContacts';
@@ -33,9 +34,16 @@ let legacy: Legacy | null = null;
 function loadLegacy(): Legacy | null {
   if (legacy) return legacy;
   if (Platform.OS === 'web') return null;
+  // Ask for the native module WITHOUT evaluating the package first. Build 32
+  // excludes expo-contacts from autolinking (HANDOFF: its framework links
+  // Testing.framework), and evaluating `expo-contacts/legacy` on a binary
+  // without it runs `requireNativeModule('ExpoContacts')` and
+  // `requireNativeView('ExpoContactAccessButton')` at module load — that
+  // crashed the app the moment Phone → Contacts mounted.
+  if (!requireOptionalNativeModule('ExpoContacts')) return null;
   try {
     // Static require, resolved at bundle time; wrapped so a binary without
-    // the native module (anything before build 31) surfaces as "unsupported".
+    // the native module surfaces as "unsupported".
     legacy = require('expo-contacts/legacy') as Legacy;
     return legacy;
   } catch {

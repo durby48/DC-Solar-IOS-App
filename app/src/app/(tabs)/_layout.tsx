@@ -181,6 +181,9 @@ export default function TabsLayout() {
 
   return (
     <Tabs
+      // "Back" from a hidden tab (Customers, opened from the Menu or the CRM
+      // hub) returns to the tab it was opened from, not always to Home.
+      backBehavior="history"
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.olive,
