@@ -330,8 +330,9 @@ export default function FinancialsScreen() {
       const ym = run.payday.slice(0, 7);
       const rows = byMonth.get(ym) ?? [];
       rows.push({
-        id: `run-${run.payday}`,
-        title: `Payroll — paid ${formatShortDate(run.payday)}`,
+        // One row per receipt: a regular run and a correction can share a payday.
+        id: `run-${run.receiptId ?? `${run.periodEnd}-${run.payday}`}`,
+        title: `${run.kind === 'off_cycle' ? 'Off-cycle payroll' : 'Payroll'} — paid ${formatShortDate(run.payday)}`,
         caption: `period ${formatShortDate(run.periodStart)} – ${formatShortDate(run.periodEnd)}`,
         amount: run.totalWithdrawn,
       });
