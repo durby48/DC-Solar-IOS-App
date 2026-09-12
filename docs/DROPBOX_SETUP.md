@@ -148,9 +148,11 @@ pull photos *from*.
 | `{}` or `{usage, full, limit}` | the original nightly library sync — unchanged | `{ok, results:[…]}` |
 | `{action:'ensure_job_folder', job_id}` | create/adopt the job's folder | `{ok, path}`; 422 permanent / 502 retryable |
 | `{action:'mirror_photo', photo_id}` | folder first, then copy the photo | `{ok, path}`; 422 / 502 |
-| `{action:'retry_mirrors', limit?}` | drain queued/failed (< 5 attempts), 25 per call by default, max 100 | `{ok, folders:{tried,ready,failed}, photos:{tried,mirrored,failed}, errors:[…]}` |
-| `{action:'backfill_job_folders', limit?, reset_failed?}` | enqueue every job without a row, then drain | as above + `enqueued`, `pending`, `hint` |
+| `{action:'mirror_receipt', receipt_id}` | month folder first, then copy the receipt to `/DC Solar/Receipts/<YYYY-MM>/` (see *Receipts*) | `{ok, path}`; 422 / 502 |
+| `{action:'retry_mirrors', limit?}` | drain queued/failed (< 5 attempts) of both sources, 25 per call by default, max 100 | `{ok, folders:{tried,ready,failed}, photos:{tried,mirrored,failed}, receipts:{tried,mirrored,failed}, errors:[…]}` |
+| `{action:'backfill_job_folders', limit?, reset_failed?}` | enqueue every job without a row, then drain | as above + `enqueued`, `pending:{folders,photos,receipts}`, `hint` |
 | `{action:'backfill_photo_mirrors', limit?, reset_failed?}` | enqueue every photo without a row, then drain | same |
+| `{action:'backfill_receipt_mirrors', limit?, reset_failed?}` | enqueue every receipt (with a file) without a row, then drain | same |
 
 Every action answers **`503 not_configured`** when `integration_secrets` has
 no Dropbox row — rows stay queued, nothing is counted as an attempt. A missing
@@ -237,6 +239,93 @@ jobs and therefore moves their folders under the kept customer's name.
 
 Status after the first backfill (2026-09-12): 36 job folders `ready`,
 102 photos `mirrored`, 0 failed.
+
+---
+
+## Receipts (2026-09-12, later the same day)
+
+Devon: "every receipt uploaded by us employees goes into a dropbox folder for
+just receipts." Employee receipts (the field app's Receipts screen, private
+`receipts` bucket, `receipts` table) now ride the same queue, the same cron
+and the same append-only rule as job photos — migration
+`2026-09-12_dropbox_receipts.sql`, function actions `mirror_receipt` and
+`backfill_receipt_mirrors`.
+
+**Folder layout.** One folder per month, nothing per employee or per job:
+
+```
+/DC Solar/Receipts/2026-09/2026-09-11 Isaiah tools DC-26030 123.45.jpg
+/DC Solar/Receipts/2026-09/2026-09-11 Isaiah fuel 60.00.jpg
+                   └ month │          │      │     │       └ amount (2 dp)
+                           └ day      │      │     └ job number, only when the
+                                      │      │       receipt was tied to a job
+                                      │      └ category (materials/fuel/tools/
+                                      │        supplies/vehicle/meals/other)
+                                      └ submitter's first name (employees.
+                                        display_name; email local part if none)
+```
+
+The day and month are the **Kansas City** calendar day of the submission
+(receipts are bookkeeping; a 9 p.m. fuel stop should not file under
+tomorrow). Every segment is sanitised like the job folders; the extension is
+whatever the app stored (always `.jpg` today). Two identical names on one day
+→ Dropbox's autorename appends ` (1)`. The month folder is created on first
+use and simply reused if it already exists (made by hand or by an earlier
+attempt) — it has no bookkeeping row of its own.
+
+**Trigger.** `receipts_dropbox_mirror_trg` (AFTER INSERT on `receipts`):
+inserts a `dropbox_photo_mirrors` row with `source = 'receipt'`,
+`receipt_id`, `storage_bucket = 'receipts'`, status `queued`, then POSTs
+`{action:'mirror_receipt', receipt_id}` through `dropbox_sync_post()`. Same
+never-fail-the-write discipline: errors are swallowed, the row is the queue,
+the 15-minute `dropbox-mirror-retry` cron drains rows of **both** sources
+(the function branches on `source`). A receipt submitted without a photo has
+nothing to mirror and gets no row.
+
+**Table change** (`dropbox_photo_mirrors`): `+ source` (`job_photo` |
+`receipt`, default `job_photo`), `+ receipt_id` (→ receipts, CASCADE, unique
+when set), `job_id` now nullable (a receipt need not have a job), and a check
+that a receipt row has `receipt_id` and no `photo_id` while a photo row has
+`job_id` and no `receipt_id`. Admin SELECT only, as before.
+`dropbox_enqueue_receipts(p_limit, p_reset_failed)` is the backfill's enqueue
+half (service role only).
+
+**Deploy order.** The function reads mirror rows with `select *` and treats
+a missing `source` as a job photo, so it is safe either way; the cleanest
+order is:
+
+1. `supabase functions deploy dropbox-sync` (from the repo root)
+2. apply `supabase/migrations/2026-09-12_dropbox_receipts.sql` (no secret
+   placeholder in this one)
+3. backfill the receipts that predate the trigger:
+
+```
+curl -X POST "https://kjamxfezsathrsbztiln.supabase.co/functions/v1/dropbox-sync" \
+  -H "x-sync-secret: $SECRET" -H "content-type: application/json" \
+  -d '{"action":"backfill_receipt_mirrors","limit":50,"reset_failed":true}'
+```
+
+Repeat until `pending.receipts` is 0, or let the cron finish it. Re-runnable:
+a receipt already `mirrored` costs no Dropbox call. The reply's `receipts:
+{tried, mirrored, failed}` sits beside the existing `photos` counter, and
+`retry_mirrors` now reports both.
+
+**Watching it.**
+
+```sql
+select source, status, count(*) from public.dropbox_photo_mirrors group by 1, 2 order by 1, 2;
+select status, attempts, dropbox_path_display, last_error
+  from public.dropbox_photo_mirrors where source = 'receipt'
+ order by updated_at desc limit 20;
+```
+
+**Not done on purpose.** Approving, rejecting or deleting a receipt in the
+app does nothing in Dropbox — the copy stays where it was filed (append-only,
+like photos; status lives in the app). Re-linking a receipt to a different
+job after the fact does not rename the file. Receipts without a photo are not
+represented in Dropbox at all. The month folder is by submission date, not
+the date printed on the receipt. Nothing under `/DC Solar/Receipts` is ever
+read back into the app.
 
 ## Original setup — the library sync (kept for reference)
 

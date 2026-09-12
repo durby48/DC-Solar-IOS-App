@@ -79,6 +79,24 @@
  * Dropbox answers `missing_scope`; the row is marked failed with a message
  * that says exactly that, and nothing else in the app is affected.
  *
+ * ─────────────────────────────────────────────────────────────────────────
+ * 2026-09-12 (later): RECEIPTS
+ * ─────────────────────────────────────────────────────────────────────────
+ * Devon: "every receipt uploaded by us employees goes into a dropbox folder
+ * for just receipts." Same queue table (dropbox_photo_mirrors, now with a
+ * `source` column), same retry cron, same append-only rule.
+ *
+ *   { action: 'mirror_receipt', receipt_id }
+ *       download the receipt file from the private `receipts` bucket, make
+ *       sure `/DC Solar/Receipts/<YYYY-MM>` exists (adopted if it already
+ *       does), upload it as
+ *       `<YYYY-MM-DD> <first name> <category> [<job number>] <amount>.<ext>`
+ *       (mode add, autorename), record it on the row.
+ *   { action: 'backfill_receipt_mirrors', limit?, reset_failed? }
+ *       enqueue every existing receipt with a file and no row
+ *       (dropbox_enqueue_receipts RPC), then drain. Re-runnable.
+ *   retry_mirrors / the backfills drain rows of BOTH sources.
+ *
  * Never logged: photo bytes, tokens. Errors quote at most 300 chars of the
  * Dropbox reply, which never contains either.
  *
@@ -103,6 +121,12 @@ const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
 /** Root of the per-job folders, inside the Dropbox app folder. */
 const JOBS_ROOT = '/DC Solar/Jobs';
+/** Root of the receipts archive; one subfolder per month (`<YYYY-MM>`). */
+const RECEIPTS_ROOT = '/DC Solar/Receipts';
+/** The private bucket the field app uploads receipt photos to. */
+const RECEIPTS_BUCKET = 'receipts';
+/** Receipts are filed by the local calendar day, not UTC. */
+const LOCAL_TZ = 'America/Chicago';
 /** A queued/failed row is retried by the cron until it has been tried this often. */
 const MAX_ATTEMPTS = 5;
 /** Rows drained per retry / backfill call. Edge functions have a wall clock. */
@@ -519,17 +543,21 @@ type Action =
   | 'sync'
   | 'ensure_job_folder'
   | 'mirror_photo'
+  | 'mirror_receipt'
   | 'retry_mirrors'
   | 'backfill_job_folders'
-  | 'backfill_photo_mirrors';
+  | 'backfill_photo_mirrors'
+  | 'backfill_receipt_mirrors';
 
 const ACTIONS: Action[] = [
   'sync',
   'ensure_job_folder',
   'mirror_photo',
+  'mirror_receipt',
   'retry_mirrors',
   'backfill_job_folders',
   'backfill_photo_mirrors',
+  'backfill_receipt_mirrors',
 ];
 
 interface JobFolderRow {
@@ -543,16 +571,28 @@ interface JobFolderRow {
   last_error: string | null;
 }
 
+/**
+ * One dropbox_photo_mirrors row. `source`/`receipt_id` arrive with migration
+ * 2026-09-12_dropbox_receipts.sql; rows are read with `select('*')` so this
+ * code works before AND after that migration (a missing `source` means a job
+ * photo). `job_id` is null for a receipt that was not tied to a job.
+ */
 interface MirrorRow {
   id: string;
+  source?: 'job_photo' | 'receipt' | null;
   photo_id: string | null;
-  job_id: string;
+  receipt_id?: string | null;
+  job_id: string | null;
   company: string;
   storage_bucket: string;
   storage_path: string;
   status: 'queued' | 'mirrored' | 'failed' | 'skipped';
   attempts: number;
   last_error: string | null;
+}
+
+function mirrorSource(row: MirrorRow): 'job_photo' | 'receipt' {
+  return row.source === 'receipt' ? 'receipt' : 'job_photo';
 }
 
 interface DropboxReply {
@@ -889,8 +929,10 @@ async function mirrorPhoto(
   token: string,
   target: { photoId?: string; row?: MirrorRow },
 ): Promise<StepResult> {
-  const MIRROR_COLUMNS =
-    'id, photo_id, job_id, company, storage_bucket, storage_path, status, attempts, last_error';
+  // `*`, not a column list: the receipts migration adds columns, and this
+  // must keep working during the minutes between deploying the function and
+  // applying it (see the MirrorRow comment).
+  const MIRROR_COLUMNS = '*';
   let row = target.row ?? null;
 
   if (!row && target.photoId) {
@@ -931,8 +973,14 @@ async function mirrorPhoto(
     }
   }
   if (!row) return { ok: false, error: 'Nothing to mirror.', permanent: true };
+  if (mirrorSource(row) === 'receipt') return mirrorReceipt(admin, token, { row });
   if (row.status === 'mirrored') return { ok: true, error: null };
   if (row.status === 'skipped') return { ok: false, error: row.last_error, permanent: true };
+  if (!row.job_id) {
+    const error = 'Photo mirror row has no job.';
+    await markMirror(admin, row.id, { status: 'skipped', last_error: error }, false);
+    return { ok: false, error, permanent: true };
+  }
 
   // --- folder first -------------------------------------------------------
   const folder = await ensureJobFolder(admin, token, row.job_id);
@@ -1043,9 +1091,302 @@ async function mirrorPhoto(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Receipts (2026-09-12, later) — `/DC Solar/Receipts/<YYYY-MM>/…`
+// ---------------------------------------------------------------------------
+
+interface ReceiptRef {
+  id: string;
+  company: string | null;
+  employee: string;
+  job_id: string | null;
+  amount: number | string | null;
+  category: string | null;
+  storage_path: string | null;
+  created_at: string;
+}
+
+/** `YYYY-MM-DD` on the Kansas City calendar; UTC if the runtime lacks tz data. */
+function localDay(iso: string | null): string {
+  const d = iso ? new Date(iso) : new Date();
+  const date = Number.isNaN(d.getTime()) ? new Date() : d;
+  try {
+    // en-CA formats as YYYY-MM-DD.
+    const s = new Intl.DateTimeFormat('en-CA', {
+      timeZone: LOCAL_TZ,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  } catch {
+    // fall through
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+/** The file extension the app stored the receipt under; jpg when unreadable. */
+function receiptExtension(storagePath: string): string {
+  const ext = extensionOf(storagePath) ?? '';
+  return /^[a-z0-9]{2,5}$/.test(ext) ? ext : 'jpg';
+}
+
+/**
+ * `2026-09-11 Isaiah tools DC-26030 123.45.jpg`: the day, the submitter's
+ * first name, the category, the job number when the receipt has a job, and
+ * the amount. Every segment is sanitised; anything empty is left out. Two
+ * identical names on one day → Dropbox autorename appends " (1)".
+ */
+function receiptFileName(
+  receipt: ReceiptRef,
+  firstName: string | null,
+  jobNumber: string | null,
+): string {
+  const amountNum = Number(receipt.amount);
+  const amount = Number.isFinite(amountNum) ? amountNum.toFixed(2) : '';
+  const parts = [
+    localDay(receipt.created_at),
+    sanitizeSegment(firstName).replace(/\./g, ''),
+    sanitizeSegment(receipt.category) || 'receipt',
+    sanitizeSegment(jobNumber),
+    amount,
+  ].filter((p) => p.length > 0);
+  const base = sanitizeSegment(parts.join(' ')) || 'receipt';
+  return `${base}.${receiptExtension(receipt.storage_path ?? '')}`;
+}
+
+/** "Isaiah Smith" → "Isaiah"; no display name → the email's local part. */
+function firstNameOf(displayName: string | null, email: string): string {
+  const fromName = (displayName ?? '').trim().split(/\s+/)[0] ?? '';
+  if (fromName) return fromName;
+  const local = email.split('@')[0] ?? '';
+  return local.split(/[._+-]/)[0] || local || 'employee';
+}
+
+/**
+ * Make sure `/DC Solar/Receipts/<YYYY-MM>` exists. A folder that already
+ * exists (409 path/conflict/folder) is simply used — never duplicated. The
+ * month folders carry no bookkeeping row: the file's Dropbox path is
+ * recorded on the mirror row and that is enough. `ensured` lets one drain
+ * skip the call after the first receipt of a month.
+ */
+async function ensureReceiptsMonthFolder(
+  token: string,
+  monthPath: string,
+  ensured?: Set<string>,
+): Promise<{ ok: true } | { ok: false; error: string; permanent: boolean }> {
+  if (ensured?.has(monthPath)) return { ok: true };
+  const created = await dropboxCall(token, 'files/create_folder_v2', {
+    path: monthPath,
+    autorename: false,
+  });
+  if (created.ok || created.text.includes('path/conflict/folder')) {
+    ensured?.add(monthPath);
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    error: dropboxErrorMessage('files/create_folder_v2', created),
+    permanent: isPermanentDropboxError(created),
+  };
+}
+
+/**
+ * Copy one employee receipt into `/DC Solar/Receipts/<YYYY-MM>/`. Mirrors
+ * mirrorPhoto: the row is the queue; `mode: add` + `autorename: true`, so
+ * nothing in Dropbox is ever overwritten; a receipt deleted, rejected or
+ * re-linked in the app leaves its Dropbox copy exactly where it is.
+ */
+async function mirrorReceipt(
+  admin: SupabaseClient,
+  token: string,
+  target: { receiptId?: string; row?: MirrorRow; ensured?: Set<string> },
+): Promise<StepResult> {
+  const RECEIPT_COLUMNS = 'id, company, employee, job_id, amount, category, storage_path, created_at';
+  let row = target.row ?? null;
+  let receipt: ReceiptRef | null = null;
+
+  if (!row && target.receiptId) {
+    const { data: found } = await admin
+      .from('dropbox_photo_mirrors')
+      .select('*')
+      .eq('receipt_id', target.receiptId)
+      .maybeSingle();
+    row = found as MirrorRow | null;
+
+    if (!row) {
+      // The trigger normally enqueued this; a direct call for an older
+      // receipt (or a trigger that raced) creates the row here.
+      const { data: receiptRow } = await admin
+        .from('receipts')
+        .select(RECEIPT_COLUMNS)
+        .eq('id', target.receiptId)
+        .maybeSingle();
+      receipt = receiptRow as ReceiptRef | null;
+      if (!receipt) return { ok: false, error: 'Receipt not found.', permanent: true };
+      if (!receipt.storage_path) {
+        return { ok: false, error: 'Receipt has no file attached.', permanent: true };
+      }
+      const { data: inserted, error: insErr } = await admin
+        .from('dropbox_photo_mirrors')
+        .insert({
+          source: 'receipt',
+          receipt_id: receipt.id,
+          job_id: receipt.job_id,
+          company: receipt.company ?? COMPANY,
+          storage_bucket: RECEIPTS_BUCKET,
+          storage_path: receipt.storage_path,
+        })
+        .select('*')
+        .single();
+      if (insErr || !inserted) {
+        return {
+          ok: false,
+          error:
+            insErr?.message ??
+            'Could not enqueue the receipt (is migration 2026-09-12_dropbox_receipts.sql applied?).',
+        };
+      }
+      row = inserted as MirrorRow;
+    }
+  }
+  if (!row) return { ok: false, error: 'Nothing to mirror.', permanent: true };
+  if (row.status === 'mirrored') return { ok: true, error: null };
+  if (row.status === 'skipped') return { ok: false, error: row.last_error, permanent: true };
+  if (!row.receipt_id) {
+    const error = 'Receipt mirror row has no receipt_id.';
+    await markMirror(admin, row.id, { status: 'skipped', last_error: error }, false);
+    return { ok: false, error, permanent: true };
+  }
+
+  // --- the receipt itself (for the file name) ------------------------------
+  if (!receipt) {
+    const { data: receiptRow } = await admin
+      .from('receipts')
+      .select(RECEIPT_COLUMNS)
+      .eq('id', row.receipt_id)
+      .maybeSingle();
+    receipt = receiptRow as ReceiptRef | null;
+  }
+  if (!receipt) {
+    // The receipt row is gone (the FK cascades, so this is a race at most).
+    const error = 'Receipt not found.';
+    await markMirror(admin, row.id, { status: 'skipped', last_error: error }, false);
+    return { ok: false, error, permanent: true };
+  }
+
+  // --- download from Storage (service role; the bucket is private) --------
+  const { data: blob, error: dlErr } = await admin.storage
+    .from(row.storage_bucket || RECEIPTS_BUCKET)
+    .download(row.storage_path);
+  if (dlErr || !blob) {
+    const missing = /not found|does not exist|404/i.test(dlErr?.message ?? '');
+    const error = `Could not read ${row.storage_path} from storage: ${dlErr?.message ?? 'no data'}`;
+    await markMirror(
+      admin,
+      row.id,
+      { status: missing ? 'skipped' : 'failed', last_error: error },
+      !missing,
+    );
+    return { ok: false, error, permanent: missing };
+  }
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+
+  // --- name: who, what, which job ------------------------------------------
+  let displayName: string | null = null;
+  if (receipt.employee) {
+    const { data: emp } = await admin
+      .from('employees')
+      .select('display_name')
+      .eq('email', receipt.employee.toLowerCase())
+      .maybeSingle();
+    displayName = (emp as { display_name?: string | null } | null)?.display_name ?? null;
+  }
+  let jobNumber: string | null = null;
+  if (receipt.job_id) {
+    const { data: job } = await admin
+      .from('jobs')
+      .select('job_number')
+      .eq('id', receipt.job_id)
+      .maybeSingle();
+    jobNumber = (job as { job_number?: string | null } | null)?.job_number ?? null;
+  }
+
+  const day = localDay(receipt.created_at);
+  const monthPath = `${RECEIPTS_ROOT}/${day.slice(0, 7)}`;
+  const targetPath = `${monthPath}/${receiptFileName(
+    receipt,
+    firstNameOf(displayName, receipt.employee ?? ''),
+    jobNumber,
+  )}`;
+
+  try {
+    // --- folder first -----------------------------------------------------
+    const folder = await ensureReceiptsMonthFolder(token, monthPath, target.ensured);
+    if (!folder.ok) {
+      await markMirror(admin, row.id, { status: 'failed', last_error: folder.error }, true);
+      return { ok: false, error: folder.error, permanent: folder.permanent };
+    }
+
+    // --- upload to Dropbox -------------------------------------------------
+    const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/octet-stream',
+        'Dropbox-API-Arg': dropboxApiArg({
+          path: targetPath,
+          mode: 'add',
+          autorename: true,
+          mute: true,
+          strict_conflict: false,
+        }),
+      },
+      body: bytes,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      const reply: DropboxReply = { ok: false, status: res.status, body: {}, text };
+      const error = dropboxErrorMessage('files/upload', reply);
+      await markMirror(admin, row.id, { status: 'failed', last_error: error }, true);
+      return { ok: false, error, permanent: isPermanentDropboxError(reply) };
+    }
+    let meta: Record<string, unknown> = {};
+    try {
+      meta = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    } catch {
+      meta = {};
+    }
+    const pathDisplay = typeof meta.path_display === 'string' ? meta.path_display : targetPath;
+    await markMirror(
+      admin,
+      row.id,
+      {
+        status: 'mirrored',
+        last_error: null,
+        dropbox_id: typeof meta.id === 'string' ? meta.id : null,
+        dropbox_path_lower:
+          typeof meta.path_lower === 'string' ? meta.path_lower : targetPath.toLowerCase(),
+        dropbox_path_display: pathDisplay,
+        dropbox_rev: typeof meta.rev === 'string' ? meta.rev : null,
+        content_hash: typeof meta.content_hash === 'string' ? meta.content_hash : null,
+        size_bytes: typeof meta.size === 'number' ? meta.size : bytes.byteLength,
+        mirrored_at: new Date().toISOString(),
+      },
+      false,
+    );
+    return { ok: true, error: null, path: pathDisplay };
+  } catch (e) {
+    const error = e instanceof Error ? e.message : 'Upload to Dropbox failed.';
+    await markMirror(admin, row.id, { status: 'failed', last_error: error }, true);
+    return { ok: false, error };
+  }
+}
+
 interface DrainResult {
   folders: { tried: number; ready: number; failed: number };
   photos: { tried: number; mirrored: number; failed: number };
+  receipts: { tried: number; mirrored: number; failed: number };
   errors: string[];
 }
 
@@ -1059,8 +1400,11 @@ async function drain(admin: SupabaseClient, token: string, limit: number): Promi
   const result: DrainResult = {
     folders: { tried: 0, ready: 0, failed: 0 },
     photos: { tried: 0, mirrored: 0, failed: 0 },
+    receipts: { tried: 0, mirrored: 0, failed: 0 },
     errors: [],
   };
+  // Month folders already confirmed during this drain.
+  const ensuredMonths = new Set<string>();
   // One scope error means every other row will fail the same way; stop
   // burning attempts on them.
   const SCOPE = 'files.content.write';
@@ -1084,20 +1428,25 @@ async function drain(admin: SupabaseClient, token: string, limit: number): Promi
     }
   }
 
+  // Both sources share the queue; each row is routed by `source`.
   const { data: mirrorRows } = await admin
     .from('dropbox_photo_mirrors')
-    .select('id, photo_id, job_id, company, storage_bucket, storage_path, status, attempts, last_error')
+    .select('*')
     .in('status', ['queued', 'failed'])
     .lt('attempts', MAX_ATTEMPTS)
     .order('updated_at', { ascending: true })
     .limit(limit);
   for (const row of (mirrorRows as MirrorRow[] | null) ?? []) {
-    result.photos.tried += 1;
-    const r = await mirrorPhoto(admin, token, { row });
+    const isReceipt = mirrorSource(row) === 'receipt';
+    const bucket = isReceipt ? result.receipts : result.photos;
+    bucket.tried += 1;
+    const r = isReceipt
+      ? await mirrorReceipt(admin, token, { row, ensured: ensuredMonths })
+      : await mirrorPhoto(admin, token, { row });
     if (r.ok) {
-      result.photos.mirrored += 1;
+      bucket.mirrored += 1;
     } else {
-      result.photos.failed += 1;
+      bucket.failed += 1;
       if (r.error && result.errors.length < 5) result.errors.push(r.error);
       if (r.error?.includes(SCOPE)) return result;
     }
@@ -1152,6 +1501,7 @@ Deno.serve(async (req) => {
       limit?: number;
       job_id?: string;
       photo_id?: string;
+      receipt_id?: string;
       reset_failed?: boolean;
     } = {};
     try {
@@ -1188,6 +1538,9 @@ Deno.serve(async (req) => {
     }
     if (action === 'mirror_photo' && !uuidLike.test(String(payload.photo_id ?? ''))) {
       return fail(400, 'bad_request', 'mirror_photo needs a photo_id (uuid).');
+    }
+    if (action === 'mirror_receipt' && !uuidLike.test(String(payload.receipt_id ?? ''))) {
+      return fail(400, 'bad_request', 'mirror_receipt needs a receipt_id (uuid).');
     }
 
     // --- credentials --------------------------------------------------------
@@ -1231,26 +1584,53 @@ Deno.serve(async (req) => {
       return ok({ action, photo_id: payload.photo_id, path: r.path ?? null });
     }
 
+    if (action === 'mirror_receipt') {
+      const r = await mirrorReceipt(admin, token, { receiptId: String(payload.receipt_id) });
+      if (!r.ok) return fail(r.permanent ? 422 : 502, 'dropbox_error', r.error ?? 'Failed.');
+      return ok({ action, receipt_id: payload.receipt_id, path: r.path ?? null });
+    }
+
     if (action === 'retry_mirrors') {
       const drained = await drain(admin, token, drainLimit);
       return ok({ action, ...drained });
     }
 
-    if (action === 'backfill_job_folders' || action === 'backfill_photo_mirrors') {
+    if (
+      action === 'backfill_job_folders' ||
+      action === 'backfill_photo_mirrors' ||
+      action === 'backfill_receipt_mirrors'
+    ) {
       // Enqueue rows for everything that predates the triggers (bounded), then
       // drain. `reset_failed: true` re-queues rows that failed — what you want
       // right after fixing the Dropbox scope.
-      const { data: enqueued, error: enqErr } = await admin.rpc('dropbox_enqueue_backlog', {
-        p_jobs: action === 'backfill_job_folders' ? Math.max(drainLimit, 200) : 0,
-        p_photos: action === 'backfill_photo_mirrors' ? Math.max(drainLimit, 200) : 0,
-        p_reset_failed: payload.reset_failed === true,
-      });
-      if (enqErr) {
-        return fail(
-          500,
-          'server_error',
-          `Could not enqueue the backlog (is migration 2026-09-12_dropbox_job_folders.sql applied?): ${enqErr.message}`,
-        );
+      let enqueued: unknown = null;
+      if (action === 'backfill_receipt_mirrors') {
+        const { data, error: enqErr } = await admin.rpc('dropbox_enqueue_receipts', {
+          p_limit: Math.max(drainLimit, 200),
+          p_reset_failed: payload.reset_failed === true,
+        });
+        if (enqErr) {
+          return fail(
+            500,
+            'server_error',
+            `Could not enqueue the receipts (is migration 2026-09-12_dropbox_receipts.sql applied?): ${enqErr.message}`,
+          );
+        }
+        enqueued = data ?? null;
+      } else {
+        const { data, error: enqErr } = await admin.rpc('dropbox_enqueue_backlog', {
+          p_jobs: action === 'backfill_job_folders' ? Math.max(drainLimit, 200) : 0,
+          p_photos: action === 'backfill_photo_mirrors' ? Math.max(drainLimit, 200) : 0,
+          p_reset_failed: payload.reset_failed === true,
+        });
+        if (enqErr) {
+          return fail(
+            500,
+            'server_error',
+            `Could not enqueue the backlog (is migration 2026-09-12_dropbox_job_folders.sql applied?): ${enqErr.message}`,
+          );
+        }
+        enqueued = data ?? null;
       }
       const drained = await drain(admin, token, drainLimit);
       const { count: pendingFolders } = await admin
@@ -1258,18 +1638,28 @@ Deno.serve(async (req) => {
         .select('job_id', { count: 'exact', head: true })
         .in('status', ['queued', 'failed'])
         .lt('attempts', MAX_ATTEMPTS);
-      const { count: pendingPhotos } = await admin
+      // Total across both sources (works before the receipts migration too);
+      // receipts counted separately when the `source` column exists.
+      const { count: pendingMirrors } = await admin
         .from('dropbox_photo_mirrors')
         .select('id', { count: 'exact', head: true })
         .in('status', ['queued', 'failed'])
         .lt('attempts', MAX_ATTEMPTS);
+      const { count: pendingReceiptsRaw } = await admin
+        .from('dropbox_photo_mirrors')
+        .select('id', { count: 'exact', head: true })
+        .eq('source', 'receipt')
+        .in('status', ['queued', 'failed'])
+        .lt('attempts', MAX_ATTEMPTS);
+      const pendingReceipts = pendingReceiptsRaw ?? 0;
+      const pendingPhotos = Math.max((pendingMirrors ?? 0) - pendingReceipts, 0);
       return ok({
         action,
-        enqueued: enqueued ?? null,
+        enqueued,
         ...drained,
-        pending: { folders: pendingFolders ?? 0, photos: pendingPhotos ?? 0 },
+        pending: { folders: pendingFolders ?? 0, photos: pendingPhotos, receipts: pendingReceipts },
         hint:
-          (pendingFolders ?? 0) + (pendingPhotos ?? 0) > 0
+          (pendingFolders ?? 0) + (pendingMirrors ?? 0) > 0
             ? 'Call again (or wait for the 15-minute cron) until pending is 0.'
             : 'Nothing pending.',
       });

@@ -56,6 +56,8 @@ Two developers push to `main` (Devon's sessions and Carson's). **Always `git pul
 
 **Void rows:** `finance_entries.status = 'void'` is now excluded by every reader (merge cb76841); the one voided row keeps its real amount for the audit trail. **Payroll runs:** unique key is (company, period_end, receipt_id) with `kind` regular/off_cycle, `payroll_through` is the accrual cut-off, and the Hours tab records off-cycle runs (merge 9852a19).
 
+**Receipts → Dropbox (2026-09-12):** every employee receipt photo is mirrored to `/DC Solar/Receipts/<YYYY-MM>/<date> <first name> <category> [<job>] <amount>.jpg` by a trigger on `receipts` + the same `dropbox-sync` function/cron as job photos (migration `2026-09-12_dropbox_receipts.sql`; backfill done for the existing receipts). Append-only: approve/reject/delete in the app never touch Dropbox.
+
 **Books (2026-09-12):** ledger reconciled to the Chase export through 09/11 (proof + backups in that session's scratchpad, rows stamped `extracted.reconciled`); cash anchored to the 09/11 statement; `payroll_runs` complete through the 09/04 run (+ Ben's off-cycle 09/14) — one row per Gusto receipt, `kind` regular/off_cycle, and `company_settings.payroll_through` (advanced by regular runs only) is the single "paid through" for the Financials accrual and the cash position; the Financials chart (Revenue/Profit/Value) rebuilds from rows and follows realtime. Next reconciliation: export Chase again, match new lines the same way, re-anchor.
 
 **Open for Devon (nothing else is blocked on code)**
