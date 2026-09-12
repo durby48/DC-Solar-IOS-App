@@ -404,43 +404,82 @@ export interface PayrollRun {
   kind: 'regular' | 'off_cycle';
 }
 
-/** Recorded runs keyed by period_end. Empty map on any error. */
-export async function fetchPayrollRuns(): Promise<Map<string, PayrollRun>> {
-  const runs = new Map<string, PayrollRun>();
+/**
+ * Every recorded run, newest payday first. One row per Gusto receipt
+ * (2026-09-12): a period can hold its regular run AND any number of off-cycle
+ * corrections, so this is a list, not a map keyed by period_end — that map
+ * let Ben's one-person correction pose as the whole crew's run. Empty on any
+ * error.
+ */
+export async function fetchPayrollRuns(): Promise<PayrollRun[]> {
   try {
     const { data, error } = await supabase
       .from('payroll_runs')
       .select('id, period_start, period_end, payday, gross_wages, total_withdrawn, receipt_id, kind')
-      .eq('company', COMPANY);
-    if (error || !data) return runs;
-    for (const row of data as Record<string, unknown>[]) {
-      const run: PayrollRun = {
-        id: row.id as string,
-        period_start: row.period_start as string,
-        period_end: row.period_end as string,
-        payday: row.payday as string,
-        gross_wages: Number(row.gross_wages) || 0,
-        total_withdrawn: Number(row.total_withdrawn) || 0,
-        receipt_id: (row.receipt_id as string | null) ?? null,
-        kind: row.kind === 'off_cycle' ? 'off_cycle' : 'regular',
-      };
-      runs.set(run.period_end, run);
-    }
-    return runs;
+      .eq('company', COMPANY)
+      .order('payday', { ascending: false });
+    if (error || !data) return [];
+    return (data as Record<string, unknown>[]).map((row) => ({
+      id: row.id as string,
+      period_start: row.period_start as string,
+      period_end: row.period_end as string,
+      payday: row.payday as string,
+      gross_wages: Number(row.gross_wages) || 0,
+      total_withdrawn: Number(row.total_withdrawn) || 0,
+      receipt_id: (row.receipt_id as string | null) ?? null,
+      kind: row.kind === 'off_cycle' ? 'off_cycle' : 'regular',
+    }));
   } catch {
-    return runs;
+    return [];
   }
+}
+
+export interface PeriodRuns {
+  /**
+   * The crew-wide run for the period — the regular run whose period_end
+   * falls inside it (the 08/18–08/28 transition run belongs to the app's
+   * Aug 18–31 period even though it closed early). Newest period_end wins
+   * if there is somehow more than one.
+   */
+  regular: PayrollRun | undefined;
+  /** Corrections / one-person runs whose period_end falls inside the period. */
+  offCycle: PayrollRun[];
+}
+
+/** Split the recorded runs into what belongs to one Hours-tab period. */
+export function runsForPeriod(runs: PayrollRun[], period: PayrollPeriod): PeriodRuns {
+  if (period.pre) return { regular: undefined, offCycle: [] };
+  const inPeriod = runs.filter((r) => r.period_end >= period.start && r.period_end <= period.end);
+  const regulars = inPeriod
+    .filter((r) => r.kind === 'regular')
+    .sort((a, b) => b.period_end.localeCompare(a.period_end));
+  return {
+    regular: regulars[0],
+    offCycle: inPeriod.filter((r) => r.kind === 'off_cycle'),
+  };
 }
 
 export type RecordRunResult = { ok: true } | { ok: false; message: string };
 
+/** Postgres unique_violation, surfaced by PostgREST as the error code. */
+const UNIQUE_VIOLATION = '23505';
+
 /**
- * Record (or correct) a completed payroll run and advance
- * `company_settings.payroll_through` so the cash position stops counting the
- * period's wages as unpaid. Upserts on (company, period_end), so re-saving a
- * period fixes a typo instead of erroring. Admin-only via RLS.
+ * Record (or correct) a completed payroll run. Pass `id` to edit a run the
+ * screen already shows; otherwise the row is upserted on
+ * (company, period_end, receipt_id) — one row per Gusto receipt — so
+ * re-saving the same receipt fixes a typo instead of erroring, and a second
+ * run for the same period (an off-cycle correction) gets its own row instead
+ * of overwriting the first.
+ *
+ * A REGULAR run advances `company_settings.payroll_through` (forward only) so
+ * the accrual estimate in lib/financials.ts and the cash position stop
+ * counting the period's wages as unpaid. An off-cycle run never moves it: it
+ * paid one person, not the crew. Admin-only via RLS.
  */
 export async function recordPayrollRun(params: {
+  /** Existing payroll_runs.id when editing; omit to record a new run. */
+  id?: string;
   periodStart: string;
   periodEnd: string;
   payday: string;
@@ -451,20 +490,32 @@ export async function recordPayrollRun(params: {
   kind?: 'regular' | 'off_cycle';
 }): Promise<RecordRunResult> {
   try {
-    const { error } = await supabase.from('payroll_runs').upsert(
-      {
-        company: COMPANY,
-        period_start: params.periodStart,
-        period_end: params.periodEnd,
-        payday: params.payday,
-        gross_wages: params.grossWages,
-        total_withdrawn: params.totalWithdrawn,
-        receipt_id: params.receiptId,
-        kind: params.kind ?? 'regular',
-      },
-      { onConflict: 'company,period_end,kind' },
-    );
-    if (error) return { ok: false, message: error.message };
+    const kind = params.kind ?? 'regular';
+    const row = {
+      company: COMPANY,
+      period_start: params.periodStart,
+      period_end: params.periodEnd,
+      payday: params.payday,
+      gross_wages: params.grossWages,
+      total_withdrawn: params.totalWithdrawn,
+      receipt_id: params.receiptId,
+      kind,
+    };
+    const { error } = params.id
+      ? await supabase.from('payroll_runs').update(row).eq('id', params.id).eq('company', COMPANY)
+      : await supabase
+          .from('payroll_runs')
+          .upsert(row, { onConflict: 'company,period_end,receipt_id' });
+    if (error) {
+      return {
+        ok: false,
+        message:
+          error.code === UNIQUE_VIOLATION
+            ? 'A run with this receipt ID is already recorded for this period — edit that one instead.'
+            : error.message,
+      };
+    }
+    if (kind !== 'regular') return { ok: true };
 
     // Forward only: recording an OLD run must never rewind the marker.
     const { data: settings } = await supabase

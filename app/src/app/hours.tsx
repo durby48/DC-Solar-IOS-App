@@ -25,6 +25,7 @@ import {
   listPayrollPeriods,
   payrollState,
   recordPayrollRun,
+  runsForPeriod,
   summarizePeriod,
   type HoursData,
   type PayrollRun,
@@ -123,9 +124,13 @@ export default function HoursScreen() {
   const role = useRole();
   const [data, setData] = useState<HoursData | null>(null);
   const [loaded, setLoaded] = useState(false);
-  // Recorded Gusto runs, keyed by period_end (see payroll_runs).
-  const [runs, setRuns] = useState<Map<string, PayrollRun>>(new Map());
+  // Recorded Gusto runs, one per receipt (see payroll_runs); runsForPeriod
+  // splits them into the period's regular run + its off-cycle corrections.
+  const [runs, setRuns] = useState<PayrollRun[]>([]);
   const [runFormOpen, setRunFormOpen] = useState(false);
+  // The run being corrected (null = recording a new one) and its kind.
+  const [editingRun, setEditingRun] = useState<PayrollRun | null>(null);
+  const [runKind, setRunKind] = useState<PayrollRun['kind']>('regular');
   const [runPayday, setRunPayday] = useState('');
   const [runGross, setRunGross] = useState('');
   const [runWithdrawn, setRunWithdrawn] = useState('');
@@ -148,9 +153,9 @@ export default function HoursScreen() {
 
   const load = useCallback(async () => {
     if (role?.isAdmin) {
-      const [hoursData, runMap] = await Promise.all([fetchHoursData(), fetchPayrollRuns()]);
+      const [hoursData, runList] = await Promise.all([fetchHoursData(), fetchPayrollRuns()]);
       setData(hoursData);
-      setRuns(runMap);
+      setRuns(runList);
     } else {
       setData(null);
     }
@@ -177,18 +182,31 @@ export default function HoursScreen() {
     [data, period],
   );
 
-  const recordedRun = period.pre ? undefined : runs.get(period.end);
+  const { regular: recordedRun, offCycle: offCycleRuns } = useMemo(
+    () => runsForPeriod(runs, period),
+    [runs, period],
+  );
 
-  const openRunForm = () => {
-    // Prefill from what the screen already knows: Gusto pays on the period's
-    // payday, and gross is the period's hours × rates. Withdrawn comes off
-    // the pay receipt / Chase and has no in-app source, so it starts blank.
-    setRunPayday(recordedRun?.payday ?? period.payOn ?? '');
+  /**
+   * Open the form to correct `run`, or to record a new run of `kind`. A new
+   * regular run is prefilled from what the screen already knows: Gusto pays
+   * on the period's payday, and gross is the period's hours × rates. An
+   * off-cycle run pays one person, so its gross starts blank. Withdrawn
+   * comes off the pay receipt / Chase and has no in-app source.
+   */
+  const openRunForm = (run: PayrollRun | null, kind: PayrollRun['kind']) => {
+    setEditingRun(run);
+    setRunKind(run?.kind ?? kind);
+    setRunPayday(run?.payday ?? period.payOn ?? '');
     setRunGross(
-      recordedRun ? String(recordedRun.gross_wages) : (overview?.totalPeriodPay ?? 0).toFixed(2),
+      run
+        ? String(run.gross_wages)
+        : kind === 'regular'
+          ? (overview?.totalPeriodPay ?? 0).toFixed(2)
+          : '',
     );
-    setRunWithdrawn(recordedRun ? String(recordedRun.total_withdrawn) : '');
-    setRunReceiptId(recordedRun?.receipt_id ?? '');
+    setRunWithdrawn(run ? String(run.total_withdrawn) : '');
+    setRunReceiptId(run?.receipt_id ?? '');
     setRunMessage(null);
     setRunFormOpen(true);
   };
@@ -207,12 +225,16 @@ export default function HoursScreen() {
     setRunSaving(true);
     setRunMessage(null);
     const result = await recordPayrollRun({
-      periodStart: period.start,
-      periodEnd: period.end,
+      // Editing keeps the run's own dates: the 08/18–08/28 transition run
+      // sits inside the app's Aug 18–31 period and must not be stretched.
+      id: editingRun?.id,
+      periodStart: editingRun?.period_start ?? period.start,
+      periodEnd: editingRun?.period_end ?? period.end,
       payday: runPayday.trim(),
       grossWages: gross,
       totalWithdrawn: withdrawn,
       receiptId: runReceiptId.trim() || null,
+      kind: runKind,
     });
     setRunSaving(false);
     if (result.ok) {
@@ -343,12 +365,29 @@ export default function HoursScreen() {
                 runFormOpen ? (
                   <View style={styles.runForm}>
                     <AppText variant="section" color={colors.textMuted}>
-                      {recordedRun ? 'Correct payroll run' : 'Record payroll run'}
+                      {editingRun ? 'Correct payroll run' : 'Record payroll run'}
                     </AppText>
                     <AppText variant="caption" color={colors.textMuted}>
                       From the Gusto pay receipt. “Total withdrawn” is the run&apos;s whole
-                      withdrawal — net pay plus every tax, both sides.
+                      withdrawal — net pay plus every tax, both sides. A regular run pays the
+                      whole crew and marks the period paid; an off-cycle run (a correction for
+                      one person, a schedule transition) counts in labor but never marks
+                      anyone else&apos;s hours paid.
                     </AppText>
+                    <View style={styles.runKindRow}>
+                      <Chip
+                        label="Regular"
+                        tone="olive"
+                        selected={runKind === 'regular'}
+                        onPress={() => setRunKind('regular')}
+                      />
+                      <Chip
+                        label="Off-cycle"
+                        tone="olive"
+                        selected={runKind === 'off_cycle'}
+                        onPress={() => setRunKind('off_cycle')}
+                      />
+                    </View>
                     <AppText variant="section" color={colors.textMuted} style={styles.runLabel}>
                       Payday (YYYY-MM-DD)
                     </AppText>
@@ -413,27 +452,62 @@ export default function HoursScreen() {
                       )}
                     </View>
                   </View>
-                ) : recordedRun ? (
-                  <View style={styles.runRecordedRow}>
-                    <View style={styles.runRecordedText}>
-                      <AppText variant="caption" color={colors.mintDeep}>
-                        {`Run recorded — ${formatMoney(recordedRun.total_withdrawn)} withdrawn, paid ${formatPayrollDate(recordedRun.payday)}`}
-                      </AppText>
-                      {recordedRun.receipt_id ? (
-                        <AppText variant="caption" color={colors.textMuted} numberOfLines={1}>
-                          {`Receipt ${recordedRun.receipt_id}`}
-                        </AppText>
+                ) : (
+                  <>
+                    {recordedRun ? (
+                      <View style={styles.runRecordedRow}>
+                        <View style={styles.runRecordedText}>
+                          <AppText variant="caption" color={colors.mintDeep}>
+                            {`Run recorded — ${formatMoney(recordedRun.total_withdrawn)} withdrawn, paid ${formatPayrollDate(recordedRun.payday)}`}
+                          </AppText>
+                          {recordedRun.receipt_id ? (
+                            <AppText variant="caption" color={colors.textMuted} numberOfLines={1}>
+                              {`Receipt ${recordedRun.receipt_id}`}
+                            </AppText>
+                          ) : null}
+                        </View>
+                        <Chip
+                          label="Edit"
+                          tone="olive"
+                          onPress={() => openRunForm(recordedRun, 'regular')}
+                        />
+                      </View>
+                    ) : null}
+                    {/* Off-cycle runs sit beside the regular one: they are real
+                        withdrawals (Financials counts them) but pay one person,
+                        so they never stand in for the crew's run. */}
+                    {offCycleRuns.map((run) => (
+                      <View key={run.id} style={styles.runRecordedRow}>
+                        <View style={styles.runRecordedText}>
+                          <AppText variant="caption" color={colors.textMuted}>
+                            {`Off-cycle run — ${formatMoney(run.total_withdrawn)} withdrawn, paid ${formatPayrollDate(run.payday)}`}
+                          </AppText>
+                          {run.receipt_id ? (
+                            <AppText variant="caption" color={colors.textMuted} numberOfLines={1}>
+                              {`Receipt ${run.receipt_id}`}
+                            </AppText>
+                          ) : null}
+                        </View>
+                        <Chip label="Edit" tone="olive" onPress={() => openRunForm(run, 'off_cycle')} />
+                      </View>
+                    ))}
+                    <View style={styles.runButtons}>
+                      <Button
+                        label="Record off-cycle run"
+                        size="sm"
+                        variant="secondary"
+                        onPress={() => openRunForm(null, 'off_cycle')}
+                      />
+                      {!recordedRun ? (
+                        <Button
+                          label="Record payroll run"
+                          size="sm"
+                          variant="secondary"
+                          onPress={() => openRunForm(null, 'regular')}
+                        />
                       ) : null}
                     </View>
-                    <Chip label="Edit" tone="olive" onPress={openRunForm} />
-                  </View>
-                ) : (
-                  <Button
-                    label="Record payroll run"
-                    size="sm"
-                    variant="secondary"
-                    onPress={openRunForm}
-                  />
+                  </>
                 )
               ) : null}
             </Card>
@@ -673,6 +747,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
     alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  runKindRow: {
+    flexDirection: 'row',
     gap: spacing.sm,
     marginTop: spacing.xs,
   },

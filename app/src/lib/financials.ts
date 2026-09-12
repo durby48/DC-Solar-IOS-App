@@ -157,7 +157,7 @@ function byDateDesc(a: LedgerEntry, b: LedgerEntry): number {
  */
 export async function fetchFinancials(): Promise<FinancialsData | null> {
   try {
-    const [{ data, error }, hoursResult, timeResult, employeesResult, runsResult] = await Promise.all([
+    const [{ data, error }, hoursResult, timeResult, employeesResult, runsResult, settingsResult] = await Promise.all([
       supabase
         .from('finance_entries')
         .select(
@@ -183,12 +183,16 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
         .from('payroll_runs')
         .select('period_start, period_end, payday, total_withdrawn, receipt_id, kind')
         .eq('company', COMPANY),
+      // The accrual cut-off. recordPayrollRun (lib/payroll.ts) advances it for
+      // REGULAR runs only; lib/cashPosition.ts reads the same field, so the
+      // Labor tile and "wages worked, unpaid" agree by construction.
+      supabase.from('company_settings').select('payroll_through').eq('company', COMPANY).maybeSingle(),
     ]);
     if (error || !data) return null;
     // Labor = actual withdrawals for every completed payroll run, plus the
     // loaded ESTIMATE (gross × employer burden, lib/laborCost.ts) only for
-    // hours worked after the newest run's period end. With the runs recorded,
-    // the estimate never covers more than the current pay period, so the
+    // hours worked after `payroll_through`. With the runs recorded, the
+    // estimate never covers more than the current pay period, so the
     // Financials headline matches the bank to the penny for everything paid.
     const runRows = (runsResult.data ?? []) as {
       period_start: string;
@@ -208,9 +212,17 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
         kind: (r.kind === 'off_cycle' ? 'off_cycle' : 'regular') as 'regular' | 'off_cycle',
       }))
       .sort((a, b) => b.payday.localeCompare(a.payday));
-    // Only REGULAR runs advance "paid through": an off-cycle correction for
-    // one person must not mark the whole crew's period as paid (2026-09-12).
-    const paidThrough = laborRuns.reduce((max, r) => (r.kind === 'regular' && r.periodEnd > max ? r.periodEnd : max), '');
+    // "Paid through" is company_settings.payroll_through, NOT max(period_end)
+    // over the runs (changed 2026-09-12): an off-cycle correction for one
+    // person shares its period_end with the next regular run, and deriving
+    // the cut-off from the table marked the whole crew's period as paid and
+    // dropped everyone else's hours from the estimate. The newest REGULAR
+    // run's period_end is only a fallback for a database that has runs but
+    // no marker yet.
+    const payrollThrough = (settingsResult.data?.payroll_through as string | null | undefined) ?? '';
+    const paidThrough =
+      payrollThrough ||
+      laborRuns.reduce((max, r) => (r.kind === 'regular' && r.periodEnd > max ? r.periodEnd : max), '');
     const laborPaid = laborRuns.reduce((sum, r) => sum + r.totalWithdrawn, 0);
 
     let unpaidGross = 0;
