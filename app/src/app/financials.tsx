@@ -258,7 +258,9 @@ export default function FinancialsScreen() {
     const after = (e: LedgerEntry) =>
       asOf ? (e.occurred_on ?? '') > asOf : Boolean(anchorAt && e.created_at && e.created_at > anchorAt);
     for (const e of data.allEntries) {
-      if (!after(e)) continue;
+      // fetchFinancials already drops voided rows; guard here too so a
+      // cancelled deposit can never move the bank figure.
+      if (e.status === 'void' || !after(e)) continue;
       const inflow = e.type === 'payment' || (e.type === 'investment' && e.direction !== 'out');
       const outflow =
         (e.type === 'expense' && e.paid_from_bank) || (e.type === 'investment' && e.direction === 'out');

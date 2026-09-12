@@ -149,6 +149,8 @@ export interface FinanceRow {
   occurred_on: string | null;
   /** Tie-breaker when two estimates share an occurred_on. */
   created_at?: string | null;
+  /** 'void' = cancelled; fetchFinanceEntries never returns one, the folds skip it anyway. */
+  status?: string | null;
 }
 
 /**
@@ -178,8 +180,9 @@ export async function fetchFinanceEntries(): Promise<FinanceRow[] | null> {
   try {
     const { data, error } = await supabase
       .from('finance_entries')
-      .select('job_id, type, amount, occurred_on, created_at')
-      .eq('company', COMPANY);
+      .select('job_id, type, amount, occurred_on, created_at, status')
+      .eq('company', COMPANY)
+      .neq('status', 'void');
     if (error || !data) return null;
     return data as FinanceRow[];
   } catch {
@@ -196,7 +199,7 @@ export function moneyByJobFromEntries(rows: FinanceRow[]): Map<string, JobMoney>
   const map = new Map<string, JobMoney>();
   const estimateStamps = new Map<string, { when: string; created: string }>();
   for (const row of rows) {
-    if (!row.job_id) continue;
+    if (!row.job_id || row.status === 'void') continue;
     const entry = map.get(row.job_id) ??
       { estimate: null, estimateCount: 0, invoiced: 0, paid: 0, expenses: 0 };
     const amount = num(row.amount);
@@ -322,6 +325,7 @@ export async function fetchCompanyTotals(
     const bump = (map: Map<string, number>, key: string, amount: number) =>
       map.set(key, (map.get(key) ?? 0) + amount);
     for (const row of rows) {
+      if (row.status === 'void') continue;
       const amount = num(row.amount);
       switch (row.type) {
         case 'estimate': {

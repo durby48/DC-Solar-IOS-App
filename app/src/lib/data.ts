@@ -611,7 +611,8 @@ export async function fetchJobFinance(jobId: string): Promise<JobFinanceSummary 
       .from('finance_entries')
       .select('type, amount, direction, occurred_on, created_at')
       .eq('company', COMPANY)
-      .eq('job_id', jobId);
+      .eq('job_id', jobId)
+      .neq('status', 'void'); // a voided entry is cancelled money — never in the job's P&L
     if (financeError || !finance) return null;
 
     const [hoursRes, timeRes, employeesRes] = await Promise.all([

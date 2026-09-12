@@ -54,6 +54,7 @@ const { data: transitRows } = await client
   .from('finance_entries')
   .select('type, amount, description')
   .eq('company', 'dc-solar')
+  .neq('status', 'void')
   .ilike('description', '%awaiting deposit%');
 const inTransit = (transitRows ?? []).reduce(
   (s, r) => s + (r.type === 'payment' ? Number(r.amount) : -Number(r.amount)),

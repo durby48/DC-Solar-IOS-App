@@ -78,6 +78,7 @@ export async function fetchExpenses(client, { from, to } = {}) {
     .from('finance_entries')
     .select('id, occurred_on, amount, description, job_id, type, direction')
     .eq('company', COMPANY)
+    .neq('status', 'void') // cancelled rows never count — same rule as the app
     .eq('type', 'expense');
   if (from) q = q.gte('occurred_on', from);
   if (to) q = q.lte('occurred_on', to);
@@ -106,6 +107,7 @@ export async function fetchTotals(client) {
       .from('finance_entries')
       .select('amount')
       .eq('company', COMPANY)
+      .neq('status', 'void')
       .eq('type', type);
     if (direction) q = q.eq('direction', direction);
     const { data, error } = await q;

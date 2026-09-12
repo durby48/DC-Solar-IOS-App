@@ -134,6 +134,7 @@ export async function fetchSalesData(): Promise<SalesData | null> {
         .from('finance_entries')
         .select('id, type, amount, job_id, occurred_on, created_at')
         .eq('company', COMPANY)
+        .neq('status', 'void')
         .in('type', ['estimate', 'contract']),
       supabase
         .from('employees')

@@ -155,6 +155,9 @@ export type FinanceEntriesResult =
  * first. 'investment' is included because owner capital is tagged to the
  * Company container job — leaving it out of this filter would make $4,200 of
  * real money invisible on the one screen you would look for it on.
+ * Voided rows (`status = 'void'`) are left out: the job's Documents list
+ * sums invoiced/paid straight from this result, so a cancelled document must
+ * not be in it. `fetchFinanceEntry` still opens one by id.
  * Returns `unavailable` on any error (non-admin RLS / offline) so callers
  * can degrade to a friendly note.
  */
@@ -165,6 +168,7 @@ export async function fetchJobFinanceEntries(jobId: string): Promise<FinanceEntr
       .select(ENTRY_COLUMNS)
       .eq('company', COMPANY)
       .eq('job_id', jobId)
+      .neq('status', 'void')
       .in('type', ['invoice', 'estimate', 'contract', 'payment', 'expense', 'investment'])
       .order('occurred_on', { ascending: false });
     if (error) return { status: 'unavailable' };

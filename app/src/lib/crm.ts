@@ -697,6 +697,7 @@ export async function fetchCustomerFinance(
       .from('finance_entries')
       .select(columns)
       .eq('company', COMPANY)
+      .neq('status', 'void') // cancelled documents stay out of the Money tab and its per-project sums
       .in('type', ['estimate', 'contract', 'invoice', 'payment']);
 
     query =

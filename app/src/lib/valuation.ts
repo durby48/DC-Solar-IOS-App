@@ -16,9 +16,9 @@
  *     Company container. The app FLAGS a payment there as a misfiling but
  *     still counts it in `paid` (the money is real, only the job is wrong),
  *     so the chart counts it too and never disagrees with the tiles.
- *   - `finance_entries.status` is not a void/archive flag (every row today is
- *     recorded/draft/accepted, and the ledgers sum them all), so no status
- *     filter is applied.
+ *   - `finance_entries.status = 'void'` marks a cancelled row. fetchFinancials
+ *     excludes those before they reach `entries`, so this module — like every
+ *     other ledger — never sees one; every other status is summed.
  *   - `investment` rows are owner capital: never revenue, never a cost.
  *   - labor = recorded payroll runs (money that actually left the bank) plus
  *     the loaded estimate for hours after the newest run's period end.

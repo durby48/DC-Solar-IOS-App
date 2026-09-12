@@ -64,6 +64,13 @@ export interface LedgerEntry {
   /** True if this money moved through the bank account. Expenses paid out of
    *  pocket (pending reimbursement) or in cash are false. */
   paid_from_bank: boolean;
+  /**
+   * `finance_entries.status` — recorded / draft / accepted / void. A 'void'
+   * row is a cancelled entry kept for the audit trail: every fetch in this
+   * module already drops it, and the pure helpers below skip it again so a
+   * caller handing in rows from elsewhere cannot re-count it.
+   */
+  status?: string | null;
   /** 1 = as first created; the document NUMBER never changes, this does. */
   revision?: number | null;
   /**
@@ -161,9 +168,12 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
       supabase
         .from('finance_entries')
         .select(
-          'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path, paid_from_bank, revision, document_meta, extracted',
+          'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path, paid_from_bank, revision, document_meta, extracted, status',
         )
-        .eq('company', COMPANY),
+        .eq('company', COMPANY)
+        // A voided entry is cancelled money: it stays in the table for the
+        // audit trail but must not reach any total, ledger, or drill-down.
+        .neq('status', 'void'),
       // Wages live here, not in finance_entries. Fetched alongside so `net`
       // can subtract them — the headline overstated profit by every wage
       // dollar ever paid without this.
@@ -478,7 +488,7 @@ export function outstandingReceivables(jobs: Job[], entries: LedgerEntry[]): Out
   const invoicedByJob = new Map<string, number>();
   const paidByJob = new Map<string, number>();
   for (const e of entries) {
-    if (!e.job_id) continue;
+    if (!e.job_id || e.status === 'void') continue;
     if (e.type === 'invoice') invoicedByJob.set(e.job_id, (invoicedByJob.get(e.job_id) ?? 0) + e.amount);
     else if (e.type === 'payment') paidByJob.set(e.job_id, (paidByJob.get(e.job_id) ?? 0) + e.amount);
   }

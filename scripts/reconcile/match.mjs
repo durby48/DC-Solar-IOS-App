@@ -89,11 +89,13 @@ if (stmt.credits.length) {
     .from('finance_entries')
     .select('amount, occurred_on, description, job_id')
     .eq('company', 'dc-solar')
+    .neq('status', 'void')
     .eq('type', 'payment');
   const { data: openInvoices } = await client
     .from('finance_entries')
     .select('amount, job_id')
     .eq('company', 'dc-solar')
+    .neq('status', 'void')
     .eq('type', 'invoice');
   const { data: jobs } = await client
     .from('jobs')
