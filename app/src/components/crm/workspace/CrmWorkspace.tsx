@@ -547,7 +547,7 @@ export function CrmWorkspace() {
               hitSlop={6}
               accessibilityLabel="New project"
               style={({ pressed }) => [styles.boardAction, styles.boardActionPrimary, pressed && styles.pressed]}>
-              <Ionicons name="add" size={15} color={colors.white} />
+              <Ionicons name="add" size={15} color={colors.textInverse} />
               <Text style={[styles.boardActionText, styles.boardActionTextPrimary]}>New project</Text>
             </Pressable>
           ) : null}
@@ -647,7 +647,7 @@ const styles = StyleSheet.create({
   centerTitle: { color: colors.ink, fontSize: 16, fontWeight: '800', textAlign: 'center' },
   centerBody: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center', lineHeight: 18, maxWidth: 360 },
   retry: { marginTop: spacing.sm, backgroundColor: colors.sun, borderRadius: 999, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
-  retryText: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  retryText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
   back: { flexDirection: 'row', alignItems: 'center', gap: 4, padding: spacing.sm, paddingHorizontal: spacing.md },
   backText: { color: hubColors.crm.fg, fontSize: 13, fontWeight: '700' },
   pressed: { opacity: 0.6 },
@@ -679,6 +679,6 @@ const styles = StyleSheet.create({
   },
   boardActionPrimary: { backgroundColor: hubColors.pipeline.fg },
   boardActionText: { color: hubColors.pipeline.deep, fontSize: 12, fontWeight: '700' },
-  boardActionTextPrimary: { color: colors.white },
+  boardActionTextPrimary: { color: colors.textInverse },
   boardEmpty: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center', padding: spacing.lg },
 });

@@ -105,7 +105,7 @@ function PagerChip({
         disabled && styles.pagerChipDisabled,
       ]}>
       {({ pressed }: { pressed: boolean }) => {
-        const fg = pressed ? colors.white : hr.deep;
+        const fg = pressed ? colors.textInverse : hr.deep;
         return (
           <>
             {icon === 'chevron-back' ? <Ionicons name={icon} size={14} color={fg} /> : null}
@@ -666,7 +666,7 @@ export default function HoursScreen() {
                                       <>
                                         <AppText
                                           variant="caption"
-                                          color={pressed ? colors.white : hr.deep}
+                                          color={pressed ? colors.textInverse : hr.deep}
                                           numberOfLines={1}
                                           style={styles.jobLinkText}>
                                           {job.label}
@@ -674,7 +674,7 @@ export default function HoursScreen() {
                                         <Ionicons
                                           name="chevron-forward"
                                           size={12}
-                                          color={pressed ? colors.white : hr.fg}
+                                          color={pressed ? colors.textInverse : hr.fg}
                                         />
                                       </>
                                     )}

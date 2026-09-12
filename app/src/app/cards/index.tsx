@@ -460,7 +460,7 @@ export default function MyDeckScreen() {
                   ) : null}
                   {isRecentlyObtained(item.newest) ? (
                     <View style={styles.newTag} pointerEvents="none">
-                      <AppText variant="caption" color={colors.ink} style={styles.newTagText}>
+                      <AppText variant="caption" color={colors.textOnAction} style={styles.newTagText}>
                         NEW
                       </AppText>
                     </View>
@@ -569,7 +569,7 @@ const styles = StyleSheet.create({
     right: spacing.xs,
     minWidth: 30,
     alignItems: 'center',
-    backgroundColor: colors.oliveDeep,
+    backgroundColor: colors.oliveGround,
     borderRadius: radii.pill,
     paddingHorizontal: spacing.sm,
     paddingVertical: 1,

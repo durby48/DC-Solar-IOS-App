@@ -110,8 +110,13 @@ const FONT_FACES = {
   Inter_700Bold,
 };
 
+// Built on DefaultTheme with `dark: true` rather than importing DarkTheme:
+// expo-router does not re-export it, and every colour below is ours anyway.
+// The flag is what tells the navigators to pick their dark defaults for the
+// few things not listed here (the header blur, the modal backdrop).
 const appTheme = {
   ...DefaultTheme,
+  dark: true,
   colors: {
     ...DefaultTheme.colors,
     primary: colors.ocean,
@@ -160,7 +165,7 @@ export default function RootLayout() {
        nothing on Android. */
     <GestureHandlerRootView style={styles.root}>
       <ThemeProvider value={appTheme}>
-        <StatusBar style="dark" />
+        <StatusBar style="light" />
         {/* Floats above every screen — login, tabs, job detail — because losing
             signal matters wherever you happen to be standing. */}
         <SafeAreaView edges={['top']} style={styles.bannerLayer} pointerEvents="box-none">
@@ -234,7 +239,7 @@ const styles = StyleSheet.create({
   errorTitle: { color: colors.ink, fontSize: 18, fontWeight: '800' },
   errorBody: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center' },
   errorButton: { marginTop: 8, backgroundColor: colors.sun, borderRadius: 999, paddingHorizontal: 22, paddingVertical: 10 },
-  errorButtonText: { color: colors.ink, fontSize: 14, fontWeight: '800' },
+  errorButtonText: { color: colors.textOnAction, fontSize: 14, fontWeight: '800' },
   errorLink: { padding: 8 },
   errorLinkText: { color: colors.ocean, fontSize: 13, fontWeight: '700' },
 });

@@ -22,14 +22,16 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
  * The app's button.
  *
  * Variants, and when to use which:
- *   primary   — sun pill with INK text. THE action on a screen; one per view.
- *               The ink text is not a style choice: cream on sun is 1.9:1 and
- *               unreadable outdoors, which is where this app is used.
- *   secondary — white pill, olive outline, olive text. The other thing you
+ *   primary   — tan pill with DARK (`textOnAction`) text. THE action on a
+ *               screen; one per view. The dark text is not a style choice:
+ *               ink is light now and reads 1.6:1 on tan — unreadable
+ *               outdoors, which is where this app is used.
+ *   secondary — card pill, strong outline, sage text. The other thing you
  *               could do here.
  *   ghost     — text only. Cancel, Skip, "not now".
- *   danger    — solid danger. Delete, reject, remove. Never the default focus.
- *   onDark    — cream outline on cream text, for olive/ink surfaces where
+ *   danger    — solid terracotta with dark text (white is 3.2:1 on it).
+ *               Delete, reject, remove. Never the default focus.
+ *   onDark    — white outline and white text, for the cactus grounds where
  *               every other variant disappears.
  *
  * `loading` swaps the label for a spinner and disables the press, keeping the
@@ -103,7 +105,7 @@ export function Button({
 const VARIANTS: Record<ButtonVariant, { container: ViewStyle; text: string }> = {
   primary: {
     container: { backgroundColor: colors.accentAction },
-    text: colors.ink,
+    text: colors.textOnAction,
   },
   secondary: {
     container: {
@@ -119,7 +121,7 @@ const VARIANTS: Record<ButtonVariant, { container: ViewStyle; text: string }> = 
   },
   danger: {
     container: { backgroundColor: colors.danger },
-    text: colors.white,
+    text: colors.textInverse,
   },
   onDark: {
     container: {

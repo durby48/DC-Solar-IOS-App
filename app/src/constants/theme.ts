@@ -1,181 +1,218 @@
 /**
- * DC Solar KC brand theme — soft, sunny, rounded.
- * All colors/spacing/radii live here; screens should not hardcode hex values.
+ * DC Solar KC brand theme — "Sonoran dusk" (2026-09-12 dark overhaul).
  *
- * 2026-08-04 palette overhaul: the original four hues (cream / sun / ocean /
- * ink) made every card read the same, so stages and stat tiles were hard to
- * tell apart at a glance. The brand core is unchanged — everything below it is
- * an ADDITION. Never delete a key here; screens across the app reference them.
+ * The app is DARK: a warm brown-charcoal page, a slightly lifted charcoal
+ * card, and desert pastels for everything that carries meaning — desert tan
+ * for the thing you tap, soft terracotta for danger, cactus sage for the brand
+ * lead, and dusty rose / sky / ochre / sage / eucalyptus for the five hubs.
+ * Nothing neon: every accent is a mid-lightness pastel that reads on charcoal
+ * without glare, which is the point of a dark palette on a phone used outdoors.
  *
- * Naming convention for the accent ramp:
- *   <name>      — the saturated hue, safe for text on a soft/white background
- *   <name>Soft  — the tinted background chip color for that hue
- *   <name>Deep  — the darkened hue, safe for white text on top
+ * HOW THE NAMES SURVIVED THE FLIP. Screens reference the literal names
+ * (`cream`, `ink`, `white`, `olive`…) about 1,500 times, so the NAMES stayed
+ * and the VALUES moved to the dark-mode role each name was already playing:
  *
- * 2026-08-22 foundation pass (Workstream B). Everything added below is an
- * ADDITION on top of the two sets above; nothing was renamed or removed.
+ *   cream / canvas / surfaceAlt   the page
+ *   card / surface                a raised card
+ *   surfaceSunk                   a well or input INSIDE a card (lighter, the
+ *                                 way iOS dark mode lifts a field)
+ *   ink / inkSoft / textMuted     light body / supporting / quiet text
+ *   white / textOnDark            still #FFFFFF — text on the few solid dark
+ *                                 grounds and on danger badges
+ *   <hue>Soft / <hue>Tint         a dark tinted chip fill
+ *   <hue>                         the pastel: icons, edges, text on charcoal
+ *   <hue>Deep                     a LIGHTER pastel — the high-contrast text on
+ *                                 <hue>Soft. It is not a ground any more.
  *
- *   Semantic aliases  — `surface`, `textPrimary`, `accentAction`… Reach for
- *     these in NEW code. They say what a color is FOR, so a future palette
- *     move is one edit here instead of 1,500 across the screens. The literal
- *     names (`cream`, `ocean`, …) stay valid forever for the existing code.
- *   `gradients`       — ready-made stop lists for expo-linear-gradient.
- *   `shadows.subtle` / `shadows.hero` — the two ends the card/raised pair was
- *     missing: a hairline lift, and a floating headline surface.
- *   `fonts` / `typography` — Sora for headings, Inter for everything else.
+ * Three things could not survive by renaming alone and got NEW tokens:
+ *   textInverse    dark text for anything sitting ON a pastel fill — a
+ *                  selected chip, an ocean pill, a hub-tinted FAB.
+ *   textOnAction   dark text on the tan action pill (`sun` / `accentAction`).
+ *   oliveGround and hub*Ground — the solid dark grounds that `oliveDeep` and
+ *                  `hub*Deep` used to be, for the surfaces that carry white
+ *                  text: the on-clock card, the plaque, `Card tone="olive"`.
  *
- * OLIVE CONTRAST RULES (measured against the surface underneath):
- *   • cream or white text ON olive / oliveDeep / gradients.olive — always fine
- *     (6.21:1 and 9.26:1). This is the ONLY way to use olive as a background.
- *   • olive or oliveDeep text ON cream / white / oliveSoft / oliveTint — fine.
- *   • oliveMid is 4.45:1 on cream: icons, and large text only (18pt+, or 14pt
- *     bold). Never body copy, never a caption.
- *   • NEVER white or cream on sun (#FFB066 — 1.9:1). The sun pill takes INK
- *     text; `Button` variant "primary" already does this for you.
- *   • Hairlines on top of olive use `oliveLine`, not `line`/`tan` — those
- *     disappear against it.
+ * Never delete a key here; screens across the app reference them.
+ *
+ * CONTRAST RULES (measured; page #1E1C1A, card #2A2623):
+ *   • ink / textPrimary on the card — 13.6:1. inkSoft 6.4:1. textMuted 4.5:1.
+ *   • Every pastel (`ocean`, `olive`, the hub `fg`s, the accent ramp) is
+ *     4.9:1 or better on the card, so it is safe as text and as icons.
+ *   • textOnAction on sun — 8.4:1. NEVER ink on sun: ink is LIGHT now.
+ *   • textInverse on any pastel fill — 5:1 or better. NEVER white on a pastel.
+ *   • white / textOnDark on oliveGround, surfaceInverse, hub*Ground — 8:1+.
+ *   • danger carries WHITE only on icon badges (3.2:1, the number is
+ *     redundant with the dot); danger BUTTONS and chips take textInverse.
+ *   • Hairlines on top of oliveGround use `oliveLine`, not `line` / `tan`.
+ *
  * Type never carries `fontFamily` AND `fontWeight` in the same style object:
  * a weight on a named face makes iOS synthesise a fake bold and Android fall
  * back to the system font. Pick the face that already has the weight.
+ *
+ * The widget is Swift and cannot import this file: `cream` (its background),
+ * `sun`, `ocean`, `ink`, `inkSoft`, `olive`, `oliveDeep` and `oliveSoft` are
+ * mirrored in targets/widget/index.swift (Theme enum) and
+ * targets/widget/expo-target.config.js — change those in all three places.
  */
 
 import type { TextStyle } from 'react-native';
 
 export const colors = {
-  // ---- brand core (unchanged) ----
-  cream: '#FFF3E6',
-  sun: '#FFB066',
-  sunLight: '#FFD3A6',
-  ocean: '#5AA8CF',
-  sky: '#9FD6F2',
-  skySoft: '#DCEFFB',
-  tan: '#E4E7EC', // 2026-09-12: was #ECD9BE (cream hairline)
-  ink: '#3D352E',
-  inkSoft: '#6B5D4F',
+  // ---- brand core (names kept; values are the dark roles) ----
+  /** The page. Warm brown-charcoal. */
+  cream: '#1E1C1A',
+  /** Desert tan — the thing you tap. Carries `textOnAction`, never ink. */
+  sun: '#D8B98A',
+  /** Dark tan tint: a chip or banner fill under ink text. */
+  sunLight: '#3F3628',
+  /** Pastel sky blue: links, back arrows, Pending Install. */
+  ocean: '#8DA9BD',
+  sky: '#A9C0D0',
+  skySoft: '#2C3238',
+  /** Hairline. */
+  tan: '#3D3833',
+  /** Body text. */
+  ink: '#EFE7DC',
+  inkSoft: '#B8AD9F',
+  /** Pure white: text on danger badges and on the solid dark grounds. */
   white: '#FFFFFF',
-  card: '#FFFFFF',
-  danger: '#C0564A',
-  success: '#3E8E5E',
+  card: '#2A2623',
+  /** Soft terracotta. Text on the card (4.4:1) and the fill for badges. */
+  danger: '#D4776A',
+  /** Muted cactus green. 4.8:1 as text on the card. */
+  success: '#67A47C',
 
-  // ---- olive core (2026-08 brand evolution) ----
-  // Dark olive green joins cream / sun / ocean / ink as a core brand color.
-  // Contrast figures are measured against `cream` (#FFF3E6):
-  //   olive     #4D5C2B — 6.21:1, AA for body text and icons on cream
-  //   oliveMid  #66783A — 4.45:1, icons and large (18pt+/14pt bold) text only
-  //   oliveDeep #3A461F — 9.26:1, AAA; also the safe ground for cream/white text
-  //   oliveSoft #E7EDD8 — tinted chip/background fill
-  //   oliveTint #F2F5E9 — faintest wash, for full-bleed sections
-  //   oliveLine rgba(255,243,230,0.18) — hairline/divider *on top of* olive
-  // Header rule: cream/white on olive; olive/oliveDeep on cream; never white on sun.
-  // olive / oliveDeep / oliveSoft are mirrored in targets/widget/index.swift
-  // (Theme enum) and targets/widget/expo-target.config.js — the widget is Swift
-  // and cannot import this file, so change those three in all three places.
-  olive: '#4D5C2B',
-  oliveMid: '#66783A',
-  oliveDeep: '#3A461F',
-  oliveSoft: '#E7EDD8',
-  oliveTint: '#F2F5E9',
-  oliveLine: 'rgba(255,243,230,0.18)',
+  // ---- olive (cactus) core ----
+  // Contrast figures are measured against the card (#2A2623):
+  //   olive       #A9B894 — 7.9:1, the sage that leads the brand
+  //   oliveMid    #8FA37C — 5.2:1, icons and secondary sage
+  //   oliveDeep   #C4D0B3 — 10.2:1, text on oliveSoft; NOT a ground now
+  //   oliveSoft   #2E3A2B — tinted chip fill
+  //   oliveTint   #262D24 — faintest wash
+  //   oliveGround #34402F — the solid cactus ground under white / ink text
+  //   oliveLine   rgba(239,231,220,0.14) — hairline ON TOP of oliveGround
+  olive: '#A9B894',
+  oliveMid: '#8FA37C',
+  oliveDeep: '#C4D0B3',
+  oliveSoft: '#2E3A2B',
+  oliveTint: '#262D24',
+  oliveLine: 'rgba(239,231,220,0.14)',
+  /** The one solid cactus ground: the Home band, the plaque, the call screen. */
+  oliveGround: '#34402F',
 
-  // ---- accent ramp (new) ----
-  teal: '#2F9C95',
-  tealSoft: '#D6F0EE',
-  tealDeep: '#1F6F6A',
+  // ---- accent ramp ----
+  // <name>      the pastel — text, icons, edges on charcoal
+  // <name>Soft  the dark tinted fill behind it
+  // <name>Deep  a lighter pastel: the text that sits ON <name>Soft
+  teal: '#79A8A0',
+  tealSoft: '#263230',
+  tealDeep: '#A6C8C1',
 
-  indigo: '#5C6BC0',
-  indigoSoft: '#E1E4F7',
-  indigoDeep: '#3F4A94',
+  indigo: '#8E9BC9',
+  indigoSoft: '#2B2E3B',
+  indigoDeep: '#B3BCDC',
 
-  violet: '#8A63C7',
-  violetSoft: '#EDE3F8',
-  violetDeep: '#634391',
+  violet: '#A99BC7',
+  violetSoft: '#312D3A',
+  violetDeep: '#C6BCDB',
 
-  coral: '#E4744F',
-  coralSoft: '#FBE0D6',
-  coralDeep: '#B4522F',
+  coral: '#D39A80',
+  coralSoft: '#3B2E27',
+  coralDeep: '#E4B8A4',
 
-  rose: '#D45D7E',
-  roseSoft: '#FADDE5',
-  roseDeep: '#A03D5B',
+  rose: '#C98DA1',
+  roseSoft: '#3A2B32',
+  roseDeep: '#DCAFBE',
 
-  amber: '#D99512',
-  amberSoft: '#FBEBC8',
-  amberDeep: '#A46E06',
+  amber: '#D4B07E',
+  amberSoft: '#3B3427',
+  amberDeep: '#E5C99F',
 
-  lime: '#6BA33F',
-  limeSoft: '#E4F2D6',
-  limeDeep: '#4B7A28',
+  lime: '#A3B87E',
+  limeSoft: '#30352A',
+  limeDeep: '#C0D09F',
 
-  mint: '#49B37B',
-  mintSoft: '#DAF3E5',
-  mintDeep: '#2F7C53',
+  mint: '#8FBFA3',
+  mintSoft: '#293630',
+  mintDeep: '#B0D5BF',
 
-  slate: '#6E7C8C',
-  slateSoft: '#E4E9EE',
-  slateDeep: '#4A5765',
+  slate: '#9AA5AB',
+  slateSoft: '#2F3235',
+  slateDeep: '#B9C2C7',
 
-  // ---- surfaces (new) ----
-  /** Page background alternative with a cooler cast. */
-  canvas: '#F4F5F8', // 2026-09-12: was #FBF6EF
-  /** Hairline / divider that reads softer than tan on white. */
-  line: '#E8EAEF', // 2026-09-12: was #EFE3D2
+  // ---- surfaces ----
+  /** Page background alias. */
+  canvas: '#1E1C1A',
+  /** Hairline / divider that reads softer than tan on the card. */
+  line: '#3A3531',
 
-  // ---- semantic aliases (2026-08-22) ----
+  // ---- semantic aliases ----
   // Same values as the literals above, named for the JOB rather than the hue.
   // New code should use these; old code keeps working untouched.
   /** A raised thing sitting on the page: cards, rows, sheets. */
-  surface: '#FFFFFF',
+  surface: '#2A2623',
   /** The page itself. */
-  surfaceAlt: '#F6F7FA', // 2026-09-12: was #FFF3E6 (cream page)
-  /** Inset/recessed panel — a well punched INTO a cream page. */
-  surfaceSunk: '#EEF0F4', // 2026-09-12: was #F5EDE2
-  /** Dark ground for cream text: headers, the clock card when on-clock. */
-  surfaceInverse: '#3A461F',
-  /** Body and heading copy on a light surface. */
-  textPrimary: '#3D352E',
-  /** Supporting copy: subtitles, row seconds lines. */
-  textSecondary: '#6B5D4F',
+  surfaceAlt: '#1E1C1A',
+  /** A well or input inside a card — LIFTED, the way iOS dark mode does it. */
+  surfaceSunk: '#332E2A',
+  /** Solid cactus ground for white text: the call screen, Card "olive". */
+  surfaceInverse: '#34402F',
+  /** Body and heading copy. */
+  textPrimary: '#EFE7DC',
+  /** Supporting copy: subtitles, row second lines. */
+  textSecondary: '#B8AD9F',
   /** The quietest legible text — timestamps, footnotes, disabled labels. */
-  textMuted: '#7A6C5C',
-  /** Anything written on olive / oliveDeep / ink. */
-  textOnDark: '#FFFFFF', // 2026-09-12: was cream
+  textMuted: '#9A9083',
+  /** Anything written on oliveGround / surfaceInverse / a hub ground. */
+  textOnDark: '#FFFFFF',
+  /** Dark text for anything that sits ON a pastel fill. */
+  textInverse: '#1E1C1A',
+  /** Muted dark text on a LIGHT panel (the sign-in inputs over the art). */
+  textInverseMuted: '#6B5D4F',
+  /** Dark text on the tan action pill. Never use ink there. */
+  textOnAction: '#2A2218',
   /** Default hairline between rows. */
-  border: '#E8EAEF', // 2026-09-12: was #EFE3D2
+  border: '#3A3531',
   /** Visible outline: input rings, secondary buttons, card edges. */
-  borderStrong: '#CFD4DD', // 2026-09-12: was #E0CDB2
-  /** The brand's lead color — olive. Headers, primary icons, Complete. */
-  accentPrimary: '#4D5C2B',
-  /** The thing you tap. Sun, and it always carries INK text. */
-  accentAction: '#FFB066',
+  borderStrong: '#4B4540',
+  /** The brand's lead color — sage. Icons, eyebrows, Complete. */
+  accentPrimary: '#A9B894',
+  /** The thing you tap. Tan, and it always carries `textOnAction`. */
+  accentAction: '#D8B98A',
   /** Links and back arrows stay ocean, the way the app already reads. */
-  accentLink: '#5AA8CF',
+  accentLink: '#8DA9BD',
   /** Tinted ground for a destructive card or an error row. */
-  dangerSoft: '#FBE4E1', // 2026-09-12
+  dangerSoft: '#3B2724',
 
-  // ---- hub colours (2026-09-12 overhaul) ----
-  // One saturated hue per Home hub, used on the hub tile, its icon, the
-  // colour edge around the tile, and the section eyebrow. Vivid on purpose
-  // against the white base.
-  /** CRM — customers, leads, email, phone, sales. */
-  hubCrm: '#7C3AED',
-  hubCrmSoft: '#F1EAFE',
-  hubCrmDeep: '#5B21B6',
-  /** Pipeline — the job board. */
-  hubPipeline: '#2563EB',
-  hubPipelineSoft: '#E4ECFD',
-  hubPipelineDeep: '#1E40AF',
-  /** Operations — calendar and schedule. */
-  hubOperations: '#EA8A0C',
-  hubOperationsSoft: '#FDEFD9',
-  hubOperationsDeep: '#B4620A',
-  /** Human Resources — hours, paystubs, time off, cards, employees. */
-  hubHr: '#16A34A',
-  hubHrSoft: '#DDF5E6',
-  hubHrDeep: '#15803D',
-  /** Systems Management — financials, security, monitoring, receipts, inventory, checklists. */
-  hubSystems: '#0D9488',
-  hubSystemsSoft: '#D8F3EF',
-  hubSystemsDeep: '#0F6E66',
+  // ---- hub colours ----
+  // One pastel per Home hub, on the hub tile, its icon, the colour edge around
+  // the tile and the section eyebrow. `Soft` is the tinted icon square,
+  // `Deep` the text on that square, `Ground` the solid fill under white text.
+  /** CRM — customers, leads, email, phone, sales. Dusty rose. */
+  hubCrm: '#B98A9E',
+  hubCrmSoft: '#3A2F33',
+  hubCrmDeep: '#D0A9BA',
+  hubCrmGround: '#5A424E',
+  /** Pipeline — the job board. Sky. */
+  hubPipeline: '#8DA9BD',
+  hubPipelineSoft: '#2E3338',
+  hubPipelineDeep: '#ACC1D1',
+  hubPipelineGround: '#3B4F5E',
+  /** Operations — calendar and schedule. Ochre. */
+  hubOperations: '#CFA46F',
+  hubOperationsSoft: '#3B3427',
+  hubOperationsDeep: '#E0C08F',
+  hubOperationsGround: '#66502F',
+  /** Human Resources — hours, paystubs, time off, cards, employees. Sage. */
+  hubHr: '#8FA37C',
+  hubHrSoft: '#31352C',
+  hubHrDeep: '#B0C29E',
+  hubHrGround: '#3C4A34',
+  /** Systems Management — financials, security, monitoring, receipts. Eucalyptus. */
+  hubSystems: '#7FA89B',
+  hubSystemsSoft: '#2C3531',
+  hubSystemsDeep: '#A3C4B9',
+  hubSystemsGround: '#2F4A43',
 } as const;
 
 export const spacing = {
@@ -194,29 +231,34 @@ export const radii = {
   pill: 999,
 } as const;
 
+/**
+ * Shadows are BLACK, not ink — ink is light now and a light shadow reads as a
+ * glow. The opacities are higher than the light palette's because a shadow
+ * has to work harder to separate charcoal from charcoal.
+ */
 export const shadows = {
   /**
    * Barely there — a hairline lift for a row, chip or inset panel that needs
    * to separate from the page without reading as a card.
    */
   subtle: {
-    shadowColor: colors.ink,
-    shadowOpacity: 0.05,
+    shadowColor: '#000000',
+    shadowOpacity: 0.25,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
     elevation: 1,
   },
   card: {
-    shadowColor: colors.ink,
-    shadowOpacity: 0.08,
+    shadowColor: '#000000',
+    shadowOpacity: 0.32,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
     elevation: 3,
   },
   /** Lifted surface for headline cards (totals, clock). */
   raised: {
-    shadowColor: colors.ink,
-    shadowOpacity: 0.14,
+    shadowColor: '#000000',
+    shadowOpacity: 0.42,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 8 },
     elevation: 6,
@@ -226,30 +268,49 @@ export const shadows = {
    * header. Deliberately heavier than `raised` — use it once per screen.
    */
   hero: {
-    shadowColor: colors.ink,
-    shadowOpacity: 0.2,
+    shadowColor: '#000000',
+    shadowOpacity: 0.5,
     shadowRadius: 28,
     shadowOffset: { width: 0, height: 14 },
     elevation: 10,
   },
 } as const;
 
+/** The five Home hubs, in Home order. */
+export type HubKey = 'crm' | 'pipeline' | 'operations' | 'hr' | 'systems';
+
+/**
+ * fg = icon / edge / eyebrow (the pastel), bg = the tinted icon square,
+ * deep = text on that square, ground = the solid fill under WHITE text.
+ * Put `textInverse` on `fg`, never white.
+ */
+export const hubColors: Record<HubKey, { fg: string; bg: string; deep: string; ground: string }> = {
+  crm: { fg: colors.hubCrm, bg: colors.hubCrmSoft, deep: colors.hubCrmDeep, ground: colors.hubCrmGround },
+  pipeline: {
+    fg: colors.hubPipeline,
+    bg: colors.hubPipelineSoft,
+    deep: colors.hubPipelineDeep,
+    ground: colors.hubPipelineGround,
+  },
+  operations: {
+    fg: colors.hubOperations,
+    bg: colors.hubOperationsSoft,
+    deep: colors.hubOperationsDeep,
+    ground: colors.hubOperationsGround,
+  },
+  hr: { fg: colors.hubHr, bg: colors.hubHrSoft, deep: colors.hubHrDeep, ground: colors.hubHrGround },
+  systems: {
+    fg: colors.hubSystems,
+    bg: colors.hubSystemsSoft,
+    deep: colors.hubSystemsDeep,
+    ground: colors.hubSystemsGround,
+  },
+};
+
 /**
  * Ordered accent set for anything that needs "the next distinct color" —
  * stat tiles, ticker items, chart-ish rows. Cycle with index % length.
  */
-/** The five Home hubs, in Home order. */
-export type HubKey = 'crm' | 'pipeline' | 'operations' | 'hr' | 'systems';
-
-/** fg = icon/edge/eyebrow, bg = the tinted icon square, deep = white-text ground. */
-export const hubColors: Record<HubKey, { fg: string; bg: string; deep: string }> = {
-  crm: { fg: colors.hubCrm, bg: colors.hubCrmSoft, deep: colors.hubCrmDeep },
-  pipeline: { fg: colors.hubPipeline, bg: colors.hubPipelineSoft, deep: colors.hubPipelineDeep },
-  operations: { fg: colors.hubOperations, bg: colors.hubOperationsSoft, deep: colors.hubOperationsDeep },
-  hr: { fg: colors.hubHr, bg: colors.hubHrSoft, deep: colors.hubHrDeep },
-  systems: { fg: colors.hubSystems, bg: colors.hubSystemsSoft, deep: colors.hubSystemsDeep },
-};
-
 export const accentCycle = [
   { fg: colors.ocean, bg: colors.skySoft },
   { fg: colors.teal, bg: colors.tealSoft },
@@ -265,6 +326,7 @@ export const accentCycle = [
  * Cartoon-property art palettes (consumed by components/PropertyArt.tsx).
  * Each entry is one coherent "house look"; the component picks one
  * deterministically from the job id so a property always draws the same.
+ * The art stays daylight — it sits under a dark readability scrim now.
  */
 export const artPalettes = [
   { sky: '#CDE8F7', siding: '#DCE3EA', trim: '#FFFFFF', roof: '#8C99A6', brick: '#C08A72' },
@@ -296,29 +358,28 @@ export const statusColors: Record<JobStatus, { bg: string; text: string; label: 
  * left-to-right without changing meaning.
  *
  * Contrast, so nobody has to guess:
- *   olive / oliveSky / ink  → cream or white text ONLY.
- *   sunrise / cream         → ink text ONLY (never white — see the header).
- *   ocean                   → white text at the deep end, ink at the light
- *                             end; prefer white and keep copy short.
- *   shimmer / scrimDown     → overlays, not text grounds.
+ *   olive / oliveSky / ink / cream → ink or white text.
+ *   sunrise                        → textOnAction ONLY (it is the tan pill).
+ *   ocean                          → textInverse ONLY (it is a pastel).
+ *   shimmer / scrimDown            → overlays, not text grounds.
  */
 export const gradients = {
-  /** The brand header. Olive rising to its deepest value. */
-  olive: ['#66783A', '#4D5C2B', '#3A461F'],
-  /** Olive ground lifting into brand ocean — the Home hero surface. */
-  oliveSky: ['#3A461F', '#4D5C2B', '#5AA8CF'],
-  /** Warm call-to-action fill: the off-clock clock card, primary hero pills. */
-  sunrise: ['#FFD3A6', '#FFB066'],
+  /** The cactus header. Muted sage settling into the ground. */
+  olive: ['#3E4B37', '#34402F', '#2A3427'],
+  /** Cactus ground lifting into the pipeline sky — a hero surface. */
+  oliveSky: ['#2A3427', '#34402F', '#3B4F5E'],
+  /** Warm call-to-action fill: pale sand into desert tan. */
+  sunrise: ['#E2CBA3', '#D8B98A'],
   /** Sky into ocean. Water-cool counterweight to the sun ramp. */
-  ocean: ['#9FD6F2', '#5AA8CF'],
-  /** Almost-flat page wash, cream into canvas. Use to fake depth cheaply. */
-  cream: ['#FFF3E6', '#FBF6EF'],
-  /** Neutral dark surface when olive would be too loud. */
-  ink: ['#6B5D4F', '#3D352E'],
+  ocean: ['#A9C0D0', '#8DA9BD'],
+  /** Almost-flat page wash. Use to fake depth cheaply. */
+  cream: ['#1E1C1A', '#232019'],
+  /** Neutral lifted surface when cactus would be too loud. */
+  ink: ['#3D3833', '#2A2623'],
   /** Skeleton sweep: transparent → highlight → transparent. */
-  shimmer: ['rgba(255,243,230,0)', 'rgba(255,255,255,0.72)', 'rgba(255,243,230,0)'],
+  shimmer: ['rgba(255,255,255,0)', 'rgba(255,255,255,0.10)', 'rgba(255,255,255,0)'],
   /** Bottom-of-photo scrim so caption text stays readable over any image. */
-  scrimDown: ['rgba(61,53,46,0)', 'rgba(61,53,46,0.62)'],
+  scrimDown: ['rgba(0,0,0,0)', 'rgba(0,0,0,0.66)'],
 } as const satisfies Record<string, readonly [string, string, ...string[]]>;
 
 export type GradientKey = keyof typeof gradients;

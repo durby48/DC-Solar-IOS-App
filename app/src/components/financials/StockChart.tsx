@@ -231,7 +231,7 @@ export function StockChart({ series, breakdown }: Props) {
                 style={[styles.segment, selected && styles.segmentOn]}>
                 <AppText
                   variant="caption"
-                  color={selected ? colors.textOnDark : colors.textSecondary}
+                  color={selected ? colors.textInverse : colors.textSecondary}
                   style={styles.segmentText}>
                   {s.label}
                 </AppText>

@@ -197,8 +197,10 @@ export function PropertyArt({
   imageUrl?: string | null;
   radius: number;
   /**
-   * Whiteness over the art, 0–1. The default suits a full-width phone card;
-   * the web board passes more because its type is smaller and denser.
+   * Darkness over the art, 0–1 — the art itself stays daylight, so the card's
+   * light text needs a charcoal wash to sit on. The default suits a
+   * full-width phone card; the web board passes more because its type is
+   * smaller and denser.
    */
   scrim?: number;
 }) {
@@ -218,7 +220,7 @@ export function PropertyArt({
         <DrawnScene seed={seed} />
       )}
       {/* Readability scrim — the card text sits on top of this. */}
-      <View style={[styles.scrim, { backgroundColor: `rgba(255,255,255,${scrim})` }]} />
+      <View style={[styles.scrim, { backgroundColor: `rgba(30,26,23,${scrim})` }]} />
       {/* Slightly denser band behind the top chip row. */}
       <View style={styles.topScrim} />
     </View>
@@ -232,7 +234,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(255,255,255,0.62)',
+    backgroundColor: 'rgba(30,26,23,0.62)',
   },
   topScrim: {
     position: 'absolute',
@@ -240,7 +242,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: '34%',
-    backgroundColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(30,26,23,0.22)',
   },
   sun: {
     position: 'absolute',

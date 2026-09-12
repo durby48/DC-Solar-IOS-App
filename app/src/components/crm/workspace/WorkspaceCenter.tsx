@@ -177,7 +177,7 @@ export function WorkspaceCenter({
         disabled={!phone}
         accessibilityLabel="Call"
         style={({ pressed }) => [styles.headerButton, !phone && styles.headerButtonMuted, pressed && styles.pressed]}>
-        <Ionicons name="call" size={15} color={phone ? colors.ink : colors.inkSoft} />
+        <Ionicons name="call" size={15} color={phone ? colors.textOnAction : colors.inkSoft} />
       </Pressable>
       <Pressable
         onPress={openRecord}
@@ -327,7 +327,7 @@ export function WorkspaceCenter({
                 onPress={() => void submitNote()}
                 disabled={savingNote || !noteDraft.trim()}
                 style={({ pressed }) => [styles.noteSave, (pressed || savingNote || !noteDraft.trim()) && styles.pressed]}>
-                {savingNote ? <ActivityIndicator color={colors.ink} size="small" /> : <Text style={styles.noteSaveText}>Add note</Text>}
+                {savingNote ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.noteSaveText}>Add note</Text>}
               </Pressable>
             </View>
           </View>
@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
@@ -410,7 +410,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
@@ -428,7 +428,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
   },
   channel: { paddingHorizontal: spacing.sm + 2, paddingVertical: 4, borderRadius: radii.pill },
-  channelActive: { backgroundColor: colors.white },
+  channelActive: { backgroundColor: colors.surface },
   channelText: { color: colors.inkSoft, fontSize: 12, fontWeight: '800' },
   channelTextActive: { color: colors.ink },
   paneBody: { flex: 1 },
@@ -437,7 +437,7 @@ const styles = StyleSheet.create({
   emptyBody: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center', lineHeight: 18 },
   notes: { flex: 1 },
   notesContent: { padding: spacing.md, gap: spacing.sm, paddingBottom: spacing.xl },
-  noteBox: { backgroundColor: colors.white, borderRadius: radii.md, padding: spacing.sm, gap: spacing.sm },
+  noteBox: { backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.sm, gap: spacing.sm },
   noteInput: {
     minHeight: 64,
     backgroundColor: colors.canvas,
@@ -452,8 +452,8 @@ const styles = StyleSheet.create({
   noteActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   noteError: { color: colors.danger, fontSize: 12, fontWeight: '700' },
   noteSave: { backgroundColor: colors.sun, borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: 6, minWidth: 90, alignItems: 'center' },
-  noteSaveText: { color: colors.ink, fontSize: 13, fontWeight: '800' },
-  noteCard: { backgroundColor: colors.white, borderRadius: radii.md, padding: spacing.md, gap: spacing.xs },
+  noteSaveText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
+  noteCard: { backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.md, gap: spacing.xs },
   notePinned: { backgroundColor: colors.amberSoft },
   noteBody: { color: colors.ink, fontSize: 14, fontWeight: '500', lineHeight: 20 },
   noteMeta: { color: colors.inkSoft, fontSize: 11, fontWeight: '600' },

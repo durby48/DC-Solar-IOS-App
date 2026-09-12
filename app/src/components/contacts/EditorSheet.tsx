@@ -15,7 +15,7 @@ import { colors, radii, shadows, spacing } from '@/constants/theme';
 import { useMotion } from '@/lib/motion';
 
 /** Ink at 45%, the same scrim `WheelPickerSheet` uses. */
-const SCRIM = 'rgba(61,53,46,0.45)';
+const SCRIM = 'rgba(0,0,0,0.45)';
 
 /**
  * A bottom sheet for a form: dark scrim, grip, title, close ×, and a

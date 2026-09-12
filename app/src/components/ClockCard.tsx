@@ -63,11 +63,12 @@ import { updateWidgetState } from '@/lib/widget';
  * moves the open entry to another job (`updateOpenEntryJob`; RLS lets you
  * edit your own open row only).
  *
- * COLOURS (2026-09-13, the white-base overhaul): off the clock it is a white
- * card with a pipeline-blue edge and a blue "Clock in"; on the clock it sits
- * on the HR green ground with white text and a white outlined "Clock out".
- * Olive and sun are gone from this card. The blue is #2563EB — 5.2:1 against
- * white, so white button text is fine.
+ * COLOURS (2026-09-12, "Sonoran dusk"): off the clock it is the charcoal card
+ * with a pipeline-sky edge; on the clock it sits on the HR hub's solid green
+ * ground with white text. In BOTH states the punch button is the desert-tan
+ * action pill with dark `textOnAction` text — the one control on Home that
+ * has to be found in sunlight, so it takes the palette's highest-contrast
+ * pairing (8.4:1) rather than a pastel fill.
  *
  * On a desktop browser the card is drawn COMPACT — it was a phone-sized hero
  * sitting in a 900px-wide column. The phone layout is untouched.
@@ -469,7 +470,7 @@ export function ClockCard({ style }: { style?: StyleProp<ViewStyle> }) {
         <View style={styles.buttonWrap}>
           {/* Draws the eye to the one control that ends the shift. Sits
               BEHIND the button, so it never intercepts the tap. */}
-          {clockedIn ? <PulseRing color={colors.white} radius={radii.lg} /> : null}
+          {clockedIn ? <PulseRing color={colors.sun} radius={radii.lg} /> : null}
           <AnimatedPressable
             onPress={handlePunch}
             disabled={punchBusy}
@@ -477,14 +478,10 @@ export function ClockCard({ style }: { style?: StyleProp<ViewStyle> }) {
             accessibilityRole="button"
             accessibilityLabel={clockedIn ? 'Clock out' : 'Clock in'}
             accessibilityState={{ disabled: punchBusy, busy: punchBusy }}
-            style={[
-              styles.button,
-              compact && styles.buttonCompact,
-              clockedIn ? styles.buttonOn : styles.buttonOff,
-            ]}>
+            style={[styles.button, compact && styles.buttonCompact]}>
             <AppText
               variant="button"
-              color={colors.textOnDark}
+              color={colors.textOnAction}
               style={[styles.buttonText, compact && styles.buttonTextCompact]}>
               {punchBusy ? 'Punching…' : clockedIn ? 'Clock Out' : 'Clock In'}
             </AppText>
@@ -518,15 +515,15 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     gap: spacing.xs + 2,
   },
-  /** Off the clock: white, with the Pipeline hub's blue edge. */
+  /** Off the clock: the charcoal card, with the Pipeline hub's sky edge. */
   cardOff: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderColor: hubColors.pipeline.fg,
   },
-  /** On the clock: the HR hub's deep green, white text. */
+  /** On the clock: the HR hub's solid green ground, white text. */
   cardOn: {
-    backgroundColor: hubColors.hr.deep,
-    borderColor: hubColors.hr.deep,
+    backgroundColor: hubColors.hr.ground,
+    borderColor: hubColors.hr.ground,
   },
   elapsed: {
     fontSize: 40,
@@ -549,9 +546,9 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   /**
-   * The selected chip on the WHITE card takes the hub blue rather than the
-   * neutral tone's ink; the chip's white "on" text already suits it. On the
-   * green card the ink fill stays — blue on green reads as mud.
+   * The selected chip on the charcoal card takes the pipeline sky rather than
+   * the neutral tone's pale ink; the chip's dark "on" text suits both. On the
+   * green card the ink fill stays — sky on green reads as mud.
    */
   chipSelectedBlue: {
     backgroundColor: hubColors.pipeline.fg,
@@ -577,25 +574,18 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     marginTop: spacing.xs,
   },
+  /** The tan action pill, in both states; its text is `textOnAction`. */
   button: {
     borderRadius: radii.lg,
     paddingVertical: spacing.md + 2,
     alignItems: 'center',
     alignSelf: 'stretch',
     borderWidth: 2,
+    backgroundColor: colors.sun,
+    borderColor: colors.sun,
   },
   buttonCompact: {
     paddingVertical: spacing.sm + 2,
-  },
-  /** On the clock: a white OUTLINE on green, white text. */
-  buttonOn: {
-    backgroundColor: 'transparent',
-    borderColor: colors.white,
-  },
-  /** Off the clock: solid hub blue (#2563EB, 5.2:1 under white text). */
-  buttonOff: {
-    backgroundColor: hubColors.pipeline.fg,
-    borderColor: hubColors.pipeline.fg,
   },
   buttonText: {
     fontSize: 20,

@@ -47,9 +47,9 @@ export const STAGE_COLORS: Record<Stage, { bg: string; fg: string }> = {
   // 2026-08-22: Complete moved ocean → olive. Ocean is Pending Install's hue,
   // so a solid ocean "Complete" pill sat two columns from a soft ocean
   // "Pending Install" pill and the board read as if half of it were finished.
-  // Olive is the new brand lead and is 9.4:1 under cream, so it also gives
-  // the one inverted pill the best contrast on the board.
-  Complete: { bg: colors.olive, fg: colors.cream },
+  // 2026-09-12 dark palette: olive is a pastel sage now, so the inverted pill
+  // is a LIGHT pill with dark text — 8:1, still the strongest on the board.
+  Complete: { bg: colors.olive, fg: colors.textInverse },
 };
 
 /** Accent hue for a stage, used for art tinting and card accents. */
@@ -133,8 +133,9 @@ export function labelForJob(job: {
 export const LABEL_COLORS: Record<StageLabel, { bg: string; fg: string }> = {
   ...STAGE_COLORS,
   // Warm neutral, deliberately unlike every pipeline hue: overhead is not a
-  // step in the pipeline and shouldn't read as one.
-  [COMPANY_LABEL]: { bg: colors.ink, fg: colors.cream },
+  // step in the pipeline and shouldn't read as one. Ink is the light neutral
+  // on the dark palette, so this is a pale pill with dark text.
+  [COMPANY_LABEL]: { bg: colors.ink, fg: colors.textInverse },
 };
 
 export const LABEL_ACCENT: Record<StageLabel, string> = {

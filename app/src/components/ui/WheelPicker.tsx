@@ -71,11 +71,14 @@ const IS_WEB = Platform.OS === 'web';
 // every stop list in the theme is opaque on both ends because they are FILLS.
 // These two are overlays, so they are spelled out here rather than adding a
 // one-off key to the palette.
-const CLEAR = 'rgba(255,255,255,0)';
+// The transparent stop carries the SURFACE's own rgb (#2A2623) at zero alpha:
+// a transparent-white stop interpolates through a pale fringe on the way
+// down to charcoal.
+const CLEAR = 'rgba(42,38,35,0)';
 const FADE_TOP = [colors.surface, CLEAR] as const;
 const FADE_BOTTOM = [CLEAR, colors.surface] as const;
-/** Ink at 45%, the same family as `gradients.scrimDown`. */
-const SCRIM = 'rgba(61,53,46,0.45)';
+/** Black at 45%, the same family as `gradients.scrimDown`. */
+const SCRIM = 'rgba(0,0,0,0.45)';
 
 /**
  * A vertical wheel of choices.

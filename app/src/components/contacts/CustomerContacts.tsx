@@ -348,7 +348,7 @@ export function CustomerContacts({
                     onPress={() => void call(contact)}
                     disabled={!dialable || busyId !== null}
                     style={({ pressed }) => [styles.action, !dialable && styles.actionMuted, pressed && styles.pressed]}>
-                    {busyId === contact.id ? <ActivityIndicator color={colors.ink} size="small" /> : <Ionicons name="call" size={15} color={colors.ink} />}
+                    {busyId === contact.id ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Ionicons name="call" size={15} color={colors.textOnAction} />}
                     <Text style={styles.actionLabel}>Call</Text>
                   </Pressable>
                   <Pressable
@@ -430,7 +430,7 @@ const styles = StyleSheet.create({
   headButtonText: { color: hubColors.crm.fg, fontSize: 12, fontWeight: '800' },
   spinner: { paddingVertical: spacing.md },
   empty: { color: colors.inkSoft, fontSize: 13, fontWeight: '600' },
-  card: { backgroundColor: colors.white, borderRadius: radii.md, borderWidth: 1, borderColor: colors.line },
+  card: { backgroundColor: colors.surface, borderRadius: radii.md, borderWidth: 1, borderColor: colors.line },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md },
   rowPressed: { backgroundColor: hubColors.crm.bg },
   rowBody: { flex: 1, gap: 2 },
@@ -461,16 +461,16 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     paddingHorizontal: 4,
   },
-  actionSecondary: { backgroundColor: colors.white, borderWidth: 1, borderColor: colors.line },
+  actionSecondary: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
   actionMuted: { opacity: 0.45 },
-  actionLabel: { color: colors.ink, fontSize: 12, fontWeight: '800' },
+  actionLabel: { color: colors.textOnAction, fontSize: 12, fontWeight: '800' },
   actionLabelSecondary: { color: hubColors.crm.fg },
   manage: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   manageButton: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4 },
   manageText: { color: hubColors.crm.fg, fontSize: 12, fontWeight: '700' },
   manageTextMuted: { color: colors.inkSoft },
   manageTextDanger: { color: colors.danger },
-  pool: { backgroundColor: colors.white, borderRadius: radii.md, borderWidth: 1, borderColor: colors.line, padding: spacing.sm, gap: spacing.xs },
+  pool: { backgroundColor: colors.surface, borderRadius: radii.md, borderWidth: 1, borderColor: colors.line, padding: spacing.sm, gap: spacing.xs },
   poolHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   poolTitle: { color: colors.ink, fontSize: 14, fontWeight: '800' },
   poolRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.xs, paddingVertical: spacing.sm },

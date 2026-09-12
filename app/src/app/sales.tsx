@@ -360,7 +360,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     paddingVertical: spacing.sm - 2,
   },
-  segmentActive: { backgroundColor: colors.white, ...shadows.card },
+  segmentActive: { backgroundColor: colors.borderStrong, ...shadows.card },
   segmentPressed: { opacity: 0.7 },
   segmentText: { color: colors.inkSoft, fontSize: 14, fontWeight: '800' },
   segmentTextActive: { color: colors.ink },

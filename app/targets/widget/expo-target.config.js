@@ -10,12 +10,13 @@ module.exports = (config) => ({
   bundleIdentifier: '.widget',
   deploymentTarget: '17.0',
   colors: {
-    // Theme tokens from src/constants/theme.ts (sun / cream / olive).
-    $accent: '#FFB066',
-    $widgetBackground: '#FFF3E6',
-    $olive: '#4D5C2B',
-    $oliveDeep: '#3A461F',
-    $oliveSoft: '#E7EDD8',
+    // Theme tokens from src/constants/theme.ts (sun / card / olive) —
+    // the 2026-09-12 "Sonoran dusk" dark palette.
+    $accent: '#D8B98A',
+    $widgetBackground: '#2A2623',
+    $olive: '#A9B894',
+    $oliveDeep: '#C4D0B3',
+    $oliveSoft: '#2E3A2B',
   },
   entitlements: {
     'com.apple.security.application-groups':

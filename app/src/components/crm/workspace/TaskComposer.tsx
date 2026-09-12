@@ -126,7 +126,7 @@ export function TaskComposer({
           </Pressable>
         ) : null}
         <Pressable onPress={() => void submit()} disabled={saving} style={({ pressed }) => [styles.save, (pressed || saving) && styles.pressed]}>
-          {saving ? <ActivityIndicator color={colors.ink} size="small" /> : <Text style={styles.saveText}>Add task</Text>}
+          {saving ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.saveText}>Add task</Text>}
         </Pressable>
       </View>
     </View>
@@ -136,7 +136,7 @@ export function TaskComposer({
 const styles = StyleSheet.create({
   box: { gap: spacing.xs, backgroundColor: colors.canvas, borderRadius: radii.sm, padding: spacing.sm, borderWidth: 1, borderColor: colors.line },
   input: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.line,
@@ -154,6 +154,6 @@ const styles = StyleSheet.create({
   cancel: { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radii.pill },
   cancelText: { color: colors.inkSoft, fontSize: 13, fontWeight: '700' },
   save: { backgroundColor: colors.sun, paddingHorizontal: spacing.lg, paddingVertical: 6, borderRadius: radii.pill, minWidth: 90, alignItems: 'center' },
-  saveText: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  saveText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
   pressed: { opacity: 0.6 },
 });

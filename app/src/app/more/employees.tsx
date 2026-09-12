@@ -306,7 +306,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: radii.lg,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -323,7 +323,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   employeeCard: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     overflow: 'hidden',
     ...shadows.card,

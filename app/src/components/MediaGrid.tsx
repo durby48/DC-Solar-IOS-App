@@ -214,12 +214,12 @@ export function MediaGrid({
           )}
           {asset.featured ? (
             <View style={styles.featuredBadge}>
-              <Ionicons name="star" size={11} color={colors.ink} />
+              <Ionicons name="star" size={11} color={colors.textOnAction} />
             </View>
           ) : null}
           {isSelected ? (
             <View style={styles.selectedBadge}>
-              <Ionicons name="checkmark" size={13} color={colors.white} />
+              <Ionicons name="checkmark" size={13} color={colors.textInverse} />
             </View>
           ) : null}
         </AnimatedPressable>

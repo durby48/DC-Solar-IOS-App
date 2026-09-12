@@ -135,7 +135,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.pill,
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,
@@ -157,7 +157,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xs,
   },
   bucketOverdue: { color: colors.coralDeep },
-  row: { paddingHorizontal: spacing.sm + 2, backgroundColor: colors.white, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
+  row: { paddingHorizontal: spacing.sm + 2, backgroundColor: colors.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
   empty: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center', padding: spacing.lg },
   pressed: { opacity: 0.6 },
 });

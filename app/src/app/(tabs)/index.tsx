@@ -86,8 +86,8 @@ export default function HomeScreen() {
     };
   }, []);
 
-  // The root layout's `<StatusBar style="dark" />` suits the header now that
-  // it is a light surface; the olive-era flip to light glyphs on focus is gone.
+  // The root layout's `<StatusBar style="light" />` suits the cactus band and
+  // the charcoal page alike, so there is no per-screen status-bar flip here.
 
   useFocusEffect(
     useCallback(() => {

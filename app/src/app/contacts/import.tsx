@@ -261,7 +261,7 @@ export default function ImportContactsScreen() {
             disabled={importing || chosen.length === 0}
             style={({ pressed }) => [styles.primary, (pressed || importing) && styles.pressed]}>
             {importing ? (
-              <ActivityIndicator color={colors.ink} size="small" />
+              <ActivityIndicator color={colors.textOnAction} size="small" />
             ) : (
               <Text style={styles.primaryText}>
                 Import {chosen.length} {chosen.length === 1 ? 'contact' : 'contacts'}
@@ -292,7 +292,7 @@ export default function ImportContactsScreen() {
             disabled={reading}
             style={({ pressed }) => [styles.primary, (pressed || reading) && styles.pressed]}>
             {reading ? (
-              <ActivityIndicator color={colors.ink} size="small" />
+              <ActivityIndicator color={colors.textOnAction} size="small" />
             ) : (
               <Text style={styles.primaryText}>Read my contacts</Text>
             )}
@@ -415,7 +415,7 @@ const styles = StyleSheet.create({
   gap: { gap: spacing.sm },
   list: { padding: spacing.lg, paddingBottom: 96 },
   infoCard: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.lg,
     alignItems: 'center',
@@ -428,7 +428,7 @@ const styles = StyleSheet.create({
   infoTitle: { color: colors.ink, fontSize: 17, fontWeight: '800', textAlign: 'center' },
   infoBody: { color: colors.inkSoft, fontSize: 14, fontWeight: '600', textAlign: 'center' },
   card: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     gap: spacing.sm,
@@ -442,7 +442,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -459,7 +459,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     borderWidth: 1,
@@ -493,13 +493,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minHeight: 44,
   },
-  primaryText: { color: colors.ink, fontSize: 15, fontWeight: '800' },
+  primaryText: { color: colors.textOnAction, fontSize: 15, fontWeight: '800' },
   secondary: {
     borderRadius: radii.pill,
     paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
   },

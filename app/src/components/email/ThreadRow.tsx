@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
     paddingLeft: spacing.xs,
   },
-  rowUnread: { backgroundColor: colors.white },
+  rowUnread: { backgroundColor: colors.surface },
   rowActive: { backgroundColor: hubColors.crm.bg },
   rowSelected: { backgroundColor: colors.skySoft },
   side: { width: 32, height: 44, alignItems: 'center', justifyContent: 'center' },

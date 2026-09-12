@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs + 2,
   },
   tableHead: {
-    backgroundColor: colors.accentPrimary,
+    backgroundColor: colors.oliveGround,
   },
   tableAlt: {
     backgroundColor: colors.oliveTint,

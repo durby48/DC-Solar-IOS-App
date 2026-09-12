@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
   valueText: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '600' },
   valueMuted: { color: colors.inkSoft, fontWeight: '500' },
   list: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.line,

@@ -385,9 +385,9 @@ export default function ContactsScreen() {
                   pressed && styles.pressed,
                 ]}>
                 {callingKey === key ? (
-                  <ActivityIndicator color={colors.ink} size="small" />
+                  <ActivityIndicator color={colors.textOnAction} size="small" />
                 ) : (
-                  <Ionicons name="call" size={16} color={colors.ink} />
+                  <Ionicons name="call" size={16} color={colors.textOnAction} />
                 )}
                 <Text style={styles.actionLabel}>Call</Text>
               </Pressable>
@@ -652,7 +652,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -667,7 +667,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xs,
     alignSelf: 'flex-start',
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -688,7 +688,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     ...shadows.card,
@@ -734,9 +734,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     paddingVertical: spacing.sm + 2,
   },
-  actionSecondary: { backgroundColor: colors.white },
+  actionSecondary: { backgroundColor: colors.surface },
   actionMuted: { opacity: 0.45 },
-  actionLabel: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  actionLabel: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
   actionLabelSecondary: { color: colors.ocean },
   hint: { color: colors.inkSoft, fontSize: 12, fontWeight: '600' },
   manageRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },

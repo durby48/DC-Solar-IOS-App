@@ -15,7 +15,8 @@ type Point = { x: number; y: number };
  * scrim and card fill in this app wants.
  *
  * Read the contrast note on `gradients` before putting text on one:
- * olive / oliveSky / ink take cream text, sunrise / cream take ink text.
+ * olive / oliveSky / ink / cream take ink or white text, sunrise takes
+ * `textOnAction`, ocean takes `textInverse`.
  */
 export function GradientSurface({
   gradient,

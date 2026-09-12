@@ -419,9 +419,9 @@ export function Conversation({
           accessibilityLabel="Send"
           style={({ pressed }) => [styles.sendButton, (pressed || !canSend) && styles.pressed]}>
           {sending ? (
-            <ActivityIndicator color={colors.ink} size="small" />
+            <ActivityIndicator color={colors.textOnAction} size="small" />
           ) : (
-            <Ionicons name="send" size={16} color={colors.ink} />
+            <Ionicons name="send" size={16} color={colors.textOnAction} />
           )}
         </Pressable>
       </View>
@@ -503,7 +503,7 @@ const styles = StyleSheet.create({
   bubbleRowIn: { justifyContent: 'flex-start' },
   bubbleRowOut: { justifyContent: 'flex-end' },
   bubble: { maxWidth: '82%', borderRadius: radii.md, padding: spacing.sm + 2, gap: 4 },
-  bubbleIn: { backgroundColor: colors.white, ...shadows.card },
+  bubbleIn: { backgroundColor: colors.surface, ...shadows.card },
   bubbleOut: { backgroundColor: colors.skySoft },
   bubbleText: { color: colors.ink, fontSize: 15, fontWeight: '500', lineHeight: 21 },
   bubbleMeta: { color: colors.inkSoft, fontSize: 11, fontWeight: '600' },
@@ -527,7 +527,7 @@ const styles = StyleSheet.create({
   },
 
   composerWrap: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
@@ -536,7 +536,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: spacing.sm,
     padding: spacing.md,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
   },
   composerInput: {
     flex: 1,
@@ -589,7 +589,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: 'rgba(61,53,46,0.75)',
+    backgroundColor: 'rgba(0,0,0,0.75)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -609,7 +609,7 @@ const styles = StyleSheet.create({
     height: 16,
     borderRadius: 8,
     backgroundColor: colors.ocean,
-    color: colors.white,
+    color: colors.textInverse,
     fontSize: 10,
     fontWeight: '800',
     textAlign: 'center',
@@ -630,7 +630,7 @@ const styles = StyleSheet.create({
   templateSheetTitle: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '800' },
   templateSheetList: { maxHeight: 210 },
   templateOption: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.sm,
     padding: spacing.sm,
     gap: 2,

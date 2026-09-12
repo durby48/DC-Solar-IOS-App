@@ -244,7 +244,7 @@ export function DetailPanel({
                 <Text style={styles.cancelText}>Cancel</Text>
               </Pressable>
               <Pressable onPress={() => void save()} disabled={saving} style={({ pressed }) => [styles.save, (pressed || saving) && styles.pressed]}>
-                {saving ? <ActivityIndicator color={colors.ink} size="small" /> : <Text style={styles.saveText}>Save</Text>}
+                {saving ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.saveText}>Save</Text>}
               </Pressable>
             </View>
           </View>
@@ -521,7 +521,7 @@ const styles = StyleSheet.create({
   content: { padding: spacing.md, gap: spacing.md, paddingBottom: spacing.xxl },
   close: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start' },
   closeText: { color: hubColors.crm.fg, fontSize: 13, fontWeight: '700' },
-  section: { backgroundColor: colors.white, borderRadius: radii.md, padding: spacing.md, gap: spacing.sm },
+  section: { backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.md, gap: spacing.sm },
   sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sectionTitle: { color: colors.inkSoft, fontSize: 11, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase' },
   fact: { gap: 2 },
@@ -546,12 +546,12 @@ const styles = StyleSheet.create({
   cancel: { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radii.pill },
   cancelText: { color: colors.inkSoft, fontSize: 13, fontWeight: '700' },
   save: { backgroundColor: colors.sun, paddingHorizontal: spacing.lg, paddingVertical: 6, borderRadius: radii.pill, minWidth: 70, alignItems: 'center' },
-  saveText: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  saveText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
   statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   statusChip: { paddingHorizontal: spacing.sm + 2, paddingVertical: 5, borderRadius: radii.pill, backgroundColor: colors.canvas, borderWidth: 1, borderColor: colors.line },
   statusChipActive: { backgroundColor: colors.olive, borderColor: colors.olive },
   statusChipText: { color: colors.inkSoft, fontSize: 12, fontWeight: '700' },
-  statusChipTextActive: { color: colors.cream },
+  statusChipTextActive: { color: colors.textInverse },
   repButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   repList: { marginTop: spacing.xs, backgroundColor: colors.canvas, borderRadius: radii.sm, borderWidth: 1, borderColor: colors.line },
   repRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.sm },

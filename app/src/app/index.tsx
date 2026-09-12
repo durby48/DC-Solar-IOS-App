@@ -331,7 +331,7 @@ export default function LoginScreen() {
                 value={code}
                 onChangeText={setCode}
                 placeholder="000000"
-                placeholderTextColor={colors.inkSoft}
+                placeholderTextColor={colors.textInverseMuted}
                 keyboardType="number-pad"
                 maxLength={6}
                 autoFocus
@@ -343,7 +343,7 @@ export default function LoginScreen() {
                 onPress={verifyCode}
                 disabled={loading || code.length < 6}>
                 {loading ? (
-                  <ActivityIndicator color={colors.ink} />
+                  <ActivityIndicator color={colors.textOnAction} />
                 ) : (
                   <Text style={styles.buttonText}>Verify</Text>
                 )}
@@ -354,7 +354,7 @@ export default function LoginScreen() {
             <TextInput
               style={styles.input}
               placeholder="Email"
-              placeholderTextColor={colors.inkSoft}
+              placeholderTextColor={colors.textInverseMuted}
               autoCapitalize="none"
               autoComplete="email"
               // Lets iOS/Android offer the saved login from the OS password
@@ -368,7 +368,7 @@ export default function LoginScreen() {
             <TextInput
               style={styles.input}
               placeholder="Password"
-              placeholderTextColor={colors.inkSoft}
+              placeholderTextColor={colors.textInverseMuted}
               secureTextEntry
               autoComplete="current-password"
               textContentType="password"
@@ -406,7 +406,7 @@ export default function LoginScreen() {
               onPress={signIn}
               disabled={loading}>
               {loading ? (
-                <ActivityIndicator color={colors.ink} />
+                <ActivityIndicator color={colors.textOnAction} />
               ) : (
                 <Text style={styles.buttonText}>Sign in</Text>
               )}
@@ -489,7 +489,8 @@ const styles = StyleSheet.create({
   },
   input: {
     // Frosted panel over the artwork — opaque enough to type against, light
-    // enough that the mesh still shows through at the edges.
+    // enough that the mesh still shows through at the edges. It is the one
+    // LIGHT panel in the app, so its text is the inverse of everywhere else.
     backgroundColor: 'rgba(255,255,255,0.86)',
     borderRadius: radii.pill,
     borderWidth: 1,
@@ -497,7 +498,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md - 2,
     fontSize: 16,
-    color: colors.ink,
+    color: colors.textInverse,
   },
   codeInput: {
     fontSize: 24,
@@ -562,7 +563,7 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   buttonText: {
-    color: colors.ink,
+    color: colors.textOnAction,
     fontSize: 17,
     fontWeight: '800',
   },

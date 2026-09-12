@@ -111,8 +111,8 @@ function jobStage(job: Job): Stage {
  * is exactly the point of that column.
  */
 const HEADER_INK: Partial<Record<StageLabel, string>> = {
-  // Complete's pill is the one inverted pill — cream on olive. Cream on
-  // `oliveSoft` would vanish, so the header takes the deep olive.
+  // Complete's pill is the one inverted pill — dark text on sage. That dark
+  // text would vanish on `oliveSoft`, so the header takes the pale sage.
   Complete: colors.oliveDeep,
   // Pending Install's pill fg is `ocean`, which is roughly 2:1 on `skySoft`.
   // That passes as a 12pt pill sitting on white; it does not pass as a 15pt
@@ -669,7 +669,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   countPill: {
-    backgroundColor: 'rgba(255,255,255,0.65)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
     borderRadius: radii.pill,
     minWidth: 24,
     paddingHorizontal: spacing.xs + 2,
@@ -775,7 +775,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: 'rgba(255,255,255,0.75)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     paddingHorizontal: spacing.sm,
     height: 24,
   },
@@ -808,7 +808,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: 'rgba(255,255,255,0.75)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   moveGlyph: {
     fontSize: 18,

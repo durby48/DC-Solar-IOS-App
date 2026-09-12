@@ -64,7 +64,7 @@ import { useMotion } from '@/lib/motion';
 // Shared shell
 // ---------------------------------------------------------------------------
 
-const SCRIM = 'rgba(61,53,46,0.45)';
+const SCRIM = 'rgba(0,0,0,0.45)';
 
 /**
  * The bottom sheet these two tools share.

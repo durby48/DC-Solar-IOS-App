@@ -654,7 +654,7 @@ export default function EmailInboxScreen() {
         accessibilityRole="button"
         accessibilityLabel="Compose"
         style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}>
-        <Ionicons name="pencil" size={24} color={colors.white} />
+        <Ionicons name="pencil" size={24} color={colors.textInverse} />
       </Pressable>
 
       {menu ? (
@@ -763,7 +763,7 @@ const styles = StyleSheet.create({
   list: { paddingBottom: spacing.xxl },
 
   card: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.lg,
     alignItems: 'center',
@@ -782,7 +782,7 @@ const styles = StyleSheet.create({
   cardBody: { color: colors.inkSoft, fontSize: 14, fontWeight: '600', textAlign: 'center' },
 
   // wide
-  wide: { flex: 1, flexDirection: 'row', backgroundColor: colors.white },
+  wide: { flex: 1, flexDirection: 'row', backgroundColor: colors.surface },
   listColumn: { flex: 1, minWidth: 320, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.line },
   listColumnNarrow: { flex: 0, width: 400 },
   listHead: {
@@ -791,7 +791,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
@@ -802,7 +802,7 @@ const styles = StyleSheet.create({
 
   // phone
   phoneHead: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     paddingTop: spacing.sm,
     paddingBottom: spacing.xs,
     gap: spacing.xs,
@@ -859,7 +859,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.pill,
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: 6,
@@ -873,7 +873,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     borderRadius: radii.pill,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -886,9 +886,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  scrim: { flex: 1, backgroundColor: 'rgba(61,53,46,0.35)', justifyContent: 'flex-end' },
+  scrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
   menu: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
     padding: spacing.md,

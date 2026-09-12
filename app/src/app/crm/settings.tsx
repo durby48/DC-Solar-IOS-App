@@ -422,7 +422,7 @@ export default function MessagingSettingsScreen() {
                 (pressed || cellBusy || !cellDirty) && styles.pressed,
               ]}>
               {cellBusy ? (
-                <ActivityIndicator color={colors.ink} size="small" />
+                <ActivityIndicator color={colors.textOnAction} size="small" />
               ) : (
                 <Text style={styles.saveButtonText}>Save number</Text>
               )}
@@ -547,7 +547,7 @@ export default function MessagingSettingsScreen() {
                 (pressed || settingsBusy) && styles.pressed,
               ]}>
               {settingsBusy ? (
-                <ActivityIndicator color={colors.ink} size="small" />
+                <ActivityIndicator color={colors.textOnAction} size="small" />
               ) : (
                 <Text style={styles.saveButtonText}>Save settings</Text>
               )}
@@ -781,7 +781,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: radii.lg,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -799,7 +799,7 @@ const styles = StyleSheet.create({
   noticeText: { flex: 1, color: colors.inkSoft, fontSize: 13, fontWeight: '600' },
 
   card: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     gap: spacing.xs,
@@ -857,7 +857,7 @@ const styles = StyleSheet.create({
     minWidth: 110,
     alignItems: 'center',
   },
-  saveButtonText: { color: colors.ink, fontSize: 14, fontWeight: '800' },
+  saveButtonText: { color: colors.textOnAction, fontSize: 14, fontWeight: '800' },
   cancelButton: {
     borderRadius: radii.pill,
     paddingHorizontal: spacing.lg,

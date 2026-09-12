@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
     width: 200,
     height: 200,
     alignSelf: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
   },
   keyBox: {
     backgroundColor: colors.surfaceSunk,

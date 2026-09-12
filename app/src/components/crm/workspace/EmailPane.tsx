@@ -398,7 +398,7 @@ export function EmailPane({
               </View>
             )}
             <Pressable onPress={() => void sendReply()} disabled={sending || !draft.trim() || !thread} style={({ pressed }) => [styles.send, (pressed || sending || !draft.trim()) && styles.pressed]}>
-              {sending ? <ActivityIndicator color={colors.white} size="small" /> : <Text style={styles.sendText}>Reply</Text>}
+              {sending ? <ActivityIndicator color={colors.textInverse} size="small" /> : <Text style={styles.sendText}>Reply</Text>}
             </Pressable>
           </View>
         </View>
@@ -422,7 +422,7 @@ export function EmailPane({
           onPress={composeNew}
           style={({ pressed }) => [styles.compose, pressed && styles.pressed]}
           accessibilityLabel="New email">
-          <Ionicons name="pencil" size={13} color={colors.white} />
+          <Ionicons name="pencil" size={13} color={colors.textInverse} />
           <Text style={styles.composeText}>New</Text>
         </Pressable>
       </View>
@@ -471,14 +471,14 @@ const styles = StyleSheet.create({
   emptyTitle: { color: colors.ink, fontSize: 15, fontWeight: '800', textAlign: 'center' },
   emptyBody: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center', lineHeight: 18, maxWidth: 380 },
   button: { marginTop: spacing.xs, backgroundColor: colors.sun, borderRadius: 999, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
-  buttonText: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  buttonText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
@@ -487,7 +487,7 @@ const styles = StyleSheet.create({
   barTitle: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: '700' },
   mailbox: { color: colors.inkSoft, fontSize: 11, fontWeight: '600', maxWidth: 160 },
   compose: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: hubColors.crm.fg, borderRadius: radii.pill, paddingHorizontal: spacing.sm + 2, paddingVertical: 5 },
-  composeText: { color: colors.white, fontSize: 12, fontWeight: '800' },
+  composeText: { color: colors.textInverse, fontSize: 12, fontWeight: '800' },
   list: { paddingBottom: spacing.xl },
   row: {
     flexDirection: 'row',
@@ -495,7 +495,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
@@ -513,7 +513,7 @@ const styles = StyleSheet.create({
   messages: { padding: spacing.md, gap: spacing.sm, paddingBottom: spacing.lg },
   message: { borderRadius: radii.md, padding: spacing.sm + 2, gap: 4, maxWidth: '92%' },
   messageOurs: { alignSelf: 'flex-end', backgroundColor: hubColors.crm.bg },
-  messageTheirs: { alignSelf: 'flex-start', backgroundColor: colors.white, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line },
+  messageTheirs: { alignSelf: 'flex-start', backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line },
   messageHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   messageFrom: { flex: 1, color: colors.ink, fontSize: 12, fontWeight: '800' },
   messageWhen: { color: colors.inkSoft, fontSize: 11, fontWeight: '600' },
@@ -522,7 +522,7 @@ const styles = StyleSheet.create({
   attachments: { gap: 4, marginTop: 4 },
   attachment: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.canvas, borderRadius: radii.sm, paddingHorizontal: spacing.sm, paddingVertical: 6 },
   attachmentText: { flex: 1, color: hubColors.crm.fg, fontSize: 12, fontWeight: '700' },
-  replyBox: { padding: spacing.sm, gap: spacing.xs, backgroundColor: colors.white, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
+  replyBox: { padding: spacing.sm, gap: spacing.xs, backgroundColor: colors.surface, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   replyActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   replyLinks: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
   link: { color: hubColors.crm.fg, fontSize: 12, fontWeight: '800' },
@@ -539,7 +539,7 @@ const styles = StyleSheet.create({
   },
   replyInput: { minHeight: 64, maxHeight: 180, textAlignVertical: 'top' },
   send: { backgroundColor: hubColors.crm.fg, borderRadius: radii.pill, paddingHorizontal: spacing.lg, paddingVertical: 7, minWidth: 80, alignItems: 'center' },
-  sendText: { color: colors.white, fontSize: 13, fontWeight: '800' },
+  sendText: { color: colors.textInverse, fontSize: 13, fontWeight: '800' },
   error: { flex: 1, color: colors.danger, fontSize: 12, fontWeight: '700' },
   sent: { flex: 1, color: colors.olive, fontSize: 12, fontWeight: '700' },
   sentBanner: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, backgroundColor: colors.oliveSoft },

@@ -293,7 +293,7 @@ export function Inbox({
         onPress={() => router.push('/messages/compose' as never)}
         accessibilityLabel="New message"
         style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}>
-        <Ionicons name="create" size={24} color={colors.ink} />
+        <Ionicons name="create" size={24} color={colors.textOnAction} />
       </Pressable>
     </View>
   );
@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: radii.lg,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -339,7 +339,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     ...shadows.card,
@@ -372,7 +372,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  unreadPillText: { color: colors.white, fontSize: 12, fontWeight: '800' },
+  unreadPillText: { color: colors.textInverse, fontSize: 12, fontWeight: '800' },
   stopChip: {
     backgroundColor: colors.coralSoft,
     borderRadius: radii.pill,

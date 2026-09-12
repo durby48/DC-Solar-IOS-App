@@ -6,16 +6,18 @@ import WidgetKit
 private let appGroup = "group.com.dcsolarkc.fieldapp"
 private let stateKey = "widgetState"
 
-/// Brand colors mirroring src/constants/theme.ts.
+/// Brand colors mirroring src/constants/theme.ts — the 2026-09-12 "Sonoran
+/// dusk" dark palette. `cream` is the widget ground and is the app's CARD
+/// charcoal (not the page), so the widget matches a card on the Home screen.
 private enum Theme {
-  static let cream = Color(red: 1.0, green: 0.953, blue: 0.902) // #FFF3E6
-  static let sun = Color(red: 1.0, green: 0.690, blue: 0.400) // #FFB066
-  static let ocean = Color(red: 0.353, green: 0.659, blue: 0.812) // #5AA8CF
-  static let ink = Color(red: 0.239, green: 0.208, blue: 0.180) // #3D352E
-  static let inkSoft = Color(red: 0.420, green: 0.365, blue: 0.310) // #6B5D4F
-  static let olive = Color(red: 77 / 255, green: 92 / 255, blue: 43 / 255) // #4D5C2B
-  static let oliveDeep = Color(red: 58 / 255, green: 70 / 255, blue: 31 / 255) // #3A461F
-  static let oliveSoft = Color(red: 231 / 255, green: 237 / 255, blue: 216 / 255) // #E7EDD8
+  static let cream = Color(red: 42 / 255, green: 38 / 255, blue: 35 / 255) // #2A2623
+  static let sun = Color(red: 216 / 255, green: 185 / 255, blue: 138 / 255) // #D8B98A
+  static let ocean = Color(red: 141 / 255, green: 169 / 255, blue: 189 / 255) // #8DA9BD
+  static let ink = Color(red: 239 / 255, green: 231 / 255, blue: 220 / 255) // #EFE7DC
+  static let inkSoft = Color(red: 184 / 255, green: 173 / 255, blue: 159 / 255) // #B8AD9F
+  static let olive = Color(red: 169 / 255, green: 184 / 255, blue: 148 / 255) // #A9B894
+  static let oliveDeep = Color(red: 196 / 255, green: 208 / 255, blue: 179 / 255) // #C4D0B3
+  static let oliveSoft = Color(red: 46 / 255, green: 58 / 255, blue: 43 / 255) // #2E3A2B
 }
 
 struct WidgetState {

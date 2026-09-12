@@ -15,12 +15,13 @@ export type CardElevation = 'none' | 'subtle' | 'card' | 'raised' | 'hero';
  * olive palette; that is what this component exists to stop.
  *
  * Tones:
- *   plain  — white, sitting ON the cream page. The default.
- *   sunk   — a well punched INTO the page: no shadow, a border, warmer fill.
+ *   plain  — the charcoal card, sitting ON the darker page. The default.
+ *   sunk   — a well punched INTO the card: no shadow, a border, lifted fill.
  *            Use for nested content (a form inside a card, an inset list).
  *   danger — the tinted ground for a destructive confirmation.
- *   olive  — inverted. Text on it must be `textOnDark`; `AppText` will not
- *            do that for you, so pass `color={colors.textOnDark}`.
+ *   olive  — the solid cactus ground. Text on it must be `textOnDark`;
+ *            `AppText` will not do that for you, so pass
+ *            `color={colors.textOnDark}`.
  */
 export function Card({
   tone = 'plain',
@@ -72,7 +73,7 @@ const TONES: Record<CardTone, ViewStyle> = {
     borderColor: colors.borderStrong,
   },
   danger: { backgroundColor: colors.dangerSoft },
-  olive: { backgroundColor: colors.accentPrimary },
+  olive: { backgroundColor: colors.oliveGround },
 };
 
 const styles = StyleSheet.create({

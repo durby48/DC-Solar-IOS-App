@@ -57,7 +57,7 @@ function LensChip({
   attention?: boolean;
 }) {
   const bg = selected ? hue.fg : attention ? colors.amberSoft : hue.bg;
-  const fg = selected ? colors.white : attention ? colors.amberDeep : hue.deep;
+  const fg = selected ? colors.textInverse : attention ? colors.amberDeep : hue.deep;
   return (
     <Pressable
       onPress={onPress}
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     margin: spacing.sm,
     marginBottom: spacing.xs,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.line,
@@ -330,7 +330,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
-  rowSelected: { backgroundColor: colors.white },
+  rowSelected: { backgroundColor: colors.surface },
   accent: { width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: 'transparent', marginRight: -2 },
   accentSelected: { backgroundColor: hubColors.crm.fg },
   rowPressed: { backgroundColor: hubColors.crm.bg },
@@ -354,7 +354,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  unreadPillText: { color: colors.white, fontSize: 10, fontWeight: '800' },
+  unreadPillText: { color: colors.textInverse, fontSize: 10, fontWeight: '800' },
   empty: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center', padding: spacing.lg },
   pressed: { opacity: 0.6 },
 });

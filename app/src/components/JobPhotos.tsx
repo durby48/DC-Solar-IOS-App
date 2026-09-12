@@ -302,7 +302,7 @@ export function JobPhotos({ jobId }: { jobId: string }) {
       {signedIn ? (
         uploading ? (
           <View style={[styles.addButton, styles.addButtonPressed]}>
-            <ActivityIndicator color={colors.ink} />
+            <ActivityIndicator color={colors.textOnAction} />
             <Text style={styles.addButtonText}>Uploading…</Text>
           </View>
         ) : Platform.OS === 'web' ? (
@@ -314,7 +314,7 @@ export function JobPhotos({ jobId }: { jobId: string }) {
                 styles.webButton,
                 pressed && styles.addButtonPressed,
               ]}>
-              <Ionicons name="camera" size={18} color={colors.ink} />
+              <Ionicons name="camera" size={18} color={colors.textOnAction} />
               <Text style={styles.addButtonText}>Camera</Text>
             </Pressable>
             <Pressable
@@ -332,7 +332,7 @@ export function JobPhotos({ jobId }: { jobId: string }) {
           <Pressable
             onPress={chooseSource}
             style={({ pressed }) => [styles.addButton, pressed && styles.addButtonPressed]}>
-            <Ionicons name="camera" size={18} color={colors.ink} />
+            <Ionicons name="camera" size={18} color={colors.textOnAction} />
             <Text style={styles.addButtonText}>Add photo</Text>
           </Pressable>
         )
@@ -407,7 +407,7 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: 'rgba(61, 53, 46, 0.65)',
+    backgroundColor: 'rgba(0,0,0, 0.65)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -458,7 +458,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   addButtonText: {
-    color: colors.ink,
+    color: colors.textOnAction,
     fontSize: 15,
     fontWeight: '800',
   },

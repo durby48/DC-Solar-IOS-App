@@ -352,7 +352,7 @@ export default function ComposeEmailScreen() {
               style={({ pressed }) => [styles.barDanger, (pressed || discarding) && styles.pressed]}
               accessibilityRole="button">
               {discarding ? (
-                <ActivityIndicator color={colors.white} size="small" />
+                <ActivityIndicator color={colors.textInverse} size="small" />
               ) : (
                 <Text style={styles.barDangerText}>Discard</Text>
               )}
@@ -377,11 +377,11 @@ export default function ComposeEmailScreen() {
               accessibilityRole="button"
               style={({ pressed }) => [styles.send, (pressed || sending) && styles.pressed]}>
               {sending ? (
-                <ActivityIndicator color={colors.white} size="small" />
+                <ActivityIndicator color={colors.textInverse} size="small" />
               ) : (
                 <>
                   <Text style={styles.sendText}>Send</Text>
-                  <Ionicons name="send" size={15} color={colors.white} />
+                  <Ionicons name="send" size={15} color={colors.textInverse} />
                 </>
               )}
             </Pressable>
@@ -500,7 +500,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.white },
+  screen: { flex: 1, backgroundColor: colors.surface },
   center: { alignItems: 'center', justifyContent: 'center', gap: spacing.sm, padding: spacing.lg },
   gateTitle: { color: colors.ink, fontSize: 17, fontWeight: '800', textAlign: 'center' },
   gateBody: { color: colors.inkSoft, fontSize: 14, fontWeight: '600', textAlign: 'center' },
@@ -513,7 +513,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
   },
   barIcon: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: radii.pill },
   status: { flex: 1, color: colors.textMuted, fontSize: 12, fontWeight: '600' },
@@ -529,7 +529,7 @@ const styles = StyleSheet.create({
     minWidth: 88,
     justifyContent: 'center',
   },
-  sendText: { color: colors.white, fontSize: 14, fontWeight: '800' },
+  sendText: { color: colors.textInverse, fontSize: 14, fontWeight: '800' },
   confirmText: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '700' },
   barGhost: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   barGhostText: { color: colors.inkSoft, fontSize: 14, fontWeight: '800' },
@@ -541,7 +541,7 @@ const styles = StyleSheet.create({
     minWidth: 88,
     alignItems: 'center',
   },
-  barDangerText: { color: colors.white, fontSize: 14, fontWeight: '800' },
+  barDangerText: { color: colors.textInverse, fontSize: 14, fontWeight: '800' },
 
   form: { paddingBottom: spacing.xxl },
   field: {

@@ -286,7 +286,7 @@ export default function KeypadScreen() {
               disabled={savingCell}
               style={({ pressed }) => [styles.setupSave, (pressed || savingCell) && styles.pressed]}>
               {savingCell ? (
-                <ActivityIndicator color={colors.ink} size="small" />
+                <ActivityIndicator color={colors.textOnAction} size="small" />
               ) : (
                 <Text style={styles.setupSaveText}>Save & call</Text>
               )}
@@ -347,7 +347,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.sm + 2,
     opacity: 0.8,
@@ -367,14 +367,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.xs,
     alignSelf: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
   textButtonLabel: { color: colors.ocean, fontSize: 13, fontWeight: '800' },
   setup: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     gap: spacing.sm,
@@ -405,6 +405,6 @@ const styles = StyleSheet.create({
     minWidth: 110,
     alignItems: 'center',
   },
-  setupSaveText: { color: colors.ink, fontSize: 14, fontWeight: '800' },
+  setupSaveText: { color: colors.textOnAction, fontSize: 14, fontWeight: '800' },
   pressed: { opacity: 0.6 },
 });

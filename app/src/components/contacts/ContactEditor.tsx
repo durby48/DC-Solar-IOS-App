@@ -154,7 +154,7 @@ export function ContactEditor({
           onPress={() => void save()}
           disabled={saving}
           style={({ pressed }) => [styles.save, (pressed || saving) && styles.pressed]}>
-          {saving ? <ActivityIndicator color={colors.ink} size="small" /> : <Text style={styles.saveText}>Save</Text>}
+          {saving ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.saveText}>Save</Text>}
         </Pressable>
       </View>
     </View>
@@ -163,7 +163,7 @@ export function ContactEditor({
 
 const styles = StyleSheet.create({
   form: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     gap: spacing.sm,
@@ -196,6 +196,6 @@ const styles = StyleSheet.create({
     minWidth: 72,
     alignItems: 'center',
   },
-  saveText: { color: colors.ink, fontSize: 14, fontWeight: '800' },
+  saveText: { color: colors.textOnAction, fontSize: 14, fontWeight: '800' },
   pressed: { opacity: 0.6 },
 });

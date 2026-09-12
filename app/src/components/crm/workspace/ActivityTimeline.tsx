@@ -22,7 +22,7 @@ const ICONS: Record<ActivityKind, { name: keyof typeof Ionicons.glyphMap; fg: st
   note: { name: 'document-text', fg: colors.amberDeep, bg: colors.amberSoft },
   job_created: { name: 'hammer', fg: colors.olive, bg: colors.oliveSoft },
   job_scheduled: { name: 'calendar', fg: colors.olive, bg: colors.oliveSoft },
-  job_completed: { name: 'checkmark-circle', fg: colors.cream, bg: colors.olive },
+  job_completed: { name: 'checkmark-circle', fg: colors.textInverse, bg: colors.olive },
   job_stage: { name: 'swap-horizontal', fg: colors.olive, bg: colors.oliveSoft },
   lead_status: { name: 'flag', fg: colors.amberDeep, bg: colors.amberSoft },
   task_added: { name: 'checkbox-outline', fg: colors.indigoDeep, bg: colors.indigoSoft },

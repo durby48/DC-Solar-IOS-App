@@ -23,16 +23,16 @@ import { useRole } from '@/lib/role';
  * The top of Home: who you are, what day it is, and a greeting that changes
  * with the clock.
  *
- * 2026-09-13: no longer the olive band. Devon asked for the header and the
- * clock bar to take "the same color scheme you updated on the app", so it is
- * now the app's cool surface with ink text and ONE accent — a slim stripe of
- * the five hub colours, in Home order, under the greeting. The clock card no
- * longer overlaps it; it sits below like every other card.
+ * 2026-09-12 "Sonoran dusk": the band is a colour block again — Devon chose
+ * the muted cactus header over a flat charcoal one — so it sits on
+ * `oliveGround` with the light ink greeting and ONE accent: a slim stripe of
+ * the five hub pastels, in Home order, under the greeting. The clock card
+ * does not overlap it; it sits below like every other card.
  *
  * It still adds the top inset itself rather than sitting inside a
  * `SafeAreaView`: it is the first scroll child on a screen with `edges={[]}`,
- * so the surface runs up under the status bar (dark glyphs — the root
- * `<StatusBar style="dark" />` is right for this surface now).
+ * so the cactus runs up under the status bar (light glyphs — the root
+ * `<StatusBar style="light" />` suits it and the charcoal page alike).
  *
  * THE AVATAR IS THE PROFILE PICTURE CONTROL. Tapping it opens a small panel
  * under the greeting rather than a modal: this band is already the top of the
@@ -381,7 +381,7 @@ const styles = StyleSheet.create({
   band: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.oliveGround,
     gap: spacing.md,
   },
   /** Five equal segments, one per hub, in a pill. */
@@ -430,7 +430,7 @@ const styles = StyleSheet.create({
     left: 0,
     width: AVATAR,
     height: AVATAR,
-    backgroundColor: 'rgba(61,53,46,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
   pressed: { opacity: 0.7 },
 
@@ -452,7 +452,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.sm,
     padding: spacing.sm,
   },

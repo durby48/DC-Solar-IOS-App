@@ -726,9 +726,9 @@ export function MediaLightbox({
                 accessibilityRole="button"
                 style={({ pressed }) => [styles.saveButton, pressed && styles.dimmed]}>
                 {saving ? (
-                  <ActivityIndicator size="small" color={colors.ink} />
+                  <ActivityIndicator size="small" color={colors.textOnAction} />
                 ) : (
-                  <AppText variant="button" color={colors.ink}>
+                  <AppText variant="button" color={colors.textOnAction}>
                     Save
                   </AppText>
                 )}

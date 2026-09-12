@@ -595,7 +595,7 @@ export default function EmployeeOfMonthScreen() {
                     disabled={saving}
                     style={({ pressed }) => [styles.primaryButton, pressed && styles.rowPressed]}>
                     {saving ? (
-                      <ActivityIndicator color={colors.white} />
+                      <ActivityIndicator color={colors.textInverse} />
                     ) : (
                       <Text style={styles.primaryButtonText}>Save month</Text>
                     )}
@@ -610,7 +610,7 @@ export default function EmployeeOfMonthScreen() {
                   setOpen(true);
                 }}
                 style={({ pressed }) => [styles.addButton, pressed && styles.rowPressed]}>
-                <Ionicons name="add" size={18} color={colors.white} />
+                <Ionicons name="add" size={18} color={colors.textInverse} />
                 <Text style={styles.addButtonText}>Add month</Text>
               </Pressable>
             )}
@@ -668,7 +668,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: radii.lg,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -717,12 +717,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 4,
   },
   addButtonText: {
-    color: colors.white,
+    color: colors.textInverse,
     fontSize: 15,
     fontWeight: '800',
   },
   formCard: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     gap: spacing.sm,
@@ -778,7 +778,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs + 2,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
   },
@@ -810,7 +810,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs + 3,
   },
   sourceTabActive: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     ...shadows.card,
   },
   sourceTabText: {
@@ -886,12 +886,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm + 2,
   },
   primaryButtonText: {
-    color: colors.white,
+    color: colors.textInverse,
     fontSize: 14,
     fontWeight: '800',
   },
   entryCard: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     overflow: 'hidden',
     ...shadows.card,

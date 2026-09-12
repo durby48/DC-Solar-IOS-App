@@ -184,7 +184,7 @@ export function CurrentJobCard({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     gap: spacing.xs + 2,
@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   stageOption: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.sm + 2, paddingVertical: 7 },
-  stageOptionActive: { backgroundColor: colors.white },
+  stageOptionActive: { backgroundColor: colors.surface },
   stageDot: { width: 8, height: 8, borderRadius: 4 },
   stageOptionText: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: '600' },
   stageOptionTextActive: { fontWeight: '800' },

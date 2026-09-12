@@ -191,7 +191,7 @@ export function EmployeeOfMonthPlacard({
               {motion.enabled ? (
                 <PulseRing color={colors.sun} radius={radii.pill} scaleTo={1.7} duration={2600} />
               ) : null}
-              <Ionicons name="trophy" size={15} color={colors.oliveDeep} />
+              <Ionicons name="trophy" size={15} color={colors.textOnAction} />
             </View>
             {/* Two engraved lines rather than one "Employee of the Month ·
                 August 2026" string. Measured on a 375pt phone that string
@@ -203,7 +203,7 @@ export function EmployeeOfMonthPlacard({
               <AppText variant="section" color={colors.textOnDark} numberOfLines={1}>
                 Employee of the Month
               </AppText>
-              <AppText variant="section" color={colors.sunLight} numberOfLines={1}>
+              <AppText variant="section" color={colors.sun} numberOfLines={1}>
                 {card.label}
               </AppText>
             </View>
@@ -217,7 +217,7 @@ export function EmployeeOfMonthPlacard({
                   accessibilityRole="button"
                   accessibilityLabel="Previous month's employee of the month"
                   style={[styles.arrow, !pager.canPrev && styles.arrowDisabled]}>
-                  <Ionicons name="chevron-back" size={15} color={colors.sunLight} />
+                  <Ionicons name="chevron-back" size={15} color={colors.sun} />
                 </AnimatedPressable>
                 <AnimatedPressable
                   onPress={pager.onNext}
@@ -227,7 +227,7 @@ export function EmployeeOfMonthPlacard({
                   accessibilityRole="button"
                   accessibilityLabel="Next month's employee of the month"
                   style={[styles.arrow, !pager.canNext && styles.arrowDisabled]}>
-                  <Ionicons name="chevron-forward" size={15} color={colors.sunLight} />
+                  <Ionicons name="chevron-forward" size={15} color={colors.sun} />
                 </AnimatedPressable>
               </View>
             ) : null}
@@ -249,12 +249,12 @@ export function EmployeeOfMonthPlacard({
                 {card.employeeName}
               </AppText>
               {card.caption ? (
-                <AppText variant="body" color={colors.oliveSoft} numberOfLines={5}>
+                <AppText variant="body" color={colors.oliveDeep} numberOfLines={5}>
                   {card.caption}
                 </AppText>
               ) : null}
               {card.isFallback ? (
-                <AppText variant="caption" color={colors.sunLight}>
+                <AppText variant="caption" color={colors.sun}>
                   Still standing from {formatMonthLabel(card.month)}
                 </AppText>
               ) : null}
@@ -263,7 +263,7 @@ export function EmployeeOfMonthPlacard({
 
           {/* Only shown to the people who can actually do something about it. */}
           {!card.photoUrl && isAdmin ? (
-            <AppText variant="caption" color={colors.sunLight}>
+            <AppText variant="caption" color={colors.sun}>
               Add one in Menu → Employee of the Month
             </AppText>
           ) : null}
@@ -322,7 +322,7 @@ function PhotoSlot({
 
   return (
     <View style={[styles.frame, styles.frameEmpty]}>
-      <Ionicons name="images-outline" size={26} color={colors.sunLight} />
+      <Ionicons name="images-outline" size={26} color={colors.sun} />
       <AppText variant="caption" color={colors.textOnDark} align="center">
         Photo coming soon
       </AppText>
@@ -337,13 +337,13 @@ const FRAME_H = 150;
 const styles = StyleSheet.create({
   shell: {
     borderRadius: radii.lg,
-    backgroundColor: colors.olive,
+    backgroundColor: colors.oliveGround,
     ...shadows.card,
   },
   placard: {
     padding: spacing.md,
     gap: spacing.sm,
-    // The gold edge of the plaque: sunLight, held back so it reads as a bevel
+    // The gold edge of the plaque: pale tan, held back so it reads as a bevel
     // rather than a highlighter line.
     borderWidth: 1,
     borderColor: 'rgba(255,211,166,0.45)',
@@ -382,7 +382,7 @@ const styles = StyleSheet.create({
   },
   rule: {
     height: 1,
-    backgroundColor: colors.sunLight,
+    backgroundColor: colors.sun,
     opacity: 0.45,
   },
   row: {
@@ -401,8 +401,8 @@ const styles = StyleSheet.create({
   },
   frameFilled: {
     borderWidth: 2,
-    borderColor: colors.sunLight,
-    backgroundColor: colors.oliveDeep,
+    borderColor: colors.sun,
+    backgroundColor: colors.oliveGround,
   },
   frameEmpty: {
     borderWidth: 1.5,

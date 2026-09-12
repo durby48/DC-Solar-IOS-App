@@ -174,9 +174,9 @@ export function Dialpad({
         accessibilityLabel="Call"
         style={({ pressed }) => [styles.callButton, !canCall && styles.callDisabled, pressed && canCall && styles.pressed]}>
         {callBusy ? (
-          <ActivityIndicator color={colors.white} />
+          <ActivityIndicator color={colors.textInverse} />
         ) : (
-          <Ionicons name="call" size={28} color={colors.white} />
+          <Ionicons name="call" size={28} color={colors.textInverse} />
         )}
       </Pressable>
     </View>
@@ -210,7 +210,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
   },
   hidden: { opacity: 0 },
   pasteNote: { color: colors.inkSoft, fontSize: 12, fontWeight: '600', textAlign: 'center' },
@@ -225,7 +225,7 @@ const styles = StyleSheet.create({
     width: KEY_SIZE,
     height: KEY_SIZE,
     borderRadius: KEY_SIZE / 2,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },

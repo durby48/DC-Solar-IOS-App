@@ -68,7 +68,7 @@ export function ConnectionBanner() {
       <Ionicons
         name={offline ? 'cloud-offline' : 'cellular'}
         size={18}
-        color={offline ? colors.white : colors.ink}
+        color={offline ? colors.textInverse : colors.textOnAction}
       />
       <View style={styles.text}>
         <Text style={[styles.title, !offline && styles.titleDark]}>
@@ -102,20 +102,24 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     ...shadows.raised,
   },
+  // Both fills are pastels on the dark palette (terracotta, desert tan), so
+  // both carry DARK text: white is 3.2:1 on danger and 1.9:1 on sun. The
+  // "Dark" suffix on the slow-signal styles is historical — it now means the
+  // action-pill text rather than ink.
   offline: { backgroundColor: colors.danger },
-  slow: { backgroundColor: colors.sunLight },
+  slow: { backgroundColor: colors.sun },
   text: { flex: 1, gap: 1 },
-  title: { color: colors.white, fontSize: 14, fontWeight: '800' },
-  titleDark: { color: colors.ink },
-  body: { color: 'rgba(255,255,255,0.92)', fontSize: 11, lineHeight: 15, fontWeight: '600' },
-  bodyDark: { color: colors.inkSoft },
+  title: { color: colors.textInverse, fontSize: 14, fontWeight: '800' },
+  titleDark: { color: colors.textOnAction },
+  body: { color: 'rgba(30,26,23,0.85)', fontSize: 11, lineHeight: 15, fontWeight: '600' },
+  bodyDark: { color: colors.textOnAction },
   retry: {
-    backgroundColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(0,0,0,0.16)',
     borderRadius: radii.pill,
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: spacing.xs,
   },
-  retryText: { color: colors.white, fontSize: 12, fontWeight: '800' },
-  retryTextDark: { color: colors.ink },
+  retryText: { color: colors.textInverse, fontSize: 12, fontWeight: '800' },
+  retryTextDark: { color: colors.textOnAction },
   pressed: { opacity: 0.7 },
 });

@@ -65,7 +65,7 @@ export function FolderRail({
         }}
         accessibilityRole="button"
         style={({ pressed }) => [styles.compose, pressed && styles.pressed]}>
-        <Ionicons name="pencil" size={18} color={colors.white} />
+        <Ionicons name="pencil" size={18} color={colors.textInverse} />
         <Text style={styles.composeText}>Compose</Text>
       </Pressable>
       <ScrollView contentContainerStyle={styles.railList} showsVerticalScrollIndicator={false}>
@@ -137,7 +137,7 @@ export function FolderStrip({
             <Ionicons
               name={selected ? item.icon : (`${item.icon}-outline` as IconName)}
               size={14}
-              color={selected ? colors.white : colors.inkSoft}
+              color={selected ? colors.textInverse : colors.inkSoft}
             />
             <Text style={[styles.chipText, selected && styles.chipTextActive]} numberOfLines={1}>
               {item.label}
@@ -173,7 +173,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm + 4,
   },
-  composeText: { color: colors.white, fontSize: 14, fontWeight: '800' },
+  composeText: { color: colors.textInverse, fontSize: 14, fontWeight: '800' },
   railList: { paddingRight: spacing.sm, paddingBottom: spacing.md },
   railSection: {
     color: colors.textMuted,
@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.pill,
     paddingHorizontal: spacing.sm + 4,
     paddingVertical: 6,
@@ -222,8 +222,8 @@ const styles = StyleSheet.create({
   },
   chipActive: { backgroundColor: hubColors.crm.fg, borderColor: hubColors.crm.fg },
   chipText: { color: colors.inkSoft, fontSize: 12, fontWeight: '800' },
-  chipTextActive: { color: colors.white },
+  chipTextActive: { color: colors.textInverse },
   chipCount: { color: colors.textMuted, fontSize: 11, fontWeight: '800' },
-  chipCountActive: { color: colors.white },
+  chipCountActive: { color: colors.textInverse },
   pressed: { opacity: 0.75 },
 });

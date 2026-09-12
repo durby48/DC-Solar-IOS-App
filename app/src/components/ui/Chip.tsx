@@ -15,8 +15,9 @@ export type ChipTone = 'neutral' | 'olive' | 'sun' | 'ocean' | 'danger' | 'succe
  *
  * Selected state is a FILL change, not just a border change — on a phone in
  * sunlight a 1px outline is not a state anyone can see. Unselected chips are
- * the soft tint of their tone; selected chips are the saturated hue with
- * contrasting text.
+ * the dark tint of their tone with the pastel as text; selected chips flip to
+ * the pastel as the fill with DARK (`textInverse`) text. Never white on a
+ * pastel — every one of them is under 3:1 with white.
  *
  * Without `onPress` it renders as a static tag (and stays non-interactive to
  * screen readers).
@@ -86,44 +87,45 @@ const TONES: Record<
     offBg: colors.surface,
     offFg: colors.textSecondary,
     offBorder: colors.borderStrong,
+    // Selected neutral is a LIGHT pill (ink is light now) with dark text.
     onBg: colors.ink,
-    onFg: colors.textOnDark,
+    onFg: colors.textInverse,
   },
   olive: {
     offBg: colors.oliveSoft,
     offFg: colors.oliveDeep,
     offBorder: colors.oliveSoft,
     onBg: colors.olive,
-    onFg: colors.textOnDark,
+    onFg: colors.textInverse,
   },
   sun: {
     offBg: colors.sunLight,
     offFg: colors.ink,
     offBorder: colors.sunLight,
-    // Sun keeps INK text in both states — cream on sun is unreadable.
+    // The tan pill takes the action text — ink is 1.6:1 on it.
     onBg: colors.sun,
-    onFg: colors.ink,
+    onFg: colors.textOnAction,
   },
   ocean: {
     offBg: colors.skySoft,
     offFg: colors.ocean,
     offBorder: colors.skySoft,
     onBg: colors.ocean,
-    onFg: colors.white,
+    onFg: colors.textInverse,
   },
   danger: {
     offBg: colors.dangerSoft,
     offFg: colors.danger,
     offBorder: colors.dangerSoft,
     onBg: colors.danger,
-    onFg: colors.white,
+    onFg: colors.textInverse,
   },
   success: {
     offBg: colors.mintSoft,
     offFg: colors.mintDeep,
     offBorder: colors.mintSoft,
     onBg: colors.success,
-    onFg: colors.white,
+    onFg: colors.textInverse,
   },
 };
 

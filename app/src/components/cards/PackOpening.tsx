@@ -184,7 +184,7 @@ export function PackOpening({ onClose }: { onClose: () => void }) {
               <AppText variant="title" color={colors.textOnDark} align="center">
                 {failure?.code === 'no_packs' ? 'No packs yet' : "That didn't work"}
               </AppText>
-              <AppText variant="body" color={colors.oliveSoft} align="center">
+              <AppText variant="body" color={colors.oliveDeep} align="center">
                 {failure?.message ?? 'The pack could not be opened.'}
               </AppText>
               <Button label="Close" variant="onDark" onPress={onClose} />
@@ -200,7 +200,7 @@ export function PackOpening({ onClose }: { onClose: () => void }) {
                       ? `${newCount} new for the deck`
                       : 'Your pack'}
               </AppText>
-              <AppText variant="caption" color={colors.oliveSoft} align="center">
+              <AppText variant="caption" color={colors.oliveDeep} align="center">
                 Seven cards · four common, two uncommon, one hit
               </AppText>
 
@@ -294,10 +294,10 @@ function Slot({
           /* The copy is banked either way — only the card row failed to load.
              Say so plainly rather than showing a blank rectangle. */
           <View style={[styles.mystery, { width, height }]}>
-            <AppText variant="caption" color={colors.oliveSoft} align="center">
+            <AppText variant="caption" color={colors.oliveDeep} align="center">
               Added to your deck
             </AppText>
-            <AppText variant="caption" color={colors.oliveSoft} align="center" numberOfLines={2}>
+            <AppText variant="caption" color={colors.oliveDeep} align="center" numberOfLines={2}>
               {pull.cardId}
             </AppText>
           </View>
@@ -305,7 +305,7 @@ function Slot({
 
         {revealed && pull.isNew ? (
           <View style={styles.ribbon} pointerEvents="none">
-            <AppText variant="caption" color={colors.ink} style={styles.ribbonText}>
+            <AppText variant="caption" color={colors.textOnAction} style={styles.ribbonText}>
               NEW
             </AppText>
           </View>
@@ -314,7 +314,7 @@ function Slot({
 
       <AppText
         variant="caption"
-        color={revealed ? colors.oliveSoft : 'transparent'}
+        color={revealed ? colors.oliveDeep : 'transparent'}
         align="center"
         numberOfLines={1}
         style={styles.slotLabel}>

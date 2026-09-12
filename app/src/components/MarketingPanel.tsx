@@ -221,7 +221,7 @@ export function MarketingPanel({ refreshKey = 0 }: { refreshKey?: number }) {
     <Pressable
       onPress={() => openNotice(connectExplanation(platform))}
       style={({ pressed }) => [styles.connectButton, pressed && styles.pressed]}>
-      <Ionicons name="link" size={14} color={colors.ink} />
+      <Ionicons name="link" size={14} color={colors.textOnAction} />
       <Text style={styles.connectButtonText}>{`Connect ${PLATFORM_SHORT[platform]}`}</Text>
     </Pressable>
   );
@@ -550,7 +550,7 @@ const styles = StyleSheet.create({
 
   periodRow: { flexDirection: 'row', gap: spacing.xs, marginTop: spacing.md },
   periodChip: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs + 2,
@@ -558,7 +558,7 @@ const styles = StyleSheet.create({
   },
   periodChipActive: { backgroundColor: colors.ocean },
   periodChipText: { color: colors.inkSoft, fontSize: 12, fontWeight: '800' },
-  periodChipTextActive: { color: colors.white },
+  periodChipTextActive: { color: colors.textInverse },
 
   platformHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   platformIcon: {
@@ -599,7 +599,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     marginTop: spacing.xs,
   },
-  connectButtonText: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  connectButtonText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
 
   reviewCard: {
     backgroundColor: colors.card,

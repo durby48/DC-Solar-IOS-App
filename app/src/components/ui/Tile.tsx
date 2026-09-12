@@ -19,8 +19,8 @@ export type TileTone = number | 'olive' | HubKey;
  * The square-ish destination tile the Home hub is built from.
  *
  * 2026-09-12 overhaul: every tile carries a COLOUR EDGE — a hairline around
- * the white surface in the same hue as its icon — so a grid reads as sharp
- * blocks of colour on the white page instead of identical white cards.
+ * the card surface in the same pastel as its icon — so a grid reads as
+ * distinct blocks of colour on the charcoal page instead of identical cards.
  * `compact` (the desktop browser) shrinks the icon square and padding: at
  * four columns the phone-sized whitespace behind each icon looked empty.
  *
@@ -104,7 +104,7 @@ export function Tile({
         ) : null}
         {locked ? (
           <View style={styles.lock}>
-            <Ionicons name="lock-closed" size={9} color={colors.white} />
+            <Ionicons name="lock-closed" size={9} color={colors.textInverse} />
           </View>
         ) : null}
       </View>

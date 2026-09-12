@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/app-icon.png",
     "scheme": "dcsolarkc",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "ios": {
       "bundleIdentifier": "com.dcsolarkc.fieldapp",
       "appleTeamId": "E4B2Y6BWCH",
@@ -50,7 +50,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FFF3E6",
+          "backgroundColor": "#1E1C1A",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }

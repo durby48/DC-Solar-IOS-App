@@ -168,10 +168,10 @@ export default function ThreadScreen() {
             (pressed || callBusy) && styles.pressed,
           ]}>
           {callBusy ? (
-            <ActivityIndicator color={colors.ink} size="small" />
+            <ActivityIndicator color={colors.textOnAction} size="small" />
           ) : (
             <>
-              <Ionicons name="call" size={14} color={phone ? colors.ink : colors.inkSoft} />
+              <Ionicons name="call" size={14} color={phone ? colors.textOnAction : colors.inkSoft} />
               <Text style={[styles.callButtonText, !phone && styles.callButtonTextMuted]}>Call</Text>
             </>
           )}
@@ -252,7 +252,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   callButtonMuted: { backgroundColor: colors.slateSoft },
-  callButtonText: { color: colors.ink, fontSize: 12, fontWeight: '800' },
+  callButtonText: { color: colors.textOnAction, fontSize: 12, fontWeight: '800' },
   callButtonTextMuted: { color: colors.inkSoft },
   strangerBar: {
     flexDirection: 'row',

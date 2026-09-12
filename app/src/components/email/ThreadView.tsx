@@ -387,7 +387,7 @@ export function ThreadView({
               onPress={() => compose('reply', newest)}
               style={({ pressed }) => [styles.replyButton, pressed && styles.pressed]}
               accessibilityRole="button">
-              <Ionicons name="arrow-undo" size={16} color={colors.white} />
+              <Ionicons name="arrow-undo" size={16} color={colors.textInverse} />
               <Text style={styles.replyButtonText}>Reply</Text>
             </Pressable>
             <Pressable
@@ -484,7 +484,7 @@ const styles = StyleSheet.create({
     gap: 2,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
@@ -505,7 +505,7 @@ const styles = StyleSheet.create({
   errorText: { flex: 1, color: colors.danger, fontSize: 13, fontWeight: '700' },
 
   message: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     gap: 2,
@@ -583,12 +583,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md + 2,
     paddingVertical: spacing.sm + 2,
   },
-  replyButtonText: { color: colors.white, fontSize: 14, fontWeight: '800' },
+  replyButtonText: { color: colors.textInverse, fontSize: 14, fontWeight: '800' },
   replyGhost: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,

@@ -380,7 +380,7 @@ export default function CalendarScreen() {
                                 variant="caption"
                                 color={
                                   isToday
-                                    ? colors.textOnDark
+                                    ? colors.textInverse
                                     : day.inMonth
                                       ? colors.textPrimary
                                       : colors.borderStrong
@@ -400,7 +400,7 @@ export default function CalendarScreen() {
                                 style={styles.gridChip}>
                                 <AppText
                                   variant="caption"
-                                  color={colors.ink}
+                                  color={colors.textOnAction}
                                   align="center"
                                   numberOfLines={1}
                                   style={styles.gridChipText}>

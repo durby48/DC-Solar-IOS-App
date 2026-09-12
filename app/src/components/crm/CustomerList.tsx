@@ -675,7 +675,7 @@ export function CustomerList({
                   (pressed || adding) && styles.pressed,
                 ]}>
                 {adding ? (
-                  <ActivityIndicator color={colors.ink} size="small" />
+                  <ActivityIndicator color={colors.textOnAction} size="small" />
                 ) : (
                   <Text style={styles.saveButtonText}>Add customer</Text>
                 )}
@@ -819,7 +819,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: radii.lg,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -889,7 +889,7 @@ const styles = StyleSheet.create({
   },
   leadsSection: { gap: spacing.xs },
   leadCard: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     overflow: 'hidden',
     ...shadows.card,
@@ -932,7 +932,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     ...shadows.card,
@@ -957,7 +957,7 @@ const styles = StyleSheet.create({
   },
   archivedChipText: { color: colors.slateDeep, fontSize: 10, fontWeight: '800' },
   formCard: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     gap: spacing.xs,
@@ -1004,7 +1004,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  saveButtonText: { color: colors.ink, fontSize: 14, fontWeight: '800' },
+  saveButtonText: { color: colors.textOnAction, fontSize: 14, fontWeight: '800' },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',

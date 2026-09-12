@@ -207,7 +207,7 @@ const styles = StyleSheet.create({
     ...shadows.card,
   },
   googlePill: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
   },

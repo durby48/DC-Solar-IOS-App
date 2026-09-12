@@ -294,7 +294,7 @@ const styles = StyleSheet.create({
     height: 150,
     backgroundColor: colors.skySoft,
   },
-  /** Desktop: the hub-blue edge is the card's accent on the white page. */
+  /** Desktop: the hub-sky edge is the card's accent on the charcoal page. */
   cardWide: {
     borderWidth: 1.5,
     borderColor: hubColors.pipeline.fg,
@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
   },
   frameBoxWide: {
     height: WIDE_STAGE_HEIGHT,
@@ -321,7 +321,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     height: 18,
-    backgroundColor: 'rgba(255,255,255,0.35)',
+    backgroundColor: 'rgba(42,38,35,0.55)',
   },
   ticker: {
     paddingVertical: spacing.sm,

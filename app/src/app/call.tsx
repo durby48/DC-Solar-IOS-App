@@ -364,7 +364,7 @@ export default function CallScreen() {
                   disabled={bridgeBusy}
                   style={({ pressed }) => [styles.bridgeButton, (pressed || bridgeBusy) && styles.pressed]}>
                   {bridgeBusy ? (
-                    <ActivityIndicator color={colors.ink} size="small" />
+                    <ActivityIndicator color={colors.textOnAction} size="small" />
                   ) : (
                     <>
                       <Ionicons name="call" size={16} color={colors.ink} />
@@ -439,7 +439,7 @@ function Control({
       accessibilityLabel={label}
       style={({ pressed }) => [styles.control, disabled && styles.controlDisabled, pressed && styles.pressed]}>
       <View style={[styles.controlCircle, active && styles.controlCircleActive]}>
-        <Ionicons name={icon} size={26} color={active ? colors.ink : colors.textOnDark} />
+        <Ionicons name={icon} size={26} color={active ? colors.textOnAction : colors.textOnDark} />
       </View>
       <Text style={styles.controlLabel}>{label}</Text>
     </Pressable>
@@ -449,7 +449,7 @@ function Control({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surfaceInverse, justifyContent: 'space-between' },
   top: { alignItems: 'center', paddingTop: spacing.md },
-  from: { color: colors.oliveSoft, fontFamily: fonts.medium, fontSize: 13, letterSpacing: 0.3 },
+  from: { color: colors.oliveDeep, fontFamily: fonts.medium, fontSize: 13, letterSpacing: 0.3 },
   who: { alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg },
   avatarWrap: { width: 104, height: 104, alignItems: 'center', justifyContent: 'center' },
   numberAvatar: {
@@ -461,12 +461,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   name: { color: colors.textOnDark, fontFamily: fonts.display, fontSize: 30, textAlign: 'center' },
-  number: { color: colors.oliveSoft, fontFamily: fonts.medium, fontSize: 15 },
+  number: { color: colors.oliveDeep, fontFamily: fonts.medium, fontSize: 15 },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs },
   status: { color: colors.textOnDark, fontFamily: fonts.semibold, fontSize: 18, fontVariant: ['tabular-nums'] },
-  statusFailed: { color: colors.sunLight },
+  statusFailed: { color: colors.sun },
   detail: {
-    color: colors.oliveSoft,
+    color: colors.oliveDeep,
     fontFamily: fonts.medium,
     fontSize: 13,
     textAlign: 'center',
@@ -506,8 +506,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  controlCircleActive: { backgroundColor: colors.cream },
-  controlLabel: { color: colors.oliveSoft, fontFamily: fonts.medium, fontSize: 12 },
+  /** An engaged control (mute, speaker) lights up tan, with the dark action glyph. */
+  controlCircleActive: { backgroundColor: colors.sun },
+  controlLabel: { color: colors.oliveDeep, fontFamily: fonts.medium, fontSize: 12 },
   endButton: {
     width: 76,
     height: 76,
@@ -528,7 +529,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm + 4,
   },
-  bridgeButtonText: { color: colors.ink, fontFamily: fonts.bold, fontSize: 14 },
+  bridgeButtonText: { color: colors.textOnAction, fontFamily: fonts.bold, fontSize: 14 },
   doneButton: {
     backgroundColor: 'rgba(255,243,230,0.16)',
     borderRadius: radii.pill,

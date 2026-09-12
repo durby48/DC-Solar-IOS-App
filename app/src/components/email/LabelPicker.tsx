@@ -122,7 +122,7 @@ export function LabelPicker({
               disabled={!name.trim() || creating}
               style={({ pressed }) => [styles.createButton, (!name.trim() || creating || pressed) && styles.pressed]}>
               {creating ? (
-                <ActivityIndicator color={colors.white} size="small" />
+                <ActivityIndicator color={colors.textInverse} size="small" />
               ) : (
                 <Text style={styles.createText}>Create</Text>
               )}
@@ -138,7 +138,7 @@ export function LabelPicker({
 const styles = StyleSheet.create({
   scrim: {
     flex: 1,
-    backgroundColor: 'rgba(61,53,46,0.35)',
+    backgroundColor: 'rgba(0,0,0,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: spacing.lg,
@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 380,
     maxHeight: '80%',
-    backgroundColor: colors.white,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.md,
     gap: spacing.sm,
@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
     minWidth: 72,
     alignItems: 'center',
   },
-  createText: { color: colors.white, fontSize: 13, fontWeight: '800' },
+  createText: { color: colors.textInverse, fontSize: 13, fontWeight: '800' },
   error: { color: colors.danger, fontSize: 12, fontWeight: '700' },
   pressed: { opacity: 0.6 },
 });
