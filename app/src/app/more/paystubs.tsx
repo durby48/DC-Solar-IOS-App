@@ -15,7 +15,7 @@ import {
   SectionHeader,
   SkeletonList,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
 import { haptics } from '@/lib/haptics';
 import {
@@ -248,7 +248,7 @@ export default function PaystubsScreen() {
         ) : (
           <>
             <View style={styles.section}>
-              <SectionHeader title="My paystubs" icon="cash-outline" />
+              <SectionHeader title="My paystubs" icon="cash-outline" accent={hubColors.hr.fg} />
               {myState === 'loading' ? (
                 <SkeletonList count={3} height={64} />
               ) : myState === 'unavailable' ? (
@@ -285,7 +285,7 @@ export default function PaystubsScreen() {
             {role?.isAdmin ? (
               <>
                 <View style={styles.section}>
-                  <SectionHeader title="Upload paystub" icon="cloud-upload-outline" />
+                  <SectionHeader title="Upload paystub" icon="cloud-upload-outline" accent={hubColors.hr.fg} />
                   <Card style={styles.formCard}>
                     <AppText variant="section" color={colors.textMuted}>
                       Employee
@@ -330,7 +330,7 @@ export default function PaystubsScreen() {
                 </View>
 
                 <View style={styles.section}>
-                  <SectionHeader title="All paystubs" icon="folder-open-outline" />
+                  <SectionHeader title="All paystubs" icon="folder-open-outline" accent={hubColors.hr.fg} />
                   {allState === 'loading' ? (
                     <SkeletonList count={3} height={64} />
                   ) : allState === 'unavailable' ? (

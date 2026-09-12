@@ -303,7 +303,7 @@ export default function CalendarScreen() {
   );
 
   return (
-    <Screen header={<AppText variant="title">Calendar</AppText>}>
+    <Screen header={<AppText variant="title">Operations</AppText>}>
       {/* Employee of the Month, as a trophy placard. It lived on Home until
           2026-08-22; this is the screen you open to look at the month, so the
           month's award belongs at the top of it. Every role sees it, and it

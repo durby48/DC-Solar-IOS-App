@@ -1,9 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, useRouter } from 'expo-router';
-import { Pressable, StyleSheet } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Inbox } from '@/components/comms/Inbox';
 import { colors } from '@/constants/theme';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 
 /**
  * `/crm/inbox` — the shared inbox under its own Stack header.
@@ -15,6 +16,19 @@ import { colors } from '@/constants/theme';
  */
 export default function InboxScreen() {
   const router = useRouter();
+  // Admin-only, like the phone section that also mounts this inbox: a deep
+  // link gets the "contact your administrator" alert and goes back.
+  const gate = useAdminOnlyScreen();
+
+  if (gate.blocked) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Messages' }} />
+        <View style={styles.blank} />
+      </>
+    );
+  }
+
   return (
     <>
       <Stack.Screen
@@ -38,4 +52,5 @@ export default function InboxScreen() {
 
 const styles = StyleSheet.create({
   pressed: { opacity: 0.6 },
+  blank: { flex: 1, backgroundColor: colors.surfaceAlt },
 });

@@ -64,5 +64,7 @@ export interface Job {
   scheduled_end: string | null;
   customer_id: string | null;
   company: string;
+  /** The company container (DC-26026): overhead, never a customer project. */
+  is_internal?: boolean | null;
   customer?: Customer | null;
 }

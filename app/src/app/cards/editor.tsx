@@ -45,6 +45,7 @@ import {
   type CardRecord,
   type CardType,
 } from '@/lib/cards';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { useRole } from '@/lib/role';
 
 /** Everything the form holds. Numbers live as text until they are saved. */
@@ -169,6 +170,7 @@ export default function CardEditorScreen() {
   const router = useRouter();
   const role = useRole();
   const isAdmin = role?.isAdmin ?? false;
+  const gate = useAdminOnlyScreen();
   const { width } = useWindowDimensions();
 
   const editing = typeof id === 'string' && id.length > 0;
@@ -451,30 +453,12 @@ export default function CardEditorScreen() {
     );
   }
 
-  if (!isAdmin) {
+  if (gate.blocked || !isAdmin) {
+    // Explained by the gate and on the way back to the binder; draw nothing.
     return (
       <>
         <Stack.Screen options={{ title: 'Card editor' }} />
-        <Screen edges={[]}>
-          <Card style={styles.center}>
-            <View style={styles.badge}>
-              <Ionicons name="lock-closed" size={26} color={colors.accentPrimary} />
-            </View>
-            <AppText variant="heading" align="center">
-              Admins only
-            </AppText>
-            <AppText variant="body" color={colors.textMuted} align="center">
-              The card set is company-published artwork, so only an owner or operator can change it.
-              You can still browse every card in the binder.
-            </AppText>
-            <Button
-              label="Back to the binder"
-              variant="secondary"
-              size="sm"
-              onPress={() => router.replace('/cards')}
-            />
-          </Card>
-        </Screen>
+        <Screen edges={[]}>{null}</Screen>
       </>
     );
   }
@@ -959,14 +943,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     paddingVertical: spacing.xl,
-  },
-  badge: {
-    width: 56,
-    height: 56,
-    borderRadius: radii.pill,
-    backgroundColor: colors.oliveTint,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   previewStage: {
     alignItems: 'center',

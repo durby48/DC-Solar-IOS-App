@@ -49,7 +49,7 @@ export const colors = {
   ocean: '#5AA8CF',
   sky: '#9FD6F2',
   skySoft: '#DCEFFB',
-  tan: '#ECD9BE',
+  tan: '#E4E7EC', // 2026-09-12: was #ECD9BE (cream hairline)
   ink: '#3D352E',
   inkSoft: '#6B5D4F',
   white: '#FFFFFF',
@@ -116,9 +116,9 @@ export const colors = {
 
   // ---- surfaces (new) ----
   /** Page background alternative with a cooler cast. */
-  canvas: '#FBF6EF',
+  canvas: '#F4F5F8', // 2026-09-12: was #FBF6EF
   /** Hairline / divider that reads softer than tan on white. */
-  line: '#EFE3D2',
+  line: '#E8EAEF', // 2026-09-12: was #EFE3D2
 
   // ---- semantic aliases (2026-08-22) ----
   // Same values as the literals above, named for the JOB rather than the hue.
@@ -126,9 +126,9 @@ export const colors = {
   /** A raised thing sitting on the page: cards, rows, sheets. */
   surface: '#FFFFFF',
   /** The page itself. */
-  surfaceAlt: '#FFF3E6',
+  surfaceAlt: '#F6F7FA', // 2026-09-12: was #FFF3E6 (cream page)
   /** Inset/recessed panel — a well punched INTO a cream page. */
-  surfaceSunk: '#F5EDE2',
+  surfaceSunk: '#EEF0F4', // 2026-09-12: was #F5EDE2
   /** Dark ground for cream text: headers, the clock card when on-clock. */
   surfaceInverse: '#3A461F',
   /** Body and heading copy on a light surface. */
@@ -138,11 +138,11 @@ export const colors = {
   /** The quietest legible text — timestamps, footnotes, disabled labels. */
   textMuted: '#7A6C5C',
   /** Anything written on olive / oliveDeep / ink. */
-  textOnDark: '#FFF3E6',
+  textOnDark: '#FFFFFF', // 2026-09-12: was cream
   /** Default hairline between rows. */
-  border: '#EFE3D2',
+  border: '#E8EAEF', // 2026-09-12: was #EFE3D2
   /** Visible outline: input rings, secondary buttons, card edges. */
-  borderStrong: '#E0CDB2',
+  borderStrong: '#CFD4DD', // 2026-09-12: was #E0CDB2
   /** The brand's lead color — olive. Headers, primary icons, Complete. */
   accentPrimary: '#4D5C2B',
   /** The thing you tap. Sun, and it always carries INK text. */
@@ -150,7 +150,32 @@ export const colors = {
   /** Links and back arrows stay ocean, the way the app already reads. */
   accentLink: '#5AA8CF',
   /** Tinted ground for a destructive card or an error row. */
-  dangerSoft: '#F4DDD9',
+  dangerSoft: '#FBE4E1', // 2026-09-12
+
+  // ---- hub colours (2026-09-12 overhaul) ----
+  // One saturated hue per Home hub, used on the hub tile, its icon, the
+  // colour edge around the tile, and the section eyebrow. Vivid on purpose
+  // against the white base.
+  /** CRM — customers, leads, email, phone, sales. */
+  hubCrm: '#7C3AED',
+  hubCrmSoft: '#F1EAFE',
+  hubCrmDeep: '#5B21B6',
+  /** Pipeline — the job board. */
+  hubPipeline: '#2563EB',
+  hubPipelineSoft: '#E4ECFD',
+  hubPipelineDeep: '#1E40AF',
+  /** Operations — calendar and schedule. */
+  hubOperations: '#EA8A0C',
+  hubOperationsSoft: '#FDEFD9',
+  hubOperationsDeep: '#B4620A',
+  /** Human Resources — hours, paystubs, time off, cards, employees. */
+  hubHr: '#16A34A',
+  hubHrSoft: '#DDF5E6',
+  hubHrDeep: '#15803D',
+  /** Systems Management — financials, security, monitoring, receipts, inventory, checklists. */
+  hubSystems: '#0D9488',
+  hubSystemsSoft: '#D8F3EF',
+  hubSystemsDeep: '#0F6E66',
 } as const;
 
 export const spacing = {
@@ -213,6 +238,18 @@ export const shadows = {
  * Ordered accent set for anything that needs "the next distinct color" —
  * stat tiles, ticker items, chart-ish rows. Cycle with index % length.
  */
+/** The five Home hubs, in Home order. */
+export type HubKey = 'crm' | 'pipeline' | 'operations' | 'hr' | 'systems';
+
+/** fg = icon/edge/eyebrow, bg = the tinted icon square, deep = white-text ground. */
+export const hubColors: Record<HubKey, { fg: string; bg: string; deep: string }> = {
+  crm: { fg: colors.hubCrm, bg: colors.hubCrmSoft, deep: colors.hubCrmDeep },
+  pipeline: { fg: colors.hubPipeline, bg: colors.hubPipelineSoft, deep: colors.hubPipelineDeep },
+  operations: { fg: colors.hubOperations, bg: colors.hubOperationsSoft, deep: colors.hubOperationsDeep },
+  hr: { fg: colors.hubHr, bg: colors.hubHrSoft, deep: colors.hubHrDeep },
+  systems: { fg: colors.hubSystems, bg: colors.hubSystemsSoft, deep: colors.hubSystemsDeep },
+};
+
 export const accentCycle = [
   { fg: colors.ocean, bg: colors.skySoft },
   { fg: colors.teal, bg: colors.tealSoft },

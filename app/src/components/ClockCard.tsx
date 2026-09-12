@@ -1,7 +1,16 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Platform,
+  ScrollView,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import {
   AnimatedPressable,
@@ -18,6 +27,7 @@ import {
   fetchOpenEntry,
   fetchTodayCompletedSeconds,
   getSessionEmail,
+  updateOpenEntryJob,
   type TimeEntry,
 } from '@/lib/clock';
 import { fetchJobs } from '@/lib/data';
@@ -41,14 +51,47 @@ import { updateWidgetState } from '@/lib/widget';
  * server entry does exist it wins on the next launch, because the office's
  * record is the one that gets paid.
  *
+ * THE JOB PICKER (2026-09-12). It used to appear only when a job was
+ * scheduled for today, so a crew member sent to an unscheduled site clocked
+ * in against nothing. Now it is always there: today's scheduled jobs first
+ * (marked with a calendar glyph), then every other open job — not Complete,
+ * not the internal Company job — in a horizontally scrolling row, with "No
+ * job" still the first chip. And while ON the clock, a "Working on" control
+ * opens the same row and moves the open entry to another job
+ * (`updateOpenEntryJob`; RLS lets you edit your own open row only).
+ *
+ * On a desktop browser the card is drawn COMPACT — it was a phone-sized hero
+ * sitting in a 900px-wide column. The phone layout is untouched.
+ *
  * It owns its own job fetch rather than taking one as a prop, so it can be
  * dropped onto any screen (and rendered on its own in a preview) without that
  * screen having to know about jobs.
  */
 
 const PUNCH_KEY = 'dcsolar.punch';
+const WIDE_BREAKPOINT = 900;
+
+/** `is_internal` is on the row (`select *`) but not on the shared `Job` type yet. */
+function isInternal(job: Job): boolean {
+  return (job as Job & { is_internal?: boolean | null }).is_internal === true;
+}
+
+/** Open for work: not Complete on the pipeline, not the legacy completed status. */
+function isOpenJob(job: Job): boolean {
+  if (isInternal(job)) return false;
+  if (job.stage === 'Complete') return false;
+  if (job.stage == null && job.status === 'completed') return false;
+  return true;
+}
+
+function jobLabel(job: Job): string {
+  return job.job_number ?? job.name;
+}
 
 export function ClockCard({ style }: { style?: StyleProp<ViewStyle> }) {
+  const { width } = useWindowDimensions();
+  const compact = Platform.OS === 'web' && width >= WIDE_BREAKPOINT;
+
   const [clockedInAt, setClockedInAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -59,6 +102,9 @@ export function ClockCard({ style }: { style?: StyleProp<ViewStyle> }) {
   const [feedback, setFeedback] = useState<string | null>(null);
   /** One-shot: mounted for a single confetti burst, cleared in `onDone`. */
   const [celebrating, setCelebrating] = useState(false);
+  /** The "Working on" row, while on the clock. Closed after every choice. */
+  const [switching, setSwitching] = useState(false);
+  const [switchBusy, setSwitchBusy] = useState(false);
 
   // Restore punch state from storage (local fallback / signed-out mode).
   useEffect(() => {
@@ -99,8 +145,8 @@ export function ClockCard({ style }: { style?: StyleProp<ViewStyle> }) {
     };
   }, []);
 
-  // Today's jobs feed the "which job?" chips and the widget. Refetched on
-  // focus so a job scheduled from another screen shows up on the way back.
+  // Jobs feed the picker and the widget. Refetched on focus so a job
+  // scheduled from another screen shows up on the way back.
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
@@ -168,6 +214,7 @@ export function ClockCard({ style }: { style?: StyleProp<ViewStyle> }) {
         const result = await clockOut(openEntry);
         setOpenEntry(null);
         setLocalPunch(null);
+        setSwitching(false);
         setFeedback(
           result.ok
             ? 'Clocked out ✓ synced'
@@ -187,7 +234,7 @@ export function ClockCard({ style }: { style?: StyleProp<ViewStyle> }) {
         const result = await clockIn({
           email: sessionEmail,
           jobId: selectedJobId,
-          jobLabel: selectedJob ? (selectedJob.job_number ?? selectedJob.name) : null,
+          jobLabel: selectedJob ? jobLabel(selectedJob) : null,
         });
         if (result.ok) {
           setOpenEntry(result.entry);
@@ -202,6 +249,34 @@ export function ClockCard({ style }: { style?: StyleProp<ViewStyle> }) {
       setPunchBusy(false);
     }
   }, [punchBusy, sessionEmail, openEntry, clockedInAt, jobs, selectedJobId, setLocalPunch, celebrate]);
+
+  /** Move the OPEN server entry to another job (or to none). */
+  const switchJob = useCallback(
+    async (jobId: string | null) => {
+      if (openEntry === null || switchBusy) return;
+      if (jobId === openEntry.job_id) {
+        setSwitching(false);
+        return;
+      }
+      setSwitchBusy(true);
+      try {
+        const result = await updateOpenEntryJob(openEntry.id, jobId);
+        if (result.ok) {
+          setOpenEntry(result.entry);
+          setSelectedJobId(result.entry.job_id);
+          setSwitching(false);
+          haptics.tapMedium();
+          const job = jobId ? jobs.find((j) => j.id === jobId) : null;
+          setFeedback(job ? `Now working on ${jobLabel(job)} ✓` : 'No job on this punch ✓');
+        } else {
+          setFeedback(`Could not change the job — ${result.message}`);
+        }
+      } finally {
+        setSwitchBusy(false);
+      }
+    },
+    [openEntry, switchBusy, jobs],
+  );
 
   // Keep the home-screen widget in sync: today's job, address, and clock
   // state. Runs whenever jobs load or a punch changes; no-op off iOS.
@@ -228,48 +303,106 @@ export function ClockCard({ style }: { style?: StyleProp<ViewStyle> }) {
     };
   }, [jobs, openEntry, clockedInAt, sessionEmail]);
 
+  /**
+   * The picker's order: today's scheduled jobs, then every other open job,
+   * most recently scheduled first (unscheduled ones last). `todayIds` is
+   * what marks the first group with the calendar glyph.
+   */
   const today = todayISO();
-  const todaysJobs = jobs.filter((j) => j.scheduled_for === today);
-  const showJobChips = sessionEmail !== null && !clockedIn && todaysJobs.length > 0;
+  const { pickerJobs, todayIds } = useMemo(() => {
+    const todays = jobs.filter((j) => !isInternal(j) && j.scheduled_for === today);
+    const ids = new Set(todays.map((j) => j.id));
+    const others = jobs
+      .filter((j) => !ids.has(j.id) && isOpenJob(j))
+      .sort((a, b) => (b.scheduled_for ?? '').localeCompare(a.scheduled_for ?? ''));
+    return { pickerJobs: [...todays, ...others], todayIds: ids };
+  }, [jobs, today]);
+
+  const showClockInPicker = sessionEmail !== null && !clockedIn;
+  // The switcher needs a SERVER entry to update; an offline-only punch has
+  // no row yet, and its job is recorded when it eventually syncs.
+  const showSwitcher = openEntry !== null && !punchBusy;
+  const workingOn =
+    openEntry?.job_id != null ? (jobs.find((j) => j.id === openEntry.job_id) ?? null) : null;
 
   // Cream on olive while running; ink on the sunrise fill while it isn't.
   const onDark = clockedIn;
   const primary = onDark ? colors.textOnDark : colors.ink;
   const secondary = onDark ? colors.oliveSoft : colors.inkSoft;
 
+  const renderPicker = (selectedId: string | null, onPick: (id: string | null) => void) => (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.chipScroll}
+      contentContainerStyle={styles.chipRow}
+      keyboardShouldPersistTaps="handled">
+      <Chip
+        label="No job"
+        tone={onDark ? 'sun' : 'olive'}
+        selected={selectedId === null}
+        disabled={switchBusy}
+        onPress={() => onPick(null)}
+      />
+      {pickerJobs.map((job) => (
+        <Chip
+          key={job.id}
+          label={jobLabel(job)}
+          icon={todayIds.has(job.id) ? 'today' : undefined}
+          tone={onDark ? 'sun' : 'olive'}
+          selected={selectedId === job.id}
+          disabled={switchBusy}
+          onPress={() => onPick(job.id)}
+        />
+      ))}
+    </ScrollView>
+  );
+
   return (
     <View style={style}>
       <GradientSurface
         gradient={clockedIn ? 'olive' : 'sunrise'}
         radius="lg"
-        style={[styles.card, shadows.hero]}>
+        style={[styles.card, compact && styles.cardCompact, shadows.hero]}>
         <AppText variant="section" color={secondary}>
           {clockedIn ? 'On the clock' : 'Off the clock'}
         </AppText>
 
         {clockedIn && clockedInSince !== null && !Number.isNaN(clockedInSince) ? (
-          <AppText variant="numeric" color={primary} style={styles.elapsed}>
+          <AppText
+            variant="numeric"
+            color={primary}
+            style={[styles.elapsed, compact && styles.elapsedCompact]}>
             {formatElapsed(Math.max(0, now - clockedInSince))}
           </AppText>
         ) : null}
 
-        {showJobChips ? (
-          <View style={styles.chipRow}>
-            <Chip
-              label="No job"
-              tone="olive"
-              selected={selectedJobId === null}
-              onPress={() => setSelectedJobId(null)}
-            />
-            {todaysJobs.map((job) => (
-              <Chip
-                key={job.id}
-                label={job.job_number ?? job.name}
-                tone="olive"
-                selected={selectedJobId === job.id}
-                onPress={() => setSelectedJobId(job.id)}
+        {showClockInPicker ? renderPicker(selectedJobId, setSelectedJobId) : null}
+
+        {showSwitcher ? (
+          <View style={styles.switcher}>
+            <AnimatedPressable
+              onPress={() => setSwitching((was) => !was)}
+              disabled={switchBusy}
+              haptic="tapLight"
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={
+                workingOn ? `Working on ${jobLabel(workingOn)}. Change job` : 'Choose a job'
+              }
+              accessibilityState={{ expanded: switching, busy: switchBusy }}
+              style={styles.switcherButton}>
+              <Ionicons name="briefcase-outline" size={13} color={colors.oliveSoft} />
+              <AppText variant="caption" color={colors.textOnDark} numberOfLines={1}>
+                {workingOn ? `Working on: ${jobLabel(workingOn)}` : 'No job — choose one'}
+              </AppText>
+              <Ionicons
+                name={switching ? 'chevron-up' : 'chevron-down'}
+                size={13}
+                color={colors.oliveSoft}
               />
-            ))}
+            </AnimatedPressable>
+            {switching ? renderPicker(openEntry.job_id, (id) => void switchJob(id)) : null}
           </View>
         ) : null}
 
@@ -284,11 +417,15 @@ export function ClockCard({ style }: { style?: StyleProp<ViewStyle> }) {
             accessibilityRole="button"
             accessibilityLabel={clockedIn ? 'Clock out' : 'Clock in'}
             accessibilityState={{ disabled: punchBusy, busy: punchBusy }}
-            style={[styles.button, clockedIn ? styles.buttonOn : styles.buttonOff]}>
+            style={[
+              styles.button,
+              compact && styles.buttonCompact,
+              clockedIn ? styles.buttonOn : styles.buttonOff,
+            ]}>
             <AppText
               variant="button"
               color={clockedIn ? colors.ink : colors.textOnDark}
-              style={styles.buttonText}>
+              style={[styles.buttonText, compact && styles.buttonTextCompact]}>
               {punchBusy ? 'Punching…' : clockedIn ? 'Clock Out' : 'Clock In'}
             </AppText>
           </AnimatedPressable>
@@ -313,16 +450,46 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
+  /** The desktop browser: a status card, not a phone hero. */
+  cardCompact: {
+    padding: spacing.md,
+    gap: spacing.xs + 2,
+  },
   elapsed: {
     fontSize: 40,
     lineHeight: 46,
   },
+  elapsedCompact: {
+    fontSize: 28,
+    lineHeight: 32,
+  },
+  chipScroll: {
+    alignSelf: 'stretch',
+    // Room for the chips' shadows/edges without clipping the row.
+    marginHorizontal: -spacing.xs,
+  },
   chipRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
+    alignItems: 'center',
     gap: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+  },
+  switcher: {
     alignSelf: 'stretch',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  switcherButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs + 2,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radii.pill,
+    // A hairline well on olive: see the OLIVE CONTRAST RULES in theme.ts.
+    backgroundColor: colors.oliveLine,
+    maxWidth: '100%',
   },
   buttonWrap: {
     alignSelf: 'stretch',
@@ -333,6 +500,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md + 2,
     alignItems: 'center',
     alignSelf: 'stretch',
+  },
+  buttonCompact: {
+    paddingVertical: spacing.sm + 2,
   },
   /** Sun on olive: the one warm thing on a dark card. Ink text, never cream. */
   buttonOn: {
@@ -345,5 +515,9 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 20,
     lineHeight: 26,
+  },
+  buttonTextCompact: {
+    fontSize: 16,
+    lineHeight: 20,
   },
 });

@@ -22,12 +22,18 @@
         "NSCameraUsageDescription": "DC Solar uses the camera to take job photos and receipt pictures.",
         "NSPhotoLibraryUsageDescription": "DC Solar uses your photo library to attach job photos and receipts.",
         "NSMicrophoneUsageDescription": "DC Solar uses the microphone to place calls to customers from the DC Solar business number.",
-        "UIBackgroundModes": ["audio", "voip"],
-        "ITSAppUsesNonExemptEncryption": false
+        "UIBackgroundModes": [
+          "audio",
+          "voip"
+        ],
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSContactsUsageDescription": "DC Solar uses your contacts only when you choose to import specific people into the company contact list."
       }
     },
     "android": {
-      "permissions": ["android.permission.RECORD_AUDIO"],
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -73,6 +79,12 @@
         "@react-native-google-signin/google-signin",
         {
           "iosUrlScheme": "com.googleusercontent.apps.746927911368-kq2d49b1amnetvh3q1tu1eo7ir74m8cc"
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "DC Solar uses your contacts only when you choose to import specific people into the company contact list."
         }
       ]
     ],

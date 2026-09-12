@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
 import {
   createTemplate,
   deleteTemplate,
@@ -32,6 +32,7 @@ import {
   type MessageTemplate,
   type StaffProfile,
 } from '@/lib/comms';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
@@ -91,6 +92,7 @@ const EMPTY_DRAFT: TemplateDraft = { key: '', title: '', body: '', active: true,
 export default function MessagingSettingsScreen() {
   const role = useRole();
   const isAdmin = role?.isAdmin ?? false;
+  const gate = useAdminOnlyScreen();
 
   const [authState, setAuthState] = useState<'loading' | 'out' | 'in'>('loading');
   const [loading, setLoading] = useState(true);
@@ -318,7 +320,16 @@ export default function MessagingSettingsScreen() {
 
   const title = <Stack.Screen options={{ title: 'Messaging settings' }} />;
 
-  if (authState === 'loading' || (authState === 'in' && loading)) {
+  if (gate.blocked) {
+    return (
+      <>
+        {title}
+        <View style={styles.screen} />
+      </>
+    );
+  }
+
+  if (gate.phase === 'loading' || authState === 'loading' || (authState === 'in' && loading)) {
     return (
       <>
         {title}
@@ -349,21 +360,12 @@ export default function MessagingSettingsScreen() {
   }
 
   if (!isAdmin) {
+    // `useRole` and the gate can disagree for a frame; never draw the
+    // business number for a non-admin.
     return (
       <>
         {title}
-        <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-          <View style={styles.centerCard}>
-            <View style={styles.badge}>
-              <Ionicons name="lock-closed" size={26} color={colors.ocean} />
-            </View>
-            <Text style={styles.promptTitle}>Admins only</Text>
-            <Text style={styles.promptText}>
-              The business number, business hours and saved texts are limited to owners and
-              operators.
-            </Text>
-          </View>
-        </ScrollView>
+        <View style={styles.screen} />
       </>
     );
   }
@@ -432,7 +434,7 @@ export default function MessagingSettingsScreen() {
               value={profile?.voiceBridgeEnabled !== false}
               onValueChange={(next) => void toggleBridge(next)}
               disabled={bridgeBusy}
-              trackColor={{ false: colors.tan, true: colors.sun }}
+              trackColor={{ false: colors.borderStrong, true: colors.sun }}
               thumbColor={colors.white}
             />
           </View>
@@ -475,7 +477,7 @@ export default function MessagingSettingsScreen() {
             <Switch
               value={smsEnabled}
               onValueChange={setSmsEnabled}
-              trackColor={{ false: colors.tan, true: colors.sun }}
+              trackColor={{ false: colors.borderStrong, true: colors.sun }}
               thumbColor={colors.white}
             />
           </View>
@@ -484,7 +486,7 @@ export default function MessagingSettingsScreen() {
             <Switch
               value={voiceEnabled}
               onValueChange={setVoiceEnabled}
-              trackColor={{ false: colors.tan, true: colors.sun }}
+              trackColor={{ false: colors.borderStrong, true: colors.sun }}
               thumbColor={colors.white}
             />
           </View>
@@ -764,7 +766,7 @@ export default function MessagingSettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.cream },
+  screen: { flex: 1, backgroundColor: colors.surfaceAlt },
   centerScreen: { alignItems: 'center', justifyContent: 'center' },
   container: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
 
@@ -804,7 +806,7 @@ const styles = StyleSheet.create({
     ...shadows.card,
   },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  cardTitle: { flex: 1, color: colors.ink, fontSize: 15, fontWeight: '800' },
+  cardTitle: { flex: 1, color: hubColors.crm.fg, fontSize: 15, fontWeight: '800' },
   bodyText: { color: colors.inkSoft, fontSize: 13, fontWeight: '500', lineHeight: 19 },
   emptyText: { color: colors.inkSoft, fontSize: 13, fontWeight: '600' },
   hint: { color: colors.inkSoft, fontSize: 12, fontWeight: '600' },
@@ -817,7 +819,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   input: {
-    backgroundColor: colors.canvas,
+    backgroundColor: colors.surfaceSunk,
     borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.line,
@@ -875,7 +877,7 @@ const styles = StyleSheet.create({
   secondaryButtonText: { color: colors.ocean, fontSize: 13, fontWeight: '800' },
 
   draftBox: {
-    backgroundColor: colors.canvas,
+    backgroundColor: colors.surfaceSunk,
     borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.line,
@@ -886,7 +888,7 @@ const styles = StyleSheet.create({
   templateRow: { paddingTop: spacing.sm, gap: spacing.xs },
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
     marginTop: spacing.sm,
   },
   templateHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

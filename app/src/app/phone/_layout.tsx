@@ -1,12 +1,12 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { Tabs } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { Tabs, router, useNavigation, useSegments } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { TabIcon } from '@/components/ui';
-import { colors, fonts, radii, spacing } from '@/constants/theme';
-import { fetchUnreadCount, useCommsRealtime } from '@/lib/comms';
+import { colors, fonts, hubColors } from '@/constants/theme';
+import { explainAdminOnly } from '@/lib/adminGate';
 import { useRoleGate } from '@/lib/role';
+import { fetchUnreadCount, useCommsRealtime } from '@/lib/comms';
 
 /**
  * `/phone` — the phone app: Messages · Recents · Keypad · Contacts.
@@ -18,18 +18,41 @@ import { useRoleGate } from '@/lib/role';
  * own — two headers stacked is the thing to avoid here.
  *
  * ADMIN ONLY, by Devon's decision, and enforced twice: the Home/Menu tile is
- * gated `admin`, and this layout refuses to render the tabs for anyone else.
- * Neither is the security boundary — `messages` is admin-only in RLS and
- * `phone_directory()` re-checks `is_company_admin()` itself, so a viewer who
- * typed the URL would get four empty screens. This just replaces those with
- * one honest sentence.
+ * gated `admin`, and this layout mounts `useAdminOnlyScreen`, so a crew
+ * member who typed the URL gets the "contact your administrator" alert and
+ * is sent back instead of four empty screens. Neither is the security
+ * boundary — `messages` is admin-only in RLS and `phone_directory()`
+ * re-checks `is_company_admin()` itself.
  *
  * Three states this must read correctly in, none of them a crash: signed
  * out, signed in as crew, signed in as an admin with Twilio switched off.
  */
 export default function PhoneLayout() {
-  const gate = useRoleGate();
-  const isAdmin = gate.role?.isAdmin ?? false;
+  // CONTACTS IS FOR EVERYONE (2026-09-12): the company directory — customers
+  // and the imported contacts — is something Devon wants the crew to have.
+  // The other three tabs (texts, calls, keypad) stay admin-only. So the gate
+  // is role-aware rather than a blanket `useAdminOnlyScreen`: a crew member
+  // on /phone/contacts is let through with only that tab in the bar; a crew
+  // member anywhere else under /phone gets the same alert + exit as before.
+  const segments = useSegments();
+  const onContacts = segments[segments.length - 1] === 'contacts';
+  const roleGate = useRoleGate();
+  const isAdmin = roleGate.role?.isAdmin === true;
+  const blocked = roleGate.phase === 'ready' && !isAdmin && !onContacts;
+  const explained = useRef(false);
+  const navigation = useNavigation();
+  useEffect(() => {
+    if (!blocked || explained.current) return;
+    explained.current = true;
+    explainAdminOnly();
+    try {
+      if (navigation.canGoBack()) router.back();
+      else router.replace('/(tabs)' as never);
+    } catch {
+      // Already leaving.
+    }
+  }, [blocked, navigation]);
+  const gate = { phase: roleGate.phase, isAdmin, blocked };
   const [unread, setUnread] = useState(0);
 
   const refreshUnread = useCallback(() => {
@@ -53,37 +76,9 @@ export default function PhoneLayout() {
     );
   }
 
-  if (!gate.role) {
-    return (
-      <View style={styles.padded}>
-        <View style={styles.card}>
-          <View style={styles.badge}>
-            <Ionicons name="call" size={26} color={colors.ocean} />
-          </View>
-          <Text style={styles.title}>Sign in to use the phone</Text>
-          <Text style={styles.body}>
-            Calling and texting from the DC Solar number needs a signed-in admin.
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
-  if (!isAdmin) {
-    return (
-      <View style={styles.padded}>
-        <View style={styles.card}>
-          <View style={styles.badge}>
-            <Ionicons name="lock-closed" size={26} color={colors.ocean} />
-          </View>
-          <Text style={styles.title}>Admins only</Text>
-          <Text style={styles.body}>
-            The phone carries customer threads, which hold prices and addresses, so it is
-            limited to owners and operators.
-          </Text>
-        </View>
-      </View>
-    );
+  if (gate.blocked) {
+    // Explained and leaving; draw the page ground and nothing else.
+    return <View style={styles.center} />;
   }
 
   return (
@@ -91,7 +86,7 @@ export default function PhoneLayout() {
       initialRouteName="keypad"
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.olive,
+        tabBarActiveTintColor: hubColors.crm.fg,
         tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: {
           backgroundColor: colors.surfaceAlt,
@@ -99,7 +94,7 @@ export default function PhoneLayout() {
           height: 62,
         },
         tabBarLabelStyle: { fontFamily: fonts.bold, fontSize: 11 },
-        sceneStyle: { backgroundColor: colors.cream },
+        sceneStyle: { backgroundColor: colors.surfaceAlt },
       }}>
       {/* `/phone` → keypad. Exists so a hard load of the bare path has a
           page to serve; hidden from the bar so it is not a fifth tab. */}
@@ -109,6 +104,7 @@ export default function PhoneLayout() {
       <Tabs.Screen
         name="messages"
         options={{
+          href: isAdmin ? undefined : null,
           title: 'Messages',
           tabBarIcon: ({ focused }) => <TabIcon name="chatbubbles" focused={focused} />,
           tabBarBadge: unread > 0 ? unread : undefined,
@@ -118,6 +114,7 @@ export default function PhoneLayout() {
       <Tabs.Screen
         name="recents"
         options={{
+          href: isAdmin ? undefined : null,
           title: 'Recents',
           tabBarIcon: ({ focused }) => <TabIcon name="time" focused={focused} />,
         }}
@@ -125,6 +122,7 @@ export default function PhoneLayout() {
       <Tabs.Screen
         name="keypad"
         options={{
+          href: isAdmin ? undefined : null,
           title: 'Keypad',
           tabBarIcon: ({ focused }) => <TabIcon name="keypad" focused={focused} />,
         }}
@@ -145,24 +143,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceAlt,
   },
-  padded: { flex: 1, padding: spacing.lg, backgroundColor: colors.cream },
-  card: {
-    backgroundColor: colors.skySoft,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  badge: {
-    width: 56,
-    height: 56,
-    borderRadius: radii.lg,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: { color: colors.ink, fontSize: 17, fontWeight: '800', textAlign: 'center' },
-  body: { color: colors.inkSoft, fontSize: 14, fontWeight: '600', textAlign: 'center' },
 });

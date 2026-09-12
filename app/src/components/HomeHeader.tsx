@@ -409,7 +409,7 @@ const styles = StyleSheet.create({
 
   panel: {
     marginTop: spacing.md,
-    backgroundColor: colors.canvas,
+    backgroundColor: colors.surfaceSunk,
     borderRadius: radii.md,
     padding: spacing.sm,
     gap: spacing.xs,

@@ -151,6 +151,38 @@ export async function clockIn(params: {
 }
 
 /**
+ * Change which job an OPEN punch is against, without touching its clock-in.
+ *
+ * Added 2026-09-12 for the clock card's "Working on: DC-26019" control.
+ * RLS (`te_update` in 2026-07-24_field_app.sql) lets an employee update their
+ * own row only while `clock_out is null`, which is exactly this case; the
+ * `.is('clock_out', null)` filter mirrors that so a row that was closed from
+ * another device comes back as "not found" rather than silently touching a
+ * closed entry. A non-UUID id (a label typed by hand) is stored as null, the
+ * same rule `clockIn` applies.
+ */
+export async function updateOpenEntryJob(
+  entryId: string,
+  jobId: string | null,
+): Promise<ClockResult> {
+  const validJobId = jobId !== null && UUID_RE.test(jobId) ? jobId : null;
+  try {
+    const { data, error } = await supabase
+      .from('time_entries')
+      .update({ job_id: validJobId })
+      .eq('id', entryId)
+      .is('clock_out', null)
+      .select('*')
+      .maybeSingle();
+    if (error) return { ok: false, message: error.message };
+    if (!data) return { ok: false, message: 'That punch is no longer open.' };
+    return { ok: true, entry: data as TimeEntry };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not change the job.' };
+  }
+}
+
+/**
  * Seconds worked today across the employee's COMPLETED punches (open punches
  * are excluded — the caller adds live elapsed time itself). Zero on error.
  */

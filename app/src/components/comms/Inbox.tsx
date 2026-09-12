@@ -300,7 +300,7 @@ export function Inbox({
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.cream },
+  screen: { flex: 1, backgroundColor: colors.surfaceAlt },
   centerScreen: { alignItems: 'center', justifyContent: 'center' },
   padded: { padding: spacing.lg },
   container: { padding: spacing.lg, gap: 0, paddingBottom: spacing.xxl * 2 },

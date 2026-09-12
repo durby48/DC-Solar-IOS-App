@@ -87,14 +87,14 @@ const TONES: Record<
     offFg: colors.textSecondary,
     offBorder: colors.borderStrong,
     onBg: colors.ink,
-    onFg: colors.cream,
+    onFg: colors.textOnDark,
   },
   olive: {
     offBg: colors.oliveSoft,
     offFg: colors.oliveDeep,
     offBorder: colors.oliveSoft,
     onBg: colors.olive,
-    onFg: colors.cream,
+    onFg: colors.textOnDark,
   },
   sun: {
     offBg: colors.sunLight,

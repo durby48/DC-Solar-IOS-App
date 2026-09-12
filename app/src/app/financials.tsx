@@ -18,7 +18,8 @@ import { MirrorTiles } from '@/components/financials/MirrorTiles';
 import { OverviewTiles, type OverviewMonth } from '@/components/financials/OverviewTiles';
 import { PnlSheet, type PnlRow } from '@/components/financials/PnlSheet';
 import { AppText, Button, Card, EmptyState, SectionHeader, SkeletonList } from '@/components/ui';
-import { colors, spacing } from '@/constants/theme';
+import { colors, hubColors, spacing } from '@/constants/theme';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { formatShortDate, todayISO } from '@/lib/dates';
 import { deleteFinanceEntry, updateFinanceEntry } from '@/lib/documents';
 import {
@@ -65,6 +66,10 @@ import { isValidISODate } from '@/lib/time';
  */
 export default function FinancialsScreen() {
   const role = useRole();
+  // The admin door: a crew member who lands here by deep link gets the
+  // "contact your administrator" alert and is sent back, and nothing about
+  // the company's money is drawn in the meantime.
+  const gate = useAdminOnlyScreen();
 
   const [data, setData] = useState<FinancialsData | null>(null);
   const [totals, setTotals] = useState<CompanyTotals | null>(null);
@@ -702,13 +707,9 @@ export default function FinancialsScreen() {
 
   const header = (
     <View>
-      {!loaded ? (
+      {!loaded || gate.phase === 'loading' ? (
         <SkeletonList count={4} height={110} />
-      ) : !role ? (
-        placeholder('Sign in to see company financials.')
-      ) : !role.isAdmin ? (
-        placeholder('Financials are available to owners and operators.')
-      ) : !data ? (
+      ) : !role?.isAdmin ? null : !data ? (
         placeholder('Financials are not available right now.')
       ) : (
         <>
@@ -755,7 +756,12 @@ export default function FinancialsScreen() {
 
       {role?.isAdmin && data ? (
         <View style={styles.expensesHeaderRow}>
-          <SectionHeader title="Expenses" icon="pricetag" style={styles.expensesTitle} />
+          <SectionHeader
+            title="Expenses"
+            icon="pricetag"
+            accent={hubColors.systems.fg}
+            style={styles.expensesTitle}
+          />
           <Button
             label={formOpen ? 'Close' : '+ Add expense'}
             size="sm"
@@ -800,6 +806,15 @@ export default function FinancialsScreen() {
       ) : null}
     </View>
   );
+
+  if (gate.blocked) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Financials' }} />
+        <View style={styles.safe} />
+      </>
+    );
+  }
 
   return (
     <>

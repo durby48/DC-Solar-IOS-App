@@ -17,6 +17,7 @@ import {
   SkeletonList,
 } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { fetchJob, getDocumentUrl } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
 import {
@@ -147,6 +148,7 @@ export default function DocumentBuilderScreen() {
   const paramType: DocumentType = params.type === 'estimate' ? 'estimate' : 'invoice';
 
   const [role, setRole] = useState<RoleInfo | null | 'loading'>('loading');
+  const gate = useAdminOnlyScreen();
   const [job, setJob] = useState<Job | null>(null);
   const [entry, setEntry] = useState<FinanceEntry | null>(null);
   const [loading, setLoading] = useState(true);
@@ -780,7 +782,7 @@ export default function DocumentBuilderScreen() {
       ? `Revise ${typeLabel} ${docNumber ?? ''} (rev ${currentRevision})`.trim()
       : `New ${type}`;
 
-  if (role === 'loading' || loading) {
+  if (gate.phase === 'loading' || role === 'loading' || loading) {
     return (
       <>
         <Stack.Screen options={{ title: screenTitle }} />
@@ -791,19 +793,12 @@ export default function DocumentBuilderScreen() {
     );
   }
 
-  if (!role || !role.isAdmin) {
+  if (gate.blocked || !role || !role.isAdmin) {
+    // Explained by the gate and on the way back; draw none of the document.
     return (
       <>
         <Stack.Screen options={{ title: screenTitle }} />
-        <Screen edges={[]}>
-          <Card>
-            <EmptyState
-              icon="lock-closed"
-              title="Admins only"
-              body="Estimates and invoices are only available to admins. Please sign in with an admin account."
-            />
-          </Card>
-        </Screen>
+        <Screen edges={[]}>{null}</Screen>
       </>
     );
   }

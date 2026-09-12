@@ -151,6 +151,7 @@ export function OverviewTiles({
                   tone={tile.tone}
                   compact={tile.third}
                   countUp
+                  edge
                   style={styles.tile}
                 />
                 <Ionicons
@@ -168,6 +169,7 @@ export function OverviewTiles({
                 tone={tile.tone}
                 compact={tile.third}
                 countUp
+                edge
                 style={styles.tile}
               />
             )}

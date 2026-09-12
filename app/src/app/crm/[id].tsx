@@ -18,10 +18,12 @@ import {
 } from 'react-native';
 
 import { Conversation } from '@/components/comms/Conversation';
+import { CustomerContacts } from '@/components/contacts/CustomerContacts';
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { PhoneActionSheet } from '@/components/PhoneActionSheet';
 import { StatusPill } from '@/components/StatusPill';
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { WheelPickerSheet, type WheelOption } from '@/components/ui';
+import { colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
 import { fetchEnrolledCustomerIds, inviteCustomer } from '@/lib/account';
 import {
   NOT_CONFIGURED_SMS,
@@ -66,16 +68,18 @@ import {
 } from '@/lib/customers';
 import { getDocumentUrl } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
+import { haptics } from '@/lib/haptics';
+import { updateJobStage } from '@/lib/jobs';
 import { shareDocument, viewDocument } from '@/lib/pdf';
 import { useRole } from '@/lib/role';
-import { labelForJob } from '@/lib/stages';
+import { STAGES, labelForJob, stageOrDefault, type Stage } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
 import { type Customer } from '@/lib/types';
 
 /**
- * The customer record — six segments over one person.
+ * The customer record — seven segments over one person.
  *
- * Overview · Jobs · Documents · Money · Comms · Notes, with Money and Comms
+ * Overview · Contacts · Jobs · Documents · Money · Comms · Notes, with Money and Comms
  * shown to admins only. THAT GATE IS COSMETIC. `finance_entries` and
  * `messages` are admin-only in RLS and `crm_customer_summary` returns zero
  * rows to a viewer; hiding the tabs just stops a crew member tapping into a
@@ -87,10 +91,17 @@ import { type Customer } from '@/lib/types';
  * new is jobs, money, paperwork, notes, archive and merge.
  */
 
-type Segment = 'overview' | 'jobs' | 'documents' | 'money' | 'comms' | 'notes';
+type Segment = 'overview' | 'contacts' | 'jobs' | 'documents' | 'money' | 'comms' | 'notes';
+
+/** The eight pipeline stages as wheel rows, in board order. */
+const STAGE_OPTIONS: readonly WheelOption<Stage>[] = STAGES.map((s) => ({ value: s, label: s }));
 
 const ALL_SEGMENTS: { key: Segment; label: string; adminOnly: boolean }[] = [
   { key: 'overview', label: 'Overview', adminOnly: false },
+  // The people behind the customer — a contractor's PM, office, site lead
+  // (2026-09-12, `contacts.customer_id`). Member-readable, so every crew
+  // member can see who to ring; adding/editing is admin, checked inside.
+  { key: 'contacts', label: 'Contacts', adminOnly: false },
   { key: 'jobs', label: 'Jobs', adminOnly: false },
   { key: 'documents', label: 'Documents', adminOnly: false },
   { key: 'money', label: 'Money', adminOnly: true },
@@ -214,6 +225,13 @@ export default function CustomerDetailScreen() {
   const [enrolled, setEnrolled] = useState(false);
 
   const [status, setStatus] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+
+  // Jobs: the stage wheel (2026-09-12). `stagePick` is the job whose pill was
+  // tapped and the stage the wheel currently sits on; Done commits through
+  // `updateJobStage` — the same write the Pipeline board makes, so `status`
+  // and `completed_on` follow and the stage-history trigger logs it.
+  const [stagePick, setStagePick] = useState<{ job: CustomerJob; stage: Stage } | null>(null);
+  const [stageSaving, setStageSaving] = useState<string | null>(null);
 
   // Overview
   const [showPhoneSheet, setShowPhoneSheet] = useState(false);
@@ -1141,6 +1159,25 @@ export default function CustomerDetailScreen() {
     </>
   );
 
+  const commitStage = async () => {
+    const pick = stagePick;
+    setStagePick(null);
+    if (!pick) return;
+    const current = stageOrDefault(pick.job.stage, pick.job.status);
+    if (pick.stage === current) return;
+    setStageSaving(pick.job.id);
+    setStatus(null);
+    const result = await updateJobStage(pick.job.id, pick.stage);
+    setStageSaving(null);
+    if (result.ok) {
+      haptics.success();
+      setStatus({ kind: 'success', message: `${pick.job.job_number ?? pick.job.name} moved to ${pick.stage}.` });
+      await load();
+    } else {
+      setStatus({ kind: 'error', message: result.message });
+    }
+  };
+
   const jobsSegment = (
     <View style={styles.card}>
       <Text style={styles.cardTitle}>Projects</Text>
@@ -1153,6 +1190,20 @@ export default function CustomerDetailScreen() {
             : job.scheduled_for
               ? `Scheduled ${formatShortDate(job.scheduled_for)}`
               : 'Not scheduled';
+          // Admins move the stage from the pill (a wheel, like every other
+          // picker on a phone here); the overhead container has no stage to
+          // move, so it and every non-admin get the read-only pill.
+          const canMove = isAdmin && !job.is_internal;
+          const saving = stageSaving === job.id;
+          const pill = (
+            <StatusPill
+              stage={labelForJob({
+                stage: job.stage,
+                status: job.status,
+                is_internal: job.is_internal ?? false,
+              })}
+            />
+          );
           return (
             <Pressable
               key={job.id}
@@ -1169,18 +1220,37 @@ export default function CustomerDetailScreen() {
                 </Text>
                 <Text style={styles.jobMeta}>{when}</Text>
               </View>
-              <StatusPill
-                stage={labelForJob({
-                  stage: job.stage,
-                  status: job.status,
-                  is_internal: job.is_internal ?? false,
-                })}
-              />
+              {canMove ? (
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setStagePick({ job, stage: stageOrDefault(job.stage, job.status) });
+                  }}
+                  disabled={saving}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Change stage of ${job.job_number ?? job.name}`}
+                  style={({ pressed }) => [styles.stageControl, pressed && styles.stageControlPressed]}>
+                  {saving ? <ActivityIndicator size="small" color={colors.olive} /> : pill}
+                  <Ionicons name="chevron-down" size={13} color={colors.inkSoft} />
+                </Pressable>
+              ) : (
+                pill
+              )}
               <Ionicons name="chevron-forward" size={16} color={colors.inkSoft} />
             </Pressable>
           );
         })
       )}
+      <WheelPickerSheet
+        visible={stagePick !== null}
+        title={stagePick ? `Stage · ${stagePick.job.job_number ?? stagePick.job.name}` : 'Stage'}
+        options={STAGE_OPTIONS}
+        value={stagePick?.stage ?? 'Pending Estimate'}
+        onChange={(stage) => setStagePick((p) => (p ? { ...p, stage } : p))}
+        onClose={() => void commitStage()}
+        doneLabel="Save stage"
+      />
       {isAdmin ? (
         <Pressable
           onPress={() =>
@@ -1729,6 +1799,19 @@ export default function CustomerDetailScreen() {
         {segmentBar}
 
         {segment === 'overview' ? overview : null}
+        {segment === 'contacts' ? (
+          <View style={styles.card}>
+            <CustomerContacts
+              customerId={customer.id}
+              customerName={customer.name}
+              isAdmin={isAdmin}
+              smsReady={commsSettings?.smsEnabled === true}
+              voiceReady={commsSettings?.voiceEnabled === true}
+              hasStaffNumber={Boolean(staffProfile?.cellPhoneE164)}
+              jobId={jobs[0]?.id ?? null}
+            />
+          </View>
+        ) : null}
         {segment === 'jobs' ? jobsSegment : null}
         {segment === 'documents' ? documentsSegment : null}
         {segment === 'money' ? moneySegment : null}
@@ -1940,6 +2023,20 @@ const styles = StyleSheet.create({
   },
   jobName: { color: colors.ink, fontSize: 15, fontWeight: '700' },
   jobMeta: { color: colors.inkSoft, fontSize: 12, fontWeight: '600' },
+  // The stage pill as a control: a hairline ring in the CRM hub's purple says
+  // "this one you can tap", the chevron says which way it opens.
+  stageControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingLeft: 2,
+    paddingRight: 4,
+    paddingVertical: 2,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: hubColors.crm.fg,
+  },
+  stageControlPressed: { backgroundColor: hubColors.crm.bg },
 
   docRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
   docBody: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

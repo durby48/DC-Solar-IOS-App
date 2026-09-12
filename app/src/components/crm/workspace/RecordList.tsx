@@ -3,8 +3,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
-import { Chip } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatPhone } from '@/lib/comms';
 import { type RecordKind, type WorkspaceRecord } from '@/lib/crmWorkspace';
 
@@ -28,9 +27,49 @@ import { type RecordKind, type WorkspaceRecord } from '@/lib/crmWorkspace';
  * invisible on this palette. `/` focuses the search box from anywhere on the
  * page; ↑ / ↓ in it move the selection, Enter opens the top match, Esc
  * clears. All web-only listeners, no-ops on a phone.
+ *
+ * A fifth lens, Jobs (2026-09-12), keeps this list as it is and asks the
+ * workspace to swap its centre and detail columns for the Pipeline's
+ * stage-column board. The lens chips and the selected-row accent take the
+ * CRM hub's purple; the Jobs chip alone takes the Pipeline's blue when
+ * selected, because what it opens is the Pipeline.
  */
 
-export type ListMode = RecordKind | 'all' | 'tasks';
+export type ListMode = RecordKind | 'all' | 'tasks' | 'jobs';
+
+/**
+ * One lens chip. The kit's `Chip` has fixed tones and none of them is the
+ * CRM hub's purple, so the lens row draws its own — same shape, same 28px
+ * hit height, the hub colour for the fill.
+ */
+function LensChip({
+  label,
+  selected,
+  onPress,
+  hue = hubColors.crm,
+  attention = false,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  hue?: { fg: string; bg: string; deep: string };
+  /** Unselected but wants a look: the Tasks chip with something due. */
+  attention?: boolean;
+}) {
+  const bg = selected ? hue.fg : attention ? colors.amberSoft : hue.bg;
+  const fg = selected ? colors.white : attention ? colors.amberDeep : hue.deep;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      style={({ pressed }) => [styles.lens, { backgroundColor: bg }, pressed && styles.pressed]}>
+      <Text style={[styles.lensText, { color: fg }]} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
 
 function relativeTime(iso: string | null): string {
   if (!iso) return '';
@@ -59,6 +98,8 @@ export function RecordList({
   onNewLead,
   taskBadge = 0,
   tasksPane,
+  jobsLens = false,
+  jobCount,
 }: {
   records: WorkspaceRecord[];
   total: { customers: number; leads: number };
@@ -73,6 +114,10 @@ export function RecordList({
   taskBadge?: number;
   /** Rendered in place of the record list while `kind === 'tasks'`. */
   tasksPane?: ReactNode;
+  /** Offer the Jobs lens (the workspace renders the board itself). */
+  jobsLens?: boolean;
+  /** Open (not Complete) projects, for the Jobs chip. Omitted until known. */
+  jobCount?: number;
 }) {
   const searchRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList<WorkspaceRecord>>(null);
@@ -165,7 +210,7 @@ export function RecordList({
           value={search}
           onChangeText={onSearch}
           onKeyPress={(e) => onSearchKey(e.nativeEvent.key)}
-          placeholder={kind === 'tasks' ? 'Search tasks' : 'Search name, phone, address, job #'}
+          placeholder={kind === 'tasks' ? 'Search tasks' : kind === 'jobs' ? 'Search the board' : 'Search name, phone, address, job #'}
           placeholderTextColor={colors.inkSoft}
           autoCapitalize="none"
           autoCorrect={false}
@@ -180,20 +225,28 @@ export function RecordList({
         ) : null}
         {onNewLead ? (
           <Pressable onPress={onNewLead} hitSlop={6} accessibilityLabel="New lead" style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
-            <Ionicons name="person-add-outline" size={15} color={colors.ocean} />
+            <Ionicons name="person-add-outline" size={15} color={hubColors.crm.fg} />
           </Pressable>
         ) : null}
       </View>
       <View style={styles.filters}>
-        <Chip label={`All ${total.customers + total.leads}`} tone="ocean" selected={kind === 'all'} onPress={() => onKind('all')} />
-        <Chip label={`Customers ${total.customers}`} tone="ocean" selected={kind === 'customer'} onPress={() => onKind('customer')} />
-        <Chip label={`Leads ${total.leads}`} tone="ocean" selected={kind === 'lead'} onPress={() => onKind('lead')} />
+        <LensChip label={`All ${total.customers + total.leads}`} selected={kind === 'all'} onPress={() => onKind('all')} />
+        <LensChip label={`Customers ${total.customers}`} selected={kind === 'customer'} onPress={() => onKind('customer')} />
+        <LensChip label={`Leads ${total.leads}`} selected={kind === 'lead'} onPress={() => onKind('lead')} />
         {tasksPane ? (
-          <Chip
+          <LensChip
             label={taskBadge ? `Tasks ${taskBadge}` : 'Tasks'}
-            tone={taskBadge && kind !== 'tasks' ? 'sun' : 'ocean'}
             selected={kind === 'tasks'}
+            attention={taskBadge > 0 && kind !== 'tasks'}
             onPress={() => onKind('tasks')}
+          />
+        ) : null}
+        {jobsLens ? (
+          <LensChip
+            label={jobCount != null ? `Jobs ${jobCount}` : 'Jobs'}
+            selected={kind === 'jobs'}
+            hue={hubColors.pipeline}
+            onPress={() => onKind('jobs')}
           />
         ) : null}
       </View>
@@ -246,7 +299,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingBottom: spacing.xs,
   },
-  newLead: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.skySoft },
+  lens: {
+    height: 28,
+    paddingHorizontal: spacing.sm + 2,
+    borderRadius: radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lensText: { fontSize: 12, fontWeight: '700' },
+  newLead: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: hubColors.crm.bg },
   kbd: {
     color: colors.inkSoft,
     fontSize: 10,
@@ -271,8 +332,8 @@ const styles = StyleSheet.create({
   },
   rowSelected: { backgroundColor: colors.white },
   accent: { width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: 'transparent', marginRight: -2 },
-  accentSelected: { backgroundColor: colors.ocean },
-  rowPressed: { backgroundColor: colors.skySoft },
+  accentSelected: { backgroundColor: hubColors.crm.fg },
+  rowPressed: { backgroundColor: hubColors.crm.bg },
   rowBody: { flex: 1, gap: 2 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   name: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '600' },
@@ -289,7 +350,7 @@ const styles = StyleSheet.create({
     height: 18,
     borderRadius: 9,
     paddingHorizontal: 5,
-    backgroundColor: colors.ocean,
+    backgroundColor: hubColors.crm.fg,
     alignItems: 'center',
     justifyContent: 'center',
   },

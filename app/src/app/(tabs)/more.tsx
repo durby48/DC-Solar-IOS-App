@@ -11,30 +11,30 @@ import {
   ListRow,
   Screen,
   SectionHeader,
-  SkeletonList,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { deleteOwnAccount } from '@/lib/account';
+import { explainAdminOnly, isLockedFor } from '@/lib/adminGate';
 import { fetchUnreadCount } from '@/lib/comms';
-import { visibleGroups, visibleItems } from '@/lib/hub';
+import { hubSections } from '@/lib/hub';
 import { clearRoleCache, useRoleGate } from '@/lib/role';
 import { resetToLogin, signOutAndLeave } from '@/lib/signOut';
 
 /**
  * Menu — every screen in the app as a dense list.
  *
- * The same `lib/hub.ts` data Home draws as tiles, drawn here as rows: Home is
- * for finding the thing you use every day, this is for finding the thing you
- * use twice a month. Keeping one list means a new screen appears in both
- * places, gated the same way, from a single edit.
+ * The same `lib/hub.ts` map Home draws as five tiles, drawn here as one
+ * group of rows per hub (2026-09-12 overhaul), each group in its hub's
+ * colour: the eyebrow bar and every icon square in the CRM group are CRM
+ * purple, and so on. Home is for finding the thing you use every day; this
+ * is for finding the thing you use twice a month.
  *
- * WHAT CHANGED. This screen used to hand-maintain an `ITEMS` array with a
- * literal union of every href, and it had NO role gating at all: every crew
- * member was offered Employees, Employee of the Month, and (once they moved
- * out of the tab bar) Financials and Sales — screens that then told them they
- * couldn't look. `visibleItems` fixes that. The gate is a courtesy, not a
- * boundary; the destinations still check for themselves and RLS still decides
- * what any query returns.
+ * EVERY ROLE SEES EVERY ROW. Admin-only entries are drawn locked (lock glyph,
+ * muted) and, on tap, explain that they need an administrator instead of
+ * navigating — see `lib/adminGate.ts`. The lock is a courtesy, not a
+ * boundary: the destinations still check for themselves and RLS still
+ * decides what any query returns. Because the layout no longer depends on
+ * the role there is no skeleton phase; the locks land when the role does.
  *
  * The file is still `more.tsx` and the route is still `/more`, because the
  * `more/*` directory has to keep working alongside it. Only the label is
@@ -44,7 +44,7 @@ export default function MenuScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const gate = useRoleGate();
-  const isAdmin = gate.role?.isAdmin ?? false;
+  const isAdmin = gate.phase === 'ready' && gate.role?.isAdmin === true;
 
   const [deleting, setDeleting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -88,30 +88,38 @@ export default function MenuScreen() {
 
   return (
     <Screen header={<AppText variant="title">Menu</AppText>}>
-      {gate.phase === 'loading' ? (
-        <SkeletonList count={6} height={54} />
-      ) : (
-        visibleGroups(isAdmin).map((group) => {
-          const items = visibleItems(isAdmin, group.key);
-          return (
-            <View key={group.key} style={styles.section}>
-              <SectionHeader title={group.title} subtitle={group.subtitle} />
-              <Card padded={false}>
-                {items.map((item, i) => (
+      {hubSections().map(({ hub, items }) => {
+        const accent = hubColors[hub.key];
+        return (
+          <View key={hub.key} style={styles.section}>
+            <SectionHeader title={hub.title} subtitle={hub.subtitle} accent={accent.fg} />
+            <Card padded={false}>
+              {items.map((item, i) => {
+                // Per ROW, the same rule as `hub/[key].tsx`: Receipts sits in
+                // the (admin) Systems hub but is open to everyone.
+                const locked = gate.phase === 'ready' && isLockedFor(item.gate, isAdmin);
+                return (
                   <ListRow
                     key={item.key}
                     icon={item.icon}
+                    iconColor={accent.fg}
+                    iconBackground={accent.bg}
                     title={item.title}
+                    subtitle={item.subtitle}
                     badge={item.badge === 'unread' ? unread : undefined}
                     divider={i < items.length - 1}
-                    onPress={() => router.push(item.href)}
+                    locked={locked}
+                    onPress={() => {
+                      if (isLockedFor(item.gate, isAdmin)) explainAdminOnly();
+                      else router.push(item.href);
+                    }}
                   />
-                ))}
-              </Card>
-            </View>
-          );
-        })
-      )}
+                );
+              })}
+            </Card>
+          </View>
+        );
+      })}
 
       <Card padded={false} style={styles.section}>
         <ListRow icon="log-out" title="Sign out" danger chevron={false} onPress={signOut} />

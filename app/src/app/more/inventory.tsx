@@ -16,7 +16,7 @@ import {
   SectionHeader,
   SkeletonList,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { haptics } from '@/lib/haptics';
 import {
   addInventoryItem,
@@ -338,7 +338,12 @@ export default function InventoryScreen() {
           </Card>
         ) : (
           <>
-            <SectionHeader title="Materials" icon="cube-outline" style={styles.sectionHeader} />
+            <SectionHeader
+              title="Materials"
+              icon="cube-outline"
+              accent={hubColors.systems.fg}
+              style={styles.sectionHeader}
+            />
             {itemsState === 'loading' ? (
               <SkeletonList count={5} height={60} />
             ) : itemsState === 'unavailable' ? (

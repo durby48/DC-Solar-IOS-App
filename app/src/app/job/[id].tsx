@@ -1,10 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 
 import { CustomerCard } from '@/components/CustomerCard';
 import { JobAssignedCrew } from '@/components/JobAssignedCrew';
+import { JobCustomerCard } from '@/components/JobCustomerCard';
 import { JobDocuments } from '@/components/JobDocuments';
 import { JobFinanceHeader } from '@/components/JobFinanceHeader';
 import { JobInvoices } from '@/components/JobInvoices';
@@ -42,12 +43,22 @@ import { stageOrDefault } from '@/lib/stages';
  *
  * There is deliberately no stage picker on this screen — the stage is set in
  * `job-editor.tsx`, which is where the "job → Complete" confetti belongs.
+ *
+ * 2026-09-12 cross-links: the customer block is `JobCustomerCard` (name row
+ * opens `/crm/[id]`) when the job carries a `customer_id`; and `?focus=hours`
+ * — how the Hours screen deep-links here — scrolls the "My hours" section
+ * into view once it has laid out.
  */
 export default function JobDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, focus } = useLocalSearchParams<{ id: string; focus?: string }>();
   const [job, setJob] = useState<JobWithPM | null>(null);
   const [loading, setLoading] = useState(true);
   const [myHours, setMyHours] = useState(0);
+  // `?focus=hours`: the hours section's y within the scroll content, measured
+  // by onLayout; the scroll happens once, the first time it is known.
+  const scrollRef = useRef<ScrollView>(null);
+  const [hoursY, setHoursY] = useState<number | null>(null);
+  const focused = useRef(false);
   // Bumped when JobInvoices edits/deletes an entry so the finance header
   // (which fetches independently) refreshes its totals too.
   const [financeRefresh, setFinanceRefresh] = useState(0);
@@ -96,6 +107,17 @@ export default function JobDetailScreen() {
     };
   }, [id, crewDisplayName, crewEmail, hoursRefresh]);
 
+  useEffect(() => {
+    if (focus !== 'hours' || hoursY === null || focused.current) return;
+    focused.current = true;
+    // Next frame: the section has laid out, but the ScrollView may not have
+    // its final content size on the same tick.
+    const handle = requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y: Math.max(0, hoursY - spacing.md), animated: true });
+    });
+    return () => cancelAnimationFrame(handle);
+  }, [focus, hoursY]);
+
   const openMaps = (address: string) => {
     Linking.openURL('https://maps.apple.com/?daddr=' + encodeURIComponent(address)).catch(
       () => {},
@@ -105,7 +127,7 @@ export default function JobDetailScreen() {
   return (
     <>
       <Stack.Screen options={{ title: job?.job_number ?? 'Job' }} />
-      <ScrollView style={styles.safe} contentContainerStyle={styles.container}>
+      <ScrollView ref={scrollRef} style={styles.safe} contentContainerStyle={styles.container}>
         {loading ? (
           <SkeletonList count={4} height={96} />
         ) : !job ? (
@@ -212,7 +234,11 @@ export default function JobDetailScreen() {
               </Card>
             ) : null}
 
-            {job.customer ? <CustomerCard customer={job.customer} /> : null}
+            {job.customer && job.customer_id ? (
+              <JobCustomerCard customer={job.customer} />
+            ) : job.customer ? (
+              <CustomerCard customer={job.customer} />
+            ) : null}
 
             <JobScheduleDates jobId={job.id} isAdmin={role?.isAdmin ?? false} />
 
@@ -221,12 +247,16 @@ export default function JobDetailScreen() {
             ) : null}
 
             {role ? (
-              <JobMyHours
-                jobId={job.id}
-                email={role.email}
-                isAdmin={role.isAdmin}
-                onChanged={() => setHoursRefresh((n) => n + 1)}
-              />
+              <View
+                style={styles.hoursAnchor}
+                onLayout={(e) => setHoursY(e.nativeEvent.layout.y)}>
+                <JobMyHours
+                  jobId={job.id}
+                  email={role.email}
+                  isAdmin={role.isAdmin}
+                  onChanged={() => setHoursRefresh((n) => n + 1)}
+                />
+              </View>
             ) : null}
 
             <JobDocuments jobId={job.id} />
@@ -289,5 +319,9 @@ const styles = StyleSheet.create({
   rowBody: {
     flex: 1,
     gap: 2,
+  },
+  // A measuring wrapper only; the container's `gap` still spaces its child.
+  hoursAnchor: {
+    gap: spacing.md,
   },
 });

@@ -331,7 +331,7 @@ export default function KeypadScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.cream },
+  screen: { flex: 1, backgroundColor: colors.surfaceAlt },
   container: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   gate: {
     flexDirection: 'row',
@@ -384,7 +384,7 @@ const styles = StyleSheet.create({
   setupTitle: { color: colors.ink, fontSize: 15, fontWeight: '800' },
   setupBody: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', lineHeight: 18 },
   setupInput: {
-    backgroundColor: colors.canvas,
+    backgroundColor: colors.surfaceSunk,
     borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.line,

@@ -1040,6 +1040,14 @@ export interface DirectoryEntry {
   phoneE164: string | null;
   sortKey: string;
   archived: boolean;
+  /**
+   * Contact rows only (2026-09-12, columns 8–10 of `phone_directory()`):
+   * the customer they are filed under, their tags, their job title. Empty /
+   * null for customers, leads and crew.
+   */
+  customerId: string | null;
+  tags: string[];
+  title: string | null;
 }
 
 /**
@@ -1065,6 +1073,13 @@ export async function fetchDirectory(): Promise<DirectoryEntry[]> {
         phoneE164: (row.phone_e164 as string | null) ?? null,
         sortKey: (row.sort_key as string | null) ?? '',
         archived: row.archived === true,
+        // Absent on a database that has not run 2026-09-12_contacts_tags.sql;
+        // mapped by NAME so an older function shape still fills the rest.
+        customerId: (row.customer_id as string | null) ?? null,
+        tags: Array.isArray(row.tags)
+          ? (row.tags as unknown[]).filter((t): t is string => typeof t === 'string' && t.length > 0)
+          : [],
+        title: (row.title as string | null) ?? null,
       }))
       .filter((entry) => entry.id.length > 0);
   } catch {
@@ -1101,90 +1116,19 @@ export function matchDirectory(
   return out;
 }
 
-export interface ContactInput {
-  name: string;
-  org?: string | null;
-  phone?: string | null;
-  email?: string | null;
-  /** supplier | vendor | inspector | other. Free text server-side. */
-  kind?: string;
-  notes?: string | null;
-}
-
 /**
- * Admin: add a supplier / vendor. Phase 1 built the table; only Devon knows
- * what belongs in it, so this is how it gets filled from the phone.
+ * CONTACT HELPERS MOVED (2026-09-12). `createContact`, `fetchContactById`,
+ * `archiveContact` and `ContactInput` now live in `lib/contacts.ts`, which
+ * owns the Phase 2 model (tags, title, one customer per contact, iPhone
+ * import). Re-exported here so every Phase 1 caller keeps compiling;
+ * new code should import from `@/lib/contacts` directly.
  */
-export async function createContact(input: ContactInput): Promise<CommsResult> {
-  try {
-    const name = input.name.trim();
-    if (!name) return { ok: false, message: 'Give the contact a name.' };
-    const email = await currentEmail();
-    const { error } = await supabase.from('contacts').insert({
-      company: COMPANY,
-      kind: (input.kind ?? 'supplier').trim().toLowerCase() || 'supplier',
-      name,
-      org: input.org?.trim() || null,
-      phone: input.phone?.trim() || null,
-      email: input.email?.trim() || null,
-      notes: input.notes?.trim() || null,
-      created_by: email,
-    });
-    if (error) {
-      return {
-        ok: false,
-        message:
-          error.code === '42501' || /row-level security|policy/i.test(error.message ?? '')
-            ? 'Only owners and operators can add contacts.'
-            : error.message || 'Could not save the contact.',
-      };
-    }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : 'Could not save the contact.' };
-  }
-}
-
-/** One supplier / vendor, for the thread header. Null when missing or unreadable. */
-export async function fetchContactById(
-  id: string,
-): Promise<{ id: string; name: string; org: string | null; phoneE164: string | null } | null> {
-  try {
-    const { data, error } = await supabase
-      .from('contacts')
-      .select('id, name, org, phone_e164')
-      .eq('id', id)
-      .maybeSingle();
-    if (error || !data) return null;
-    const row = data as Record<string, unknown>;
-    return {
-      id: String(row.id),
-      name: (row.name as string) ?? 'Contact',
-      org: (row.org as string | null) ?? null,
-      phoneE164: (row.phone_e164 as string | null) ?? null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** Admin: hide a supplier from the directory without losing their thread. */
-export async function archiveContact(id: string): Promise<CommsResult> {
-  try {
-    const { data, error } = await supabase
-      .from('contacts')
-      .update({ archived_at: new Date().toISOString() })
-      .eq('id', id)
-      .select('id');
-    if (error) return { ok: false, message: error.message || 'Could not archive the contact.' };
-    if (!data || data.length === 0) {
-      return { ok: false, message: 'Only owners and operators can archive contacts.' };
-    }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : 'Could not archive the contact.' };
-  }
-}
+export {
+  archiveContact,
+  createContact,
+  fetchContactById,
+  type ContactInput,
+} from '@/lib/contacts';
 
 // ---------------------------------------------------------------------------
 // Recents (Phone → Recents)

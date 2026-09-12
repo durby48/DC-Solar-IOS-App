@@ -124,7 +124,7 @@ export function isCompanyJob(job: unknown): boolean {
 export function labelForJob(job: {
   stage?: unknown;
   status?: string | null;
-  is_internal?: boolean;
+  is_internal?: boolean | null;
 }): StageLabel {
   if (isCompanyJob(job)) return COMPANY_LABEL;
   return stageOrDefault(job.stage, job.status);

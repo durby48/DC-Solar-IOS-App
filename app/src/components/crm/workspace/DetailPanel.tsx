@@ -3,12 +3,12 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { CustomerContacts } from '@/components/contacts/CustomerContacts';
 import { AppointmentComposer, AppointmentItem } from '@/components/crm/workspace/Appointments';
-import { CurrentJobCard } from '@/components/crm/workspace/CurrentJobCard';
+import { CurrentJobCard, StagePillControl } from '@/components/crm/workspace/CurrentJobCard';
 import { TaskComposer } from '@/components/crm/workspace/TaskComposer';
 import { TaskItem } from '@/components/crm/workspace/TaskItem';
-import { Pill } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { type Assignment } from '@/lib/assignments';
 import { formatPhone } from '@/lib/comms';
 import { updateCustomer, type CustomerFinanceRow, type CustomerJob } from '@/lib/crm';
@@ -17,8 +17,8 @@ import { type CustomerDocument } from '@/lib/customers';
 import { todayISO } from '@/lib/dates';
 import { isUpcoming, type LeadAppointment } from '@/lib/leadAppointments';
 import { updateLead } from '@/lib/leads';
+import { useRole } from '@/lib/role';
 import { assignLead, setLeadStatus, type LeadStatus } from '@/lib/sales';
-import { STAGE_COLORS, isStage } from '@/lib/stages';
 import { type Task } from '@/lib/tasks';
 
 /**
@@ -37,6 +37,10 @@ import { type Task } from '@/lib/tasks';
  * Pattern: Chatwoot's ContactPanel / Twenty's editable field panel — small
  * label-over-value rows, an Edit toggle that turns the section into inputs,
  * Save/Cancel, nothing modal.
+ *
+ * 2026-09-12: the "Other jobs" rows carry the same live stage control as the
+ * current job (`StagePillControl`), so every job on the record can be moved
+ * from here. Section actions take the CRM hub's purple.
  */
 
 function money(amount: number): string {
@@ -109,6 +113,7 @@ export function DetailPanel({
   onClose?: () => void;
 }) {
   const router = useRouter();
+  const role = useRole();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '' });
   const [saving, setSaving] = useState(false);
@@ -205,7 +210,7 @@ export function DetailPanel({
     <ScrollView style={styles.column} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       {onClose ? (
         <Pressable onPress={onClose} style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
-          <Ionicons name="chevron-back" size={16} color={colors.ocean} />
+          <Ionicons name="chevron-back" size={16} color={hubColors.crm.fg} />
           <Text style={styles.closeText}>Back to conversation</Text>
         </Pressable>
       ) : null}
@@ -215,7 +220,7 @@ export function DetailPanel({
         right={
           editing ? null : (
             <Pressable onPress={() => setEditing(true)} hitSlop={6} accessibilityLabel="Edit contact">
-              <Ionicons name="create-outline" size={16} color={colors.ocean} />
+              <Ionicons name="create-outline" size={16} color={hubColors.crm.fg} />
             </Pressable>
           )
         }>
@@ -253,6 +258,15 @@ export function DetailPanel({
           </>
         )}
       </Section>
+
+      {record.kind === 'customer' ? (
+        // The OTHER people on the record — a contractor's PM, office, site
+        // lead (2026-09-12). The customer's own phone/email stay above; these
+        // are additional. Loads its own rows; admin actions checked inside.
+        <View style={styles.section}>
+          <CustomerContacts customerId={record.id} customerName={record.name} isAdmin={role?.isAdmin === true} />
+        </View>
+      ) : null}
 
       {record.kind === 'lead' && record.lead ? (
         <Section title="Lead">
@@ -322,7 +336,7 @@ export function DetailPanel({
               onPress={() => router.push({ pathname: '/job-editor', params: { customerId: record.id } } as never)}
               hitSlop={6}
               accessibilityLabel="New job">
-              <Ionicons name="add-circle-outline" size={18} color={colors.ocean} />
+              <Ionicons name="add-circle-outline" size={18} color={hubColors.crm.fg} />
             </Pressable>
           }>
           <Text style={styles.factMuted}>No jobs yet.</Text>
@@ -353,7 +367,7 @@ export function DetailPanel({
           title={`Appointments${upcomingAppts.length ? ` · ${upcomingAppts.length}` : ''}`}
           right={
             <Pressable onPress={() => setAddingAppt((v) => !v)} hitSlop={6} accessibilityLabel={addingAppt ? 'Cancel new appointment' : 'New appointment'}>
-              <Ionicons name={addingAppt ? 'close-circle-outline' : 'add-circle-outline'} size={18} color={colors.ocean} />
+              <Ionicons name={addingAppt ? 'close-circle-outline' : 'add-circle-outline'} size={18} color={hubColors.crm.fg} />
             </Pressable>
           }>
           {addingAppt ? (
@@ -388,7 +402,7 @@ export function DetailPanel({
         title={`Tasks${openTasks.length ? ` · ${openTasks.length}` : ''}`}
         right={
           <Pressable onPress={() => setAddingTask((v) => !v)} hitSlop={6} accessibilityLabel={addingTask ? 'Cancel new task' : 'New task'}>
-            <Ionicons name={addingTask ? 'close-circle-outline' : 'add-circle-outline'} size={18} color={colors.ocean} />
+            <Ionicons name={addingTask ? 'close-circle-outline' : 'add-circle-outline'} size={18} color={hubColors.crm.fg} />
           </Pressable>
         }>
         {addingTask ? (
@@ -427,35 +441,34 @@ export function DetailPanel({
               onPress={() => router.push({ pathname: '/job-editor', params: { customerId: record.id } } as never)}
               hitSlop={6}
               accessibilityLabel="New job">
-              <Ionicons name="add-circle-outline" size={18} color={colors.ocean} />
+              <Ionicons name="add-circle-outline" size={18} color={hubColors.crm.fg} />
             </Pressable>
           }>
           {otherJobs.length === 0 ? <Text style={styles.factMuted}>Just the one.</Text> : null}
-          {(showAllJobs ? otherJobs : otherJobs.slice(0, OTHER_JOBS_PREVIEW)).map((j) => {
-            const stage = isStage(j.stage) ? j.stage : null;
-            const pill = stage ? STAGE_COLORS[stage] : { bg: colors.slateSoft, fg: colors.slateDeep };
-            return (
-              <Pressable
-                key={j.id}
-                onPress={() => router.push({ pathname: '/job/[id]', params: { id: j.id } })}
-                style={({ pressed }) => [styles.job, pressed && styles.pressed]}>
-                <View style={styles.jobBody}>
-                  <Text style={styles.jobTitle} numberOfLines={1}>
-                    {j.job_number ?? j.name}
-                  </Text>
-                  <Text style={styles.jobMeta} numberOfLines={1}>
-                    {j.name !== j.job_number ? j.name : ''}
-                    {j.completed_on
-                      ? `${j.name !== j.job_number ? ' · ' : ''}done ${shortDate(j.completed_on)}`
-                      : j.scheduled_for
-                        ? `${j.name !== j.job_number ? ' · ' : ''}${shortDate(j.scheduled_for)}`
-                        : ''}
-                  </Text>
-                </View>
-                <Pill label={stage ?? (j.status ?? 'No stage')} bg={pill.bg} fg={pill.fg} />
-              </Pressable>
-            );
-          })}
+          {(showAllJobs ? otherJobs : otherJobs.slice(0, OTHER_JOBS_PREVIEW)).map((j) => (
+            // The row opens the job; the pill on it is the same live stage
+            // control as the current-job card (its own Pressable, so a tap
+            // on the pill never navigates).
+            <Pressable
+              key={j.id}
+              onPress={() => router.push({ pathname: '/job/[id]', params: { id: j.id } })}
+              style={({ pressed }) => [styles.job, pressed && styles.pressed]}>
+              <View style={styles.jobBody}>
+                <Text style={styles.jobTitle} numberOfLines={1}>
+                  {j.job_number ?? j.name}
+                </Text>
+                <Text style={styles.jobMeta} numberOfLines={1}>
+                  {j.name !== j.job_number ? j.name : ''}
+                  {j.completed_on
+                    ? `${j.name !== j.job_number ? ' · ' : ''}done ${shortDate(j.completed_on)}`
+                    : j.scheduled_for
+                      ? `${j.name !== j.job_number ? ' · ' : ''}${shortDate(j.scheduled_for)}`
+                      : ''}
+                </Text>
+              </View>
+              <StagePillControl job={j} canEdit={canEditStage} onChanged={onChanged} compact />
+            </Pressable>
+          ))}
           {otherJobs.length > OTHER_JOBS_PREVIEW ? (
             <Pressable onPress={() => setShowAllJobs((v) => !v)} hitSlop={4}>
               <Text style={styles.linkText}>{showAllJobs ? 'Show fewer' : `Show all ${otherJobs.length}`}</Text>
@@ -472,7 +485,7 @@ export function DetailPanel({
               onPress={() => router.push({ pathname: '/crm/[id]', params: { id: record.id, segment: 'documents' } })}
               hitSlop={6}
               accessibilityLabel="All documents">
-              <Ionicons name="open-outline" size={15} color={colors.ocean} />
+              <Ionicons name="open-outline" size={15} color={hubColors.crm.fg} />
             </Pressable>
           }>
           {docs.length + documents.length === 0 ? (
@@ -507,7 +520,7 @@ const styles = StyleSheet.create({
   column: { flex: 1, backgroundColor: colors.canvas },
   content: { padding: spacing.md, gap: spacing.md, paddingBottom: spacing.xxl },
   close: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start' },
-  closeText: { color: colors.ocean, fontSize: 13, fontWeight: '700' },
+  closeText: { color: hubColors.crm.fg, fontSize: 13, fontWeight: '700' },
   section: { backgroundColor: colors.white, borderRadius: radii.md, padding: spacing.md, gap: spacing.sm },
   sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sectionTitle: { color: colors.inkSoft, fontSize: 11, fontWeight: '800', letterSpacing: 0.6, textTransform: 'uppercase' },
@@ -556,6 +569,6 @@ const styles = StyleSheet.create({
   moneyLabel: { color: colors.inkSoft, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
   file: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   fileText: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: '600' },
-  linkText: { color: colors.ocean, fontSize: 12, fontWeight: '700' },
+  linkText: { color: hubColors.crm.fg, fontSize: 12, fontWeight: '700' },
   pressed: { opacity: 0.6 },
 });

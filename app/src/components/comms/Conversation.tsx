@@ -477,7 +477,7 @@ export function Conversation({
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.cream },
+  screen: { flex: 1, backgroundColor: colors.surfaceAlt },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   list: { flex: 1 },
   listContent: {
@@ -529,7 +529,7 @@ const styles = StyleSheet.create({
   composerWrap: {
     backgroundColor: colors.white,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
   },
   composer: {
     flexDirection: 'row',
@@ -541,7 +541,7 @@ const styles = StyleSheet.create({
   composerInput: {
     flex: 1,
     maxHeight: 120,
-    backgroundColor: colors.canvas,
+    backgroundColor: colors.surfaceSunk,
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.line,
@@ -620,7 +620,7 @@ const styles = StyleSheet.create({
 
   templateSheet: {
     maxHeight: 300,
-    backgroundColor: colors.canvas,
+    backgroundColor: colors.surfaceSunk,
     borderTopWidth: 1,
     borderTopColor: colors.line,
     padding: spacing.md,

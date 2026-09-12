@@ -270,6 +270,11 @@ export async function fetchHoursData(): Promise<HoursData | null> {
 }
 
 export interface EmployeeJobHours {
+  /**
+   * jobs.id — the Hours tab links each per-job row to
+   * `/job/[id]?focus=hours`, so this must be the real uuid. Null for hours
+   * logged with no job ("No job" row, which is not a link).
+   */
   jobId: string | null;
   /** DC-26### when known, else job name, else "No job". */
   label: string;

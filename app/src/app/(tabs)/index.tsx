@@ -1,7 +1,14 @@
 import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import { setStatusBarStyle } from 'expo-status-bar';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, AppState, StyleSheet, useWindowDimensions, View } from 'react-native';
+import {
+  ActivityIndicator,
+  AppState,
+  Platform,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import BuildInfo from '@/components/BuildInfo';
 import { ClockCard } from '@/components/ClockCard';
@@ -15,45 +22,42 @@ import {
   ListRow,
   Screen,
   SectionHeader,
-  SkeletonList,
   Tile,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { deleteOwnAccount } from '@/lib/account';
+import { explainAdminOnly, isLockedFor } from '@/lib/adminGate';
 import { getSessionEmail } from '@/lib/clock';
 import { fetchUnreadCount } from '@/lib/comms';
 import { fetchJobs, fetchScheduleEntries } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
-import { visibleGroups, visibleItems } from '@/lib/hub';
+import { HUBS } from '@/lib/hub';
 import { type Job } from '@/lib/types';
 import { registerPushToken, scheduleJobReminders } from '@/lib/notifications';
 import { registerForIncomingCalls } from '@/lib/voice';
 import { clearRoleCache, useRoleGate } from '@/lib/role';
 import { resetToLogin, signOutAndLeave } from '@/lib/signOut';
-import { supabase } from '@/lib/supabase';
 
 /**
  * Home — the hub the app opens to.
  *
- * This file used to be the Calendar. It is now the front door: greeting and
- * date, the clock card floating over the olive band, today's work, and then
- * every screen in the app grouped into sections that respect what this person
- * is actually allowed to do. The calendar itself moved WHOLE to
- * `(tabs)/calendar.tsx`; the clock moved to `components/ClockCard.tsx` with
- * its widget sync intact. Employee of the Month followed the calendar over on
- * 2026-08-22 — Home is where you punch in, not where you linger.
+ * The olive band with the greeting, the clock card floating over its lower
+ * edge, today's work, and then the FIVE HUBS (2026-09-12 overhaul): CRM,
+ * Pipeline, Operations, Human Resources, Systems Management. Each hub is one
+ * colour-edged tile in its own hue (`hubColors`), and every role sees all
+ * five — Systems Management is drawn LOCKED for the crew and explains itself
+ * on tap instead of navigating (`lib/adminGate.ts`). The per-item grid that
+ * used to live here moved into the hub screens and the Menu tab.
  *
- * WHY THE ROLE HAS AN EXPLICIT LOADING PHASE. `useRole()` returns `null` both
- * while it is loading AND when you are not staff, so a screen that gates on
- * `role?.isAdmin` renders the VIEWER layout for a moment and then pops the
- * admin sections in. On a hub that is the whole page rearranging itself under
- * your thumb. `useRoleGate()` keeps 'loading' separate and this screen shows
- * skeletons until it knows, so the sections you get are the sections you keep.
+ * There is no role-dependent layout any more, so there is no skeleton phase
+ * either: the grid renders at once and the lock badge lands when the role
+ * does. `isAdmin` is still `ready && isAdmin === true` — an unknown role is
+ * not an admin, and the only thing that costs is a lock badge on one tile.
  *
- * The section list itself lives in `lib/hub.ts`, shared with the Menu tab.
+ * The hub list itself lives in `lib/hub.ts`, shared with the Menu tab.
  */
 
-/** Two columns on a phone, four on a desktop browser. */
+/** Two columns on a phone, five (one per hub) on a desktop browser. */
 const WIDE_BREAKPOINT = 900;
 
 export default function HomeScreen() {
@@ -61,21 +65,6 @@ export default function HomeScreen() {
   const navigation = useNavigation();
   const { width } = useWindowDimensions();
   const gate = useRoleGate();
-  /**
-   * ADMIN-ONLY TILES — the Money group (Financials, Sales) and Hours,
-   * Employees, Employee of the Month.
-   *
-   * This is deliberately `ready && isAdmin === true` rather than
-   * `gate.role?.isAdmin ?? false`. The two agree today, because the loading
-   * phase renders skeletons instead of the grid — but they agree by accident,
-   * and the moment somebody rearranges that branch the optimistic form starts
-   * rendering a guess. Every state that is not a CONFIRMED admin — still
-   * loading, lookup failed, signed out, `role === null` — is not an admin
-   * here, and there is no path through this file where an admin tile can be
-   * drawn from a maybe. (`lib/hub.ts` gating is a courtesy either way: the
-   * destinations check for themselves and RLS decides what any query
-   * returns.)
-   */
   const isAdmin = gate.phase === 'ready' && gate.role?.isAdmin === true;
 
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
@@ -101,12 +90,10 @@ export default function HomeScreen() {
    * Light status-bar glyphs while Home is on screen.
    *
    * The root layout sets `<StatusBar style="dark" />` globally, which is right
-   * for every cream page in the app — but Home's olive header runs under the
+   * for every light page in the app — but Home's olive header runs under the
    * status bar, and dark glyphs on #4D5C2B are close to invisible. Flipping it
    * imperatively on focus (and back on blur) keeps that global default for
-   * everyone else: only this screen ever asks for light, and the cleanup runs
-   * whether you swipe to Calendar, push into a job, or background the app.
-   * `setStatusBarStyle` is a no-op on web, so app.dcsolarkc.com is unaffected.
+   * everyone else. `setStatusBarStyle` is a no-op on web.
    */
   useFocusEffect(
     useCallback(() => {
@@ -146,9 +133,9 @@ export default function HomeScreen() {
 
   /**
    * Signed-in devices: keep 24h/1h job reminders synced with the schedule and
-   * register this device's push token. Moved here with the clock card — Home
-   * is the screen everyone opens, so it is the reliable place to do it.
-   * Both are silent no-ops on web and on denied permission.
+   * register this device's push token. Home is the screen everyone opens, so
+   * it is the reliable place to do it. Both are silent no-ops on web and on
+   * denied permission.
    */
   useEffect(() => {
     if (!sessionEmail) return;
@@ -190,27 +177,26 @@ export default function HomeScreen() {
     }
   };
 
-  const columns = width >= WIDE_BREAKPOINT ? 4 : 2;
-  const groups = visibleGroups(isAdmin);
+  const wide = width >= WIDE_BREAKPOINT;
+  // One row of five on a desktop browser; two columns on a phone.
+  const columns = wide ? HUBS.length : 2;
+  const compact = Platform.OS === 'web' && wide;
 
   return (
     <Screen padded={false} edges={[]} contentContainerStyle={styles.scroll}>
       <HomeHeader />
 
-      <View style={styles.body}>
+      <View style={[styles.body, compact && styles.bodyCompact]}>
         {/* The one surface allowed to float. It overlaps the olive band by
             design — see shadows.hero in constants/theme. */}
         <ClockCard style={styles.clock} />
-
-        {/* Employee of the Month used to sit here. It moved to the Calendar
-            on 2026-08-22 at Devon's request — Home is the punch-in screen,
-            and recognition reads better on the screen you open to look at the
-            month. See components/EmployeeOfMonth.tsx. */}
 
         <FadeInUp index={0}>
           <Card padded={false} style={styles.todayCard}>
             <ListRow
               icon="today"
+              iconColor={hubColors.operations.fg}
+              iconBackground={hubColors.operations.bg}
               title={
                 todayCount === null
                   ? 'Today'
@@ -222,41 +208,38 @@ export default function HomeScreen() {
           </Card>
         </FadeInUp>
 
-        {gate.phase === 'loading' ? (
-          <View style={styles.loading}>
-            <SkeletonList count={2} height={96} />
-            <SkeletonList count={2} height={96} />
+        <View style={styles.section}>
+          <SectionHeader title="Hubs" subtitle="Everything in the app, five doors" />
+          <View style={styles.grid}>
+            {HUBS.map((hub, i) => {
+              // Only a CONFIRMED non-admin gets the lock; while the role is
+              // loading the tile is drawn open and the press still explains
+              // (the gate below re-checks at tap time with the same rule).
+              const locked = gate.phase === 'ready' && isLockedFor(hub.gate, isAdmin);
+              return (
+                <FadeInUp
+                  key={hub.key}
+                  index={1 + i}
+                  style={[styles.cell, { width: `${100 / columns}%` }]}>
+                  <Tile
+                    title={hub.title}
+                    subtitle={hub.subtitle}
+                    icon={hub.icon}
+                    tone={hub.key}
+                    compact={compact}
+                    locked={locked}
+                    badge={hub.key === 'crm' ? unread : undefined}
+                    onPress={() => {
+                      if (isLockedFor(hub.gate, isAdmin)) explainAdminOnly();
+                      else router.push(hub.href);
+                    }}
+                    style={styles.tile}
+                  />
+                </FadeInUp>
+              );
+            })}
           </View>
-        ) : (
-          groups.map((group, groupIndex) => (
-            <View key={group.key} style={styles.section}>
-              <SectionHeader title={group.title} subtitle={group.subtitle} />
-              <View style={styles.grid}>
-                {visibleItems(isAdmin, group.key)
-                  // Calendar and Pipeline stay in the Menu tab; on Home
-                  // they're redundant with the "Today" card above (which
-                  // already opens the calendar) and Devon asked for the
-                  // grid trimmed.
-                  .filter((item) => item.key !== 'calendar' && item.key !== 'pipeline')
-                  .map((item, i) => (
-                    <FadeInUp
-                      key={item.key}
-                      index={groupIndex + i}
-                      style={[styles.cell, { width: `${100 / columns}%` }]}>
-                      <Tile
-                        title={item.title}
-                        icon={item.icon}
-                        href={item.href}
-                        tone={item.tone}
-                        badge={item.badge === 'unread' ? unread : undefined}
-                        style={styles.tile}
-                      />
-                    </FadeInUp>
-                  ))}
-              </View>
-            </View>
-          ))
-        )}
+        </View>
 
         <View style={styles.section}>
           <SectionHeader title="Account" />
@@ -334,6 +317,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     gap: spacing.md,
   },
+  /** The desktop browser: less air around the grid, a little more at the sides. */
+  bodyCompact: {
+    gap: spacing.sm + 2,
+    paddingHorizontal: spacing.xl,
+  },
   /**
    * Pulls the clock card up over the header band. The band's own
    * `paddingBottom: xxl` is what leaves olive showing above and beside it.
@@ -343,9 +331,6 @@ const styles = StyleSheet.create({
   },
   todayCard: {
     marginTop: spacing.xs,
-  },
-  loading: {
-    gap: spacing.md,
   },
   section: {
     marginTop: spacing.sm,
@@ -362,7 +347,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   tile: {
-    // The tile's own `minWidth: 140` would blow out a 2-up grid on a small
+    // The tile's own `minWidth` would blow out a 2-up grid on a small
     // phone; the cell decides the width here.
     minWidth: 0,
   },

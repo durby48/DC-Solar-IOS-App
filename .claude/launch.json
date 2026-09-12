@@ -3,21 +3,19 @@
   "configurations": [
     {
       "name": "expo",
-      "runtimeExecutable": "powershell.exe",
+      "runtimeExecutable": "cmd.exe",
       "runtimeArgs": [
-        "-NoProfile",
-        "-Command",
-        "Set-Location 'C:\\Users\\carso\\Documents\\DC-Solar-IOS-App-main\\DC-Solar-IOS-App-main\\app'; npx expo start --port 8081"
+        "/c",
+        "cd /d \"C:\\Users\\devon\\OneDrive\\Desktop\\DC Solar LLC\\DC-Solar-IOS-App\\app\" && npx expo start --port 8081"
       ],
       "port": 8081
     },
     {
       "name": "expo-web",
-      "runtimeExecutable": "powershell.exe",
+      "runtimeExecutable": "cmd.exe",
       "runtimeArgs": [
-        "-NoProfile",
-        "-Command",
-        "Set-Location 'C:\\Users\\carso\\Documents\\DC-Solar-IOS-App-main\\DC-Solar-IOS-App-main\\app'; npx expo start --web --port 8082"
+        "/c",
+        "cd /d \"C:\\Users\\devon\\OneDrive\\Desktop\\DC Solar LLC\\DC-Solar-IOS-App\\app\" && npx expo start --web --port 8082"
       ],
       "port": 8082
     }

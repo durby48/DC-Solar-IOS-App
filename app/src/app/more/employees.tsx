@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 
 import { EmptyState } from '@/components/ui';
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { fetchPaystubs, type EmployeeDocument } from '@/lib/paystubs';
 import { getRole, type EmployeeRole, type RoleInfo } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
@@ -80,6 +81,7 @@ function useGate(): { state: 'loading' | 'out' | 'in'; role: RoleInfo | null } {
 export default function EmployeesScreen() {
   const gate = useGate();
   const isAdmin = gate.role?.isAdmin ?? false;
+  const door = useAdminOnlyScreen();
 
   const [listState, setListState] = useState<'loading' | 'ok' | 'unavailable'>('loading');
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
@@ -224,11 +226,20 @@ export default function EmployeesScreen() {
     );
   };
 
+  if (door.blocked) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Employees' }} />
+        <View style={styles.screen} />
+      </>
+    );
+  }
+
   return (
     <>
       <Stack.Screen options={{ title: 'Employees' }} />
       <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-        {gate.state === 'loading' ? (
+        {gate.state === 'loading' || door.phase === 'loading' ? (
           <View style={styles.centerCard}>
             <ActivityIndicator color={colors.ocean} />
           </View>
@@ -242,17 +253,7 @@ export default function EmployeesScreen() {
               The employee dashboard is only visible to signed-in admins.
             </Text>
           </View>
-        ) : !isAdmin ? (
-          <View style={styles.centerCard}>
-            <View style={styles.badge}>
-              <Ionicons name="lock-closed" size={26} color={colors.ocean} />
-            </View>
-            <Text style={styles.promptTitle}>Admins only</Text>
-            <Text style={styles.promptText}>
-              The employee dashboard is limited to owners and operators.
-            </Text>
-          </View>
-        ) : (
+        ) : !isAdmin ? null : (
           <>
             <Text style={styles.sectionTitle}>Team</Text>
             {listState === 'loading' ? (
@@ -281,7 +282,7 @@ export default function EmployeesScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceAlt,
   },
   container: {
     padding: spacing.lg,
@@ -289,7 +290,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
   },
   sectionTitle: {
-    color: colors.ink,
+    color: hubColors.hr.fg,
     fontSize: 18,
     fontWeight: '700',
     marginTop: spacing.sm,

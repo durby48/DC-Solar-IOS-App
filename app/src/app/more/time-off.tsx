@@ -17,7 +17,7 @@ import {
   SectionHeader,
   SkeletonList,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatShortDate, parseISODate, todayISO } from '@/lib/dates';
 import { haptics } from '@/lib/haptics';
 import { useRole } from '@/lib/role';
@@ -244,7 +244,7 @@ export default function TimeOffScreen() {
           <>
             {role?.isAdmin ? (
               <View style={styles.section}>
-                <SectionHeader title="Pending requests" icon="hourglass-outline" />
+                <SectionHeader title="Pending requests" icon="hourglass-outline" accent={hubColors.hr.fg} />
                 {pendingState === 'loading' ? (
                   <SkeletonList count={2} height={84} />
                 ) : pendingState === 'unavailable' ? (
@@ -308,7 +308,7 @@ export default function TimeOffScreen() {
             ) : null}
 
             <View style={styles.section}>
-              <SectionHeader title="Request time off" icon="sunny-outline" />
+              <SectionHeader title="Request time off" icon="sunny-outline" accent={hubColors.hr.fg} />
               {!showForm ? (
                 <Button
                   label="Request time off"
@@ -450,7 +450,7 @@ export default function TimeOffScreen() {
             </View>
 
             <View style={styles.section}>
-              <SectionHeader title="My requests" icon="calendar-outline" />
+              <SectionHeader title="My requests" icon="calendar-outline" accent={hubColors.hr.fg} />
               {myState === 'loading' ? (
                 <SkeletonList count={3} height={64} />
               ) : myState === 'unavailable' ? (

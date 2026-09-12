@@ -12,7 +12,7 @@ import {
   Screen,
   SkeletonList,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { haptics } from '@/lib/haptics';
 import {
   confirmEnrollment,
@@ -195,13 +195,13 @@ export default function SecurityScreen() {
           </Card>
         ) : setup ? (
           <Card style={styles.card}>
-            <AppText variant="section" color={colors.accentPrimary} style={styles.step}>
+            <AppText variant="section" color={hubColors.systems.fg} style={styles.step}>
               1. Add this to your authenticator app
             </AppText>
             {Platform.OS === 'web' && setup.qrCode ? (
               <Image source={{ uri: setup.qrCode }} style={styles.qr} resizeMode="contain" />
             ) : null}
-            <AppText variant="section" color={colors.accentPrimary} style={styles.step}>
+            <AppText variant="section" color={hubColors.systems.fg} style={styles.step}>
               {Platform.OS === 'web' ? 'Or enter this key by hand:' : 'Enter this setup key:'}
             </AppText>
             <AnimatedPressable
@@ -230,7 +230,7 @@ export default function SecurityScreen() {
               </View>
             </AnimatedPressable>
 
-            <AppText variant="section" color={colors.accentPrimary} style={styles.step}>
+            <AppText variant="section" color={hubColors.systems.fg} style={styles.step}>
               2. Enter the 6-digit code it shows
             </AppText>
             <TextInput

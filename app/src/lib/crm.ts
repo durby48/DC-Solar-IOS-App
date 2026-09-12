@@ -152,6 +152,49 @@ export async function fetchCustomerById(id: string): Promise<Customer | null> {
   }
 }
 
+/**
+ * The customer a converted lead became (2026-09-12, lead → job cross-link).
+ *
+ * `leads` carries `converted_job_id` but no customer pointer, so the link is
+ * indirect: the job's `customer_id` when the conversion created a project,
+ * otherwise the un-archived customer whose E.164 phone or email matches the
+ * lead's. Null when nothing matches — the caller shows nothing rather than a
+ * guess. Member-readable on both tables, so this works for the whole crew.
+ */
+export async function findCustomerForLead(lead: {
+  converted_job_id: string | null;
+  phone: string | null;
+  email: string | null;
+}): Promise<Customer | null> {
+  try {
+    if (lead.converted_job_id) {
+      const { data: job } = await supabase
+        .from('jobs')
+        .select('customer_id')
+        .eq('company', COMPANY)
+        .eq('id', lead.converted_job_id)
+        .maybeSingle();
+      const customerId = (job as { customer_id?: string | null } | null)?.customer_id ?? null;
+      if (customerId) {
+        const byJob = await fetchCustomerById(customerId);
+        if (byJob) return byJob;
+      }
+    }
+    const digits = (lead.phone ?? '').replace(/[^0-9]/g, '');
+    const e164 =
+      digits.length === 10 ? `+1${digits}` : digits.length === 11 && digits.startsWith('1') ? `+${digits}` : null;
+    const email = lead.email?.trim().toLowerCase() ?? '';
+    if (!e164 && !email) return null;
+    let query = supabase.from('customers').select(CUSTOMER_COLUMNS).eq('company', COMPANY).is('archived_at', null);
+    query = e164 && email ? query.or(`phone_e164.eq.${e164},email.ilike.${email}`) : e164 ? query.eq('phone_e164', e164) : query.ilike('email', email);
+    const { data, error } = await query.limit(1);
+    if (error || !data || data.length === 0) return null;
+    return data[0] as unknown as Customer;
+  } catch {
+    return null;
+  }
+}
+
 /** Admin: add a customer. */
 export async function addCustomer(input: CustomerInput): Promise<MutationResult> {
   try {

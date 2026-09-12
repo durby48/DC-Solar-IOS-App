@@ -17,6 +17,7 @@ import {
   SkeletonList,
 } from '@/components/ui';
 import { colors, spacing } from '@/constants/theme';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { fetchJob } from '@/lib/data';
 import * as haptics from '@/lib/haptics';
 import {
@@ -60,6 +61,7 @@ export default function JobEditorScreen() {
   const isEdit = jobId != null;
 
   const [role, setRole] = useState<RoleInfo | null | 'loading'>('loading');
+  const gate = useAdminOnlyScreen();
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -317,7 +319,7 @@ export default function JobEditorScreen() {
 
   const screenTitle = isEdit ? 'Edit project' : 'New project';
 
-  if (role === 'loading' || loading) {
+  if (gate.phase === 'loading' || role === 'loading' || loading) {
     return (
       <>
         <Stack.Screen options={{ title: screenTitle }} />
@@ -328,19 +330,12 @@ export default function JobEditorScreen() {
     );
   }
 
-  if (!role || !role.isAdmin) {
+  if (gate.blocked || !role || !role.isAdmin) {
+    // Explained by the gate and on the way back; draw none of the form.
     return (
       <>
         <Stack.Screen options={{ title: screenTitle }} />
-        <Screen edges={[]}>
-          <Card>
-            <EmptyState
-              icon="lock-closed"
-              title="Admins only"
-              body="Editing projects is only available to admins. Please sign in with an admin account."
-            />
-          </Card>
-        </Screen>
+        <Screen edges={[]}>{null}</Screen>
       </>
     );
   }

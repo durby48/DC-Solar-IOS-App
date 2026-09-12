@@ -1,9 +1,9 @@
 import { Tabs, useNavigation, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { TabIcon } from '@/components/ui';
-import { colors, fonts } from '@/constants/theme';
+import { colors, fonts, hubColors } from '@/constants/theme';
 import { getAccountInfo } from '@/lib/account';
 import {
   clearBounceToLogin,
@@ -135,12 +135,27 @@ function useStaffGate() {
   return state;
 }
 
+/**
+ * THE TAB BAR (2026-09-12 overhaul): Home · CRM · Pipeline · Operations · Menu.
+ *
+ * Three of the five Home hubs get a tab; each tab is tinted in ITS hub's
+ * colour when focused (`hubColors`), so the bar and the Home grid agree on
+ * what purple, blue and amber mean. Home and Menu stay olive, the brand lead.
+ *
+ *   CRM        = the `workspace` route, now on BOTH platforms. The web keeps
+ *                the three-column workspace; the phone renders the CRM hub
+ *                (see `(tabs)/workspace.tsx`).
+ *   Operations = the `calendar` route, relabelled. The file and URL are
+ *                unchanged so every `/calendar` link in the app still lands.
+ *   Customers  = no longer in the bar (`href: null`) but still routable, so
+ *                the CRM hub, `/crm`'s redirect and deep links keep working.
+ */
 export default function TabsLayout() {
   const gate = useStaffGate();
   const [unread, setUnread] = useState(0);
 
   /**
-   * Unread inbound texts, for the badge on the Customers tab. `messages` is
+   * Unread inbound texts, for the badge on the CRM tab. `messages` is
    * admin-only in RLS, so the crew get 0 and no badge appears — the gate is
    * the database's, not this file's. It runs only once the gate clears, so a
    * signed-out visitor never fires the query at all.
@@ -185,40 +200,40 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="calendar"
+        name="workspace"
         options={{
-          title: 'Calendar',
-          tabBarIcon: ({ focused }) => <TabIcon name="calendar" focused={focused} />,
+          title: 'CRM',
+          tabBarActiveTintColor: hubColors.crm.fg,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="briefcase" focused={focused} color={hubColors.crm.fg} />
+          ),
+          tabBarBadge: unread > 0 ? unread : undefined,
+          tabBarBadgeStyle: { backgroundColor: colors.danger, color: colors.white },
         }}
       />
       <Tabs.Screen
         name="pipeline"
         options={{
           title: 'Pipeline',
-          tabBarIcon: ({ focused }) => <TabIcon name="layers" focused={focused} />,
+          tabBarActiveTintColor: hubColors.pipeline.fg,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="layers" focused={focused} color={hubColors.pipeline.fg} />
+          ),
         }}
       />
       <Tabs.Screen
-        name="customers"
+        name="calendar"
         options={{
-          title: 'Customers',
-          tabBarIcon: ({ focused }) => <TabIcon name="people" focused={focused} />,
-          tabBarBadge: unread > 0 ? unread : undefined,
-          tabBarBadgeStyle: { backgroundColor: colors.danger, color: colors.white },
+          title: 'Operations',
+          tabBarActiveTintColor: hubColors.operations.fg,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="calendar" focused={focused} color={hubColors.operations.fg} />
+          ),
         }}
       />
-      {/* CRM workspace (web-first, 2026-09-07). `href: null` off the web keeps
-          the phone's tab bar exactly as it was — the route still exists there
-          for a deep link, it just is not offered. Drop the Platform check when
-          the workspace is ready for the phone. */}
-      <Tabs.Screen
-        name="workspace"
-        options={{
-          title: 'CRM',
-          href: Platform.OS === 'web' ? undefined : null,
-          tabBarIcon: ({ focused }) => <TabIcon name="briefcase" focused={focused} />,
-        }}
-      />
+      {/* Routable, not offered: the Customers list is reached from the CRM
+          hub now. `href: null` hides the tab without removing the route. */}
+      <Tabs.Screen name="customers" options={{ href: null }} />
       <Tabs.Screen
         name="more"
         options={{

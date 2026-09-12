@@ -13,7 +13,8 @@ import {
 
 import { MarketingPanel } from '@/components/MarketingPanel';
 import { MediaGallery } from '@/components/MediaGrid';
-import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { useRole } from '@/lib/role';
 import { fetchSalesData, type SalesData, type SalesFunnel } from '@/lib/sales';
 
@@ -143,6 +144,7 @@ function Funnel({ funnel }: { funnel: SalesFunnel }) {
 export default function SalesScreen() {
   const router = useRouter();
   const role = useRole();
+  const gate = useAdminOnlyScreen();
   const [segment, setSegment] = useState<SalesSegment>('leads');
   const [data, setData] = useState<SalesData | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -173,6 +175,15 @@ export default function SalesScreen() {
   }, [load]);
 
   const isAdmin = role?.isAdmin ?? false;
+
+  if (gate.blocked) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Sales' }} />
+        <View style={styles.safe} />
+      </>
+    );
+  }
 
   return (
     <>
@@ -229,7 +240,7 @@ export default function SalesScreen() {
               : 'Your leads and the projects you sold.'}
           </Text>
 
-          {!loaded ? (
+          {!loaded || gate.phase === 'loading' ? (
             <ActivityIndicator style={styles.loading} color={colors.ocean} />
           ) : !data ? (
             <Text style={styles.empty}>
@@ -325,7 +336,7 @@ function statusTone(status: string) {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.cream },
+  safe: { flex: 1, backgroundColor: colors.surfaceAlt },
   pipelineLink: {
     paddingVertical: spacing.xs,
   },
@@ -336,7 +347,7 @@ const styles = StyleSheet.create({
   // as one control rather than two loose chips.
   segmentRow: {
     flexDirection: 'row',
-    backgroundColor: colors.tan,
+    backgroundColor: colors.surfaceSunk,
     borderRadius: radii.pill,
     padding: 3,
     marginTop: spacing.sm,
@@ -357,7 +368,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     fontSize: 13,
     fontWeight: '800',
-    color: colors.inkSoft,
+    color: hubColors.crm.fg,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },

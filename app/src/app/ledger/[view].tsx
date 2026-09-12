@@ -20,7 +20,8 @@ import {
   SectionHeader,
   SkeletonList,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { getDocumentUrl } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
 import {
@@ -154,6 +155,7 @@ export default function LedgerScreen() {
     : 'estimates';
   const router = useRouter();
   const role = useRole();
+  const gate = useAdminOnlyScreen();
 
   const [entries, setEntries] = useState<LedgerEntry[] | null>(null);
   const [laborRuns, setLaborRuns] = useState<LaborRun[]>([]);
@@ -710,15 +712,20 @@ export default function LedgerScreen() {
   );
 
   const body = () => {
-    if (!loaded) {
+    if (!loaded || gate.phase === 'loading') {
       return <SkeletonList count={5} height={92} />;
     }
-    if (!role?.isAdmin || entries === null) {
+    if (!role?.isAdmin) {
+      // The gate has already explained and is on its way back to Home.
+      return null;
+    }
+    if (entries === null) {
       return (
         <Card>
           <EmptyState
-            icon="lock-closed"
-            title="The company ledger is available to owners and operators."
+            icon="cloud-offline-outline"
+            title="The ledger could not be loaded right now."
+            body="Pull to try again once you are back on a signal."
           />
         </Card>
       );
@@ -730,7 +737,7 @@ export default function LedgerScreen() {
         {view === 'invoices' ? chipRow(JOB_STATUS, jobStatus, setJobStatus as never) : null}
 
         <Card style={styles.totalCard}>
-          <AppText variant="section" color={colors.ink}>
+          <AppText variant="section" color={hubColors.systems.fg}>
             {count}{' '}
             {view === 'labor'
               ? count === 1
@@ -988,6 +995,15 @@ export default function LedgerScreen() {
       </>
     );
   };
+
+  if (gate.blocked) {
+    return (
+      <>
+        <Stack.Screen options={{ title: VIEW_TITLES[view] }} />
+        <Screen edges={[]}>{null}</Screen>
+      </>
+    );
+  }
 
   return (
     <>

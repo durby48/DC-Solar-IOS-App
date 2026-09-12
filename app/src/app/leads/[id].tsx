@@ -3,7 +3,9 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-rou
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
+import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { Field } from '@/components/forms/Field';
+import { StatusPill } from '@/components/StatusPill';
 import {
   AnimatedPressable,
   AppText,
@@ -16,8 +18,8 @@ import {
   SectionHeader,
   SkeletonList,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
-import { convertLeadToCustomer } from '@/lib/crm';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
+import { convertLeadToCustomer, fetchCustomerJobs, findCustomerForLead, type CustomerJob } from '@/lib/crm';
 import { getDocumentUrl } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
 import type { LineItem } from '@/lib/documents';
@@ -35,6 +37,8 @@ import {
 import { viewDocument } from '@/lib/pdf';
 import { useRole } from '@/lib/role';
 import { setLeadStatus, type LeadStatus } from '@/lib/sales';
+import { labelForJob } from '@/lib/stages';
+import { type Customer } from '@/lib/types';
 import { LEAD_STATUS_LABELS, LEAD_STATUS_ORDER, leadStatusTone } from './index';
 
 function formatMoney(amount: number): string {
@@ -87,6 +91,12 @@ export default function LeadDetailScreen() {
   // Conversion.
   const [converting, setConverting] = useState<null | 'customer' | 'project'>(null);
 
+  // Once converted (2026-09-12, lead → job cross-link): the customer this
+  // lead became and their jobs, so the record and the work stay one tap away.
+  // `findCustomerForLead` follows `converted_job_id` first, then phone/email.
+  const [customer, setCustomer] = useState<Customer | null>(null);
+  const [customerJobs, setCustomerJobs] = useState<CustomerJob[]>([]);
+
   const load = useCallback(async () => {
     if (!id) return;
     const [fetchedLead, fetchedProjections] = await Promise.all([
@@ -96,6 +106,11 @@ export default function LeadDetailScreen() {
     setLead(fetchedLead);
     setProjections(fetchedProjections);
     setLoaded(true);
+
+    const converted = fetchedLead && (fetchedLead.status === 'won' || fetchedLead.converted_job_id);
+    const found = converted ? await findCustomerForLead(fetchedLead) : null;
+    setCustomer(found);
+    setCustomerJobs(found ? await fetchCustomerJobs(found.id) : []);
   }, [id]);
 
   useFocusEffect(
@@ -526,35 +541,118 @@ export default function LeadDetailScreen() {
               </Card>
             )}
 
-            {/* ---- Conversion ---- */}
-            <SectionHeader
-              title="Convert"
-              subtitle="turns this lead into a customer — money starts here"
-            />
-            <Card style={styles.card}>
-              <AppText variant="caption" color={colors.textMuted}>
-                Converting creates the customer record{' '}
-                (and optionally the project with a DC job number). Estimates, invoices and every
-                financial figure belong to the project — never to the lead.
-              </AppText>
-              <View style={styles.buttonRow}>
-                <Button
-                  label="Convert to customer"
-                  size="sm"
-                  variant="secondary"
-                  loading={converting === 'customer'}
-                  disabled={converting !== null}
-                  onPress={() => void convert(false)}
+            {customer ? (
+              <>
+                {/* ---- Converted: the customer and their jobs ---- */}
+                <SectionHeader
+                  title="Customer"
+                  subtitle="this lead was converted — the record and its jobs live here"
                 />
-                <Button
-                  label="Convert + create project"
-                  size="sm"
-                  loading={converting === 'project'}
-                  disabled={converting !== null}
-                  onPress={() => void convert(true)}
+                <Card padded={false} style={styles.card}>
+                  <AnimatedPressable
+                    onPress={() =>
+                      router.push({ pathname: '/crm/[id]', params: { id: customer.id } })
+                    }
+                    haptic="tapLight"
+                    scaleTo={0.99}
+                    accessibilityRole="button"
+                    accessibilityLabel={`View customer ${customer.name}`}
+                    style={[styles.customerRow, customerJobs.length > 0 && styles.rowBorderBottom]}>
+                    <CustomerAvatar customer={customer} size={36} />
+                    <View style={styles.projText}>
+                      <AppText variant="bodyStrong" numberOfLines={1}>
+                        {customer.name}
+                      </AppText>
+                      <AppText variant="caption" color={hubColors.crm.fg}>
+                        View customer
+                      </AppText>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={hubColors.crm.fg} />
+                  </AnimatedPressable>
+                  {customerJobs.map((job, index) => (
+                    <AnimatedPressable
+                      key={job.id}
+                      onPress={() => router.push({ pathname: '/job/[id]', params: { id: job.id } })}
+                      haptic="tapLight"
+                      scaleTo={0.99}
+                      accessibilityRole="button"
+                      accessibilityLabel={job.job_number ? `${job.job_number} ${job.name}` : job.name}
+                      style={[styles.jobRow, index > 0 && styles.rowBorderTop]}>
+                      <View style={styles.projText}>
+                        <AppText variant="caption" color={colors.textMuted}>
+                          {job.job_number ?? 'No number yet'}
+                        </AppText>
+                        <AppText variant="bodyStrong" numberOfLines={1}>
+                          {job.name}
+                        </AppText>
+                        <AppText variant="caption" color={colors.textMuted}>
+                          {job.completed_on
+                            ? `Completed ${formatShortDate(job.completed_on)}`
+                            : job.scheduled_for
+                              ? `Scheduled ${formatShortDate(job.scheduled_for)}`
+                              : 'Not scheduled'}
+                        </AppText>
+                      </View>
+                      <StatusPill
+                        stage={labelForJob({
+                          stage: job.stage,
+                          status: job.status,
+                          is_internal: job.is_internal ?? false,
+                        })}
+                      />
+                    </AnimatedPressable>
+                  ))}
+                  {customerJobs.length === 0 ? (
+                    <AppText variant="caption" color={colors.textMuted} style={styles.noJobs}>
+                      No jobs yet for this customer.
+                    </AppText>
+                  ) : null}
+                </Card>
+                {role?.isAdmin ? (
+                  <Button
+                    label="Start a job"
+                    icon="add"
+                    size="sm"
+                    onPress={() =>
+                      router.push({ pathname: '/job-editor', params: { customerId: customer.id } })
+                    }
+                    style={styles.startJob}
+                  />
+                ) : null}
+              </>
+            ) : (
+              <>
+                {/* ---- Conversion ---- */}
+                <SectionHeader
+                  title="Convert"
+                  subtitle="turns this lead into a customer — money starts here"
                 />
-              </View>
-            </Card>
+                <Card style={styles.card}>
+                  <AppText variant="caption" color={colors.textMuted}>
+                    Converting creates the customer record{' '}
+                    (and optionally the project with a DC job number). Estimates, invoices and every
+                    financial figure belong to the project — never to the lead.
+                  </AppText>
+                  <View style={styles.buttonRow}>
+                    <Button
+                      label="Convert to customer"
+                      size="sm"
+                      variant="secondary"
+                      loading={converting === 'customer'}
+                      disabled={converting !== null}
+                      onPress={() => void convert(false)}
+                    />
+                    <Button
+                      label="Convert + create project"
+                      size="sm"
+                      loading={converting === 'project'}
+                      disabled={converting !== null}
+                      onPress={() => void convert(true)}
+                    />
+                  </View>
+                </Card>
+              </>
+            )}
 
             {error ? (
               <AppText variant="caption" color={colors.danger} align="center">
@@ -647,6 +745,30 @@ const styles = StyleSheet.create({
   rowBorderTop: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
+  },
+  rowBorderBottom: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  customerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  jobRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+  },
+  noJobs: {
+    padding: spacing.md,
+  },
+  startJob: {
+    alignSelf: 'flex-start',
+    marginBottom: spacing.md,
   },
   projBody: {
     flex: 1,

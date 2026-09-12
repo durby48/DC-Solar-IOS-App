@@ -1,13 +1,13 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 
+import { LogHoursSheet } from '@/components/LogHoursSheet';
 import {
   AnimatedPressable,
   AppText,
   Button,
   Card,
-  Chip,
   Pill,
   SectionHeader,
   SkeletonList,
@@ -16,13 +16,9 @@ import { colors, radii, spacing, typography } from '@/constants/theme';
 import { formatShortDate, todayISO } from '@/lib/dates';
 import { haptics } from '@/lib/haptics';
 import {
-  addMyHours,
-  addMyHoursForMany,
   deleteMyHours,
-  fetchEmployeeOptions,
   fetchMyHourEntries,
   updateMyHours,
-  type EmployeeOption,
   type MyHourEntry,
 } from '@/lib/myhours';
 import { isValidISODate } from '@/lib/time';
@@ -39,9 +35,15 @@ function formatHours(h: number): string {
  * flowing from the clock in/out card separately.
  *
  * 2026-08-22 restyle: kit primitives throughout — `Card`, `Pill` for the
- * hours badge, `Chip` for the employee picker, `Button` for save, and a
- * `SkeletonList` where the first-load spinner was. The two-tap delete
- * confirm, the 0–24 hour validation and the admin/crew split are unchanged.
+ * hours badge, `Button` for save, and a `SkeletonList` where the first-load
+ * spinner was. The two-tap delete confirm, the 0–24 hour validation and the
+ * admin/crew split are unchanged.
+ *
+ * 2026-09-12: ADDING hours now goes through the shared `LogHoursSheet` (the
+ * same sheet the Hours tab uses) with this job fixed — admins tick any
+ * number of people and save once; crew get the sheet with themselves locked
+ * in. Only EDITING an existing row keeps the small inline form here, since
+ * a row belongs to one person and the pencil never reassigns it.
  */
 export function JobMyHours({
   jobId,
@@ -61,7 +63,9 @@ export function JobMyHours({
     null,
   );
 
-  const [formOpen, setFormOpen] = useState(false);
+  // `addOpen` shows the shared LogHoursSheet; `editingId` shows the inline
+  // single-row edit form. Never both.
+  const [addOpen, setAddOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [hoursText, setHoursText] = useState('');
   const [dateText, setDateText] = useState(todayISO());
@@ -69,22 +73,6 @@ export function JobMyHours({
   const [saving, setSaving] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  // Admin: who the new entry is for (defaults to the admin themself).
-  //
-  // A LIST, not one email: the crew works a job together, so "everyone did 8
-  // hours" was six trips through this form. Editing stays single — an existing
-  // row belongs to one person and reassigning it is not what the pencil means.
-  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
-  const [targetEmails, setTargetEmails] = useState<string[]>([email]);
-
-  const toggleTarget = (candidate: string) =>
-    setTargetEmails((current) =>
-      current.some((e) => e.toLowerCase() === candidate.toLowerCase())
-        ? current.filter((e) => e.toLowerCase() !== candidate.toLowerCase())
-        : [...current, candidate],
-    );
-
-  const allSelected = employees.length > 0 && targetEmails.length === employees.length;
 
   const load = useCallback(async () => {
     const result = await fetchMyHourEntries({ jobId, email, allEmployees: isAdmin });
@@ -101,34 +89,27 @@ export function JobMyHours({
     load();
   }, [load]);
 
-  useEffect(() => {
-    if (!isAdmin) return;
-    fetchEmployeeOptions().then(setEmployees);
-  }, [isAdmin]);
-
   const total = entries.reduce((sum, e) => sum + e.hours, 0);
 
   const openAdd = () => {
     setStatus(null);
     setEditingId(null);
-    setHoursText('');
-    setDateText(todayISO());
-    setNoteText('');
-    setTargetEmails([email]);
-    setFormOpen(true);
+    setAddOpen(true);
   };
 
   const openEdit = (entry: MyHourEntry) => {
     setStatus(null);
     setConfirmDeleteId(null);
+    setAddOpen(false);
     setEditingId(entry.id);
     setHoursText(String(entry.hours));
     setDateText(entry.occurred_on ?? todayISO());
     setNoteText(entry.description ?? '');
-    setFormOpen(true);
   };
 
-  const save = async () => {
+  /** Save the inline EDIT form (one existing row). Adds go through the sheet. */
+  const saveEdit = async () => {
+    if (!editingId) return;
     const hours = Number(hoursText.replace(/[^0-9.]/g, ''));
     if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
       setStatus({ kind: 'error', message: 'Enter hours between 0 and 24 (e.g. 2 or 2.5).' });
@@ -139,32 +120,15 @@ export function JobMyHours({
       setStatus({ kind: 'error', message: 'Enter the date as YYYY-MM-DD (e.g. 2026-07-27).' });
       return;
     }
-    if (isAdmin && !editingId && targetEmails.length === 0) {
-      setStatus({ kind: 'error', message: 'Pick at least one person.' });
-      return;
-    }
     setSaving(true);
     setStatus(null);
     const note = noteText.trim() || null;
-    // Admins log for a list (one insert, all-or-nothing); crew log for
-    // themselves; editing always touches exactly the one row being edited.
-    const people = isAdmin ? targetEmails.length : 1;
-    const result = editingId
-      ? await updateMyHours(editingId, { hours, occurred_on: day, description: note })
-      : isAdmin
-        ? await addMyHoursForMany({ jobId, emails: targetEmails, hours, occurredOn: day, note })
-        : await addMyHours({ jobId, email, hours, occurredOn: day, note });
+    const result = await updateMyHours(editingId, { hours, occurred_on: day, description: note });
     setSaving(false);
     if (result.ok) {
-      setFormOpen(false);
       setEditingId(null);
       haptics.success();
-      setStatus({
-        kind: 'success',
-        message: editingId
-          ? 'Hours updated.'
-          : `${formatHours(hours)} logged${people > 1 ? ` for ${people} people` : ''}.`,
-      });
+      setStatus({ kind: 'success', message: 'Hours updated.' });
       await load();
       onChanged?.();
     } else {
@@ -183,10 +147,7 @@ export function JobMyHours({
     const result = await deleteMyHours(entry.id);
     setDeletingId(null);
     if (result.ok) {
-      if (editingId === entry.id) {
-        setFormOpen(false);
-        setEditingId(null);
-      }
+      if (editingId === entry.id) setEditingId(null);
       setStatus({ kind: 'success', message: 'Entry deleted.' });
       await load();
       onChanged?.();
@@ -293,40 +254,29 @@ export function JobMyHours({
               </View>
             ) : null}
 
-            {formOpen ? (
+            {addOpen ? (
+              <View style={styles.formArea}>
+                <LogHoursSheet
+                  jobId={jobId}
+                  title={isAdmin ? 'Log hours on this job' : 'Log my hours'}
+                  lockedEmail={isAdmin ? undefined : email}
+                  defaultEmails={isAdmin ? [email] : undefined}
+                  onCancel={() => setAddOpen(false)}
+                  onSaved={(outcome) => {
+                    const people = outcome.rows.filter((r) => r.ok).length;
+                    if (outcome.ok) {
+                      setAddOpen(false);
+                      setStatus({
+                        kind: 'success',
+                        message: `${formatHours(outcome.hours)} logged${people > 1 ? ` for ${people} people` : ''}.`,
+                      });
+                    }
+                    void load().then(() => onChanged?.());
+                  }}
+                />
+              </View>
+            ) : editingId ? (
               <Card tone="sunk" style={styles.formArea}>
-                {isAdmin && !editingId && employees.length > 0 ? (
-                  <>
-                    <AppText variant="section" color={colors.textMuted}>
-                      {targetEmails.length > 1
-                        ? `For — ${targetEmails.length} selected`
-                        : 'For — tap more than one to log the same hours for each'}
-                    </AppText>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                      <View style={styles.pickRow}>
-                        <Chip
-                          label={allSelected ? 'Clear' : 'Everyone'}
-                          tone="sun"
-                          selected={allSelected}
-                          onPress={() =>
-                            setTargetEmails(allSelected ? [] : employees.map((o) => o.email))
-                          }
-                        />
-                        {employees.map((option) => (
-                          <Chip
-                            key={option.email}
-                            label={option.name}
-                            tone="olive"
-                            selected={targetEmails.some(
-                              (e) => e.toLowerCase() === option.email.toLowerCase(),
-                            )}
-                            onPress={() => toggleTarget(option.email)}
-                          />
-                        ))}
-                      </View>
-                    </ScrollView>
-                  </>
-                ) : null}
                 <AppText variant="section" color={colors.textMuted}>
                   Hours (e.g. 2 or 2.5)
                 </AppText>
@@ -363,20 +313,12 @@ export function JobMyHours({
                 <View style={styles.formButtons}>
                   <Button
                     label="Cancel"
-                    onPress={() => {
-                      setFormOpen(false);
-                      setEditingId(null);
-                    }}
+                    onPress={() => setEditingId(null)}
                     variant="ghost"
                     size="sm"
                     disabled={saving}
                   />
-                  <Button
-                    label={editingId ? 'Save' : 'Log hours'}
-                    onPress={() => void save()}
-                    loading={saving}
-                    size="sm"
-                  />
+                  <Button label="Save" onPress={() => void saveEdit()} loading={saving} size="sm" />
                 </View>
               </Card>
             ) : (
@@ -476,11 +418,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: spacing.sm,
     marginTop: spacing.xs,
-  },
-  pickRow: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
   },
   addRow: {
     paddingHorizontal: 0,

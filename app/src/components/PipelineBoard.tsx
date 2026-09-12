@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { PropertyArt } from '@/components/PropertyArt';
@@ -14,7 +14,7 @@ import {
   Chip,
   Pill,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
 import { forecastJob, type ForecastModel } from '@/lib/forecast';
 import { haptics } from '@/lib/haptics';
@@ -71,6 +71,14 @@ import { formatTimeLabel } from '@/lib/time';
  * cards are `Card` + `AnimatedPressable`, and the ‹ › arrows are ghost
  * `Button`s. The column widths, the two faces and every write path are
  * unchanged.
+ *
+ * 2026-09-12 cross-link: the customer line on a card is its own tap target
+ * and opens the customer record; the card body still opens the job. The
+ * board is also rendered INSIDE the CRM workspace (its Jobs lens), which
+ * passes `onOpenJob` / `onOpenCustomer` so a click selects the record in the
+ * workspace instead of navigating away. Without them the board routes as it
+ * always did. Each column header carries the Pipeline hub's blue as a top
+ * strip, so the board reads as the Pipeline's wherever it is embedded.
  */
 
 const COLUMN_WIDTH = 284;
@@ -140,6 +148,8 @@ function BoardCard({
   isAdmin,
   onMove,
   moving,
+  onOpenJob,
+  onOpenCustomer,
 }: {
   job: Job;
   next: NextDate | undefined;
@@ -150,6 +160,8 @@ function BoardCard({
   isAdmin: boolean;
   onMove: (job: Job, direction: -1 | 1) => void;
   moving: boolean;
+  onOpenJob?: (job: Job) => void;
+  onOpenCustomer?: (customerId: string) => void;
 }) {
   const router = useRouter();
   const [face, setFace] = useState<CardFace>('overview');
@@ -178,7 +190,15 @@ function BoardCard({
       ? ((money.paid - money.expenses - (labor?.labor ?? 0)) / money.paid) * 100
       : null;
 
-  const open = () => router.push({ pathname: '/job/[id]', params: { id: job.id } });
+  const open = () =>
+    onOpenJob ? onOpenJob(job) : router.push({ pathname: '/job/[id]', params: { id: job.id } });
+  const customerId = job.customer_id;
+  const openCustomer = customerId
+    ? () =>
+        onOpenCustomer
+          ? onOpenCustomer(customerId)
+          : router.push({ pathname: '/crm/[id]', params: { id: customerId } })
+    : null;
 
   return (
     <Card padded={false}>
@@ -217,16 +237,30 @@ function BoardCard({
             ) : null}
 
             {job.customer?.name ? (
-              <View style={styles.customerRow}>
+              // Its own Pressable so the responder stops here: tapping the
+              // customer opens the record, not the job.
+              <Pressable
+                onPress={(e) => {
+                  e.stopPropagation();
+                  openCustomer?.();
+                }}
+                disabled={!openCustomer}
+                hitSlop={4}
+                accessibilityRole={openCustomer ? 'button' : undefined}
+                accessibilityLabel={openCustomer ? `Open customer ${job.customer.name}` : undefined}
+                style={({ pressed }) => [styles.customerRow, pressed && styles.customerPressed]}>
                 <CustomerAvatar customer={job.customer} size={22} />
                 <AppText
                   variant="caption"
-                  color={colors.textSecondary}
+                  color={openCustomer ? hubColors.crm.fg : colors.textSecondary}
                   numberOfLines={1}
                   style={styles.cardCustomer}>
                   {job.customer.name}
                 </AppText>
-              </View>
+                {openCustomer ? (
+                  <Ionicons name="chevron-forward" size={11} color={hubColors.crm.fg} />
+                ) : null}
+              </Pressable>
             ) : null}
 
             {company ? (
@@ -443,6 +477,8 @@ export function PipelineBoard({
   model,
   isAdmin,
   onChanged,
+  onOpenJob,
+  onOpenCustomer,
 }: {
   jobs: Job[];
   nextDates: Map<string, NextDate>;
@@ -455,6 +491,10 @@ export function PipelineBoard({
   isAdmin: boolean;
   /** Refetch the pipeline after a card moves column. */
   onChanged: () => void;
+  /** Embedded (CRM workspace): a card click goes here instead of `/job/[id]`. */
+  onOpenJob?: (job: Job) => void;
+  /** Embedded: the customer line goes here instead of `/crm/[id]`. */
+  onOpenCustomer?: (customerId: string) => void;
 }) {
   const [movingId, setMovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -536,6 +576,8 @@ export function PipelineBoard({
           );
           return (
             <View key={stage} style={styles.column}>
+              {/* The Pipeline hub's blue, as a strip over every column head. */}
+              <View style={styles.columnAccent} />
               {tone.gradient ? (
                 <LinearGradient
                   colors={tone.gradient}
@@ -572,6 +614,8 @@ export function PipelineBoard({
                       isAdmin={isAdmin}
                       onMove={move}
                       moving={movingId === job.id}
+                      onOpenJob={onOpenJob}
+                      onOpenCustomer={onOpenCustomer}
                     />
                   ))
                 )}
@@ -600,11 +644,15 @@ const styles = StyleSheet.create({
   },
   column: {
     width: COLUMN_WIDTH,
-    backgroundColor: 'rgba(255,255,255,0.55)',
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.border,
     overflow: 'hidden',
+  },
+  columnAccent: {
+    height: 3,
+    backgroundColor: hubColors.pipeline.fg,
   },
   columnHeader: {
     paddingHorizontal: spacing.md,
@@ -665,6 +713,9 @@ const styles = StyleSheet.create({
   },
   cardCustomer: {
     flexShrink: 1,
+  },
+  customerPressed: {
+    opacity: 0.6,
   },
   numeric: {
     fontVariant: ['tabular-nums'],

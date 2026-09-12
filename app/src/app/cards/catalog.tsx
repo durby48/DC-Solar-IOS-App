@@ -42,7 +42,7 @@ import {
   type CardType,
   type CardVariant,
 } from '@/lib/cards';
-import { useRoleGate } from '@/lib/role';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 
 type LoadState = 'loading' | 'ok' | 'unavailable';
 
@@ -69,8 +69,7 @@ type ForgeSheet = 'sync' | 'draft';
  */
 export default function CardCatalogScreen() {
   const router = useRouter();
-  const { phase, role } = useRoleGate();
-  const isAdmin = role?.isAdmin ?? false;
+  const { phase, isAdmin, blocked } = useAdminOnlyScreen();
   const { width } = useWindowDimensions();
 
   const [state, setState] = useState<LoadState>('loading');
@@ -167,18 +166,12 @@ export default function CardCatalogScreen() {
     );
   }
 
-  if (!isAdmin) {
+  if (blocked) {
+    // The gate has explained and is on its way back; draw nothing of the binder.
     return (
       <>
         <Stack.Screen options={{ title: 'Card catalog' }} />
-        <Screen edges={[]}>
-          <EmptyState
-            icon="lock-closed-outline"
-            title="Admins only"
-            body="The full card catalog belongs to the owner and operators. Your own cards are in My Deck — you get a pack for every ten hours you work."
-            action={{ label: 'Go to My Deck', onPress: () => router.replace('/cards') }}
-          />
-        </Screen>
+        <Screen edges={[]}>{null}</Screen>
       </>
     );
   }

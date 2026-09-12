@@ -6,8 +6,10 @@
  * next-dates return empty maps.
  */
 
+import { fetchArtworkUrls } from '@/lib/artwork';
 import { fetchJobs, type FetchStatus } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
+import { fetchForecastModel, type ForecastModel } from '@/lib/forecast';
 import { type Job } from '@/lib/types';
 import { isCompanyJob, stageOrDefault, type Stage } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
@@ -65,6 +67,45 @@ export function sortPipelineJobs(jobs: Job[]): Job[] {
 export async function fetchPipelineJobs(): Promise<{ jobs: Job[]; status: FetchStatus }> {
   const { jobs, status } = await fetchJobs();
   return { jobs: sortPipelineJobs(jobs), status };
+}
+
+/**
+ * Everything `components/PipelineBoard` needs, in one call (2026-09-12).
+ *
+ * The Pipeline tab assembles these six reads itself; the CRM workspace's
+ * Jobs lens renders the same board and wants the same bundle without
+ * re-deriving the recipe. `admin` gates the finance and labor reads — RLS
+ * would refuse them for a crew member anyway, this just skips the round
+ * trips. Each piece degrades on its own, exactly as on the tab.
+ */
+export interface JobsBoardData {
+  jobs: Job[];
+  status: FetchStatus;
+  nextDates: Map<string, NextDate>;
+  artUrls: Map<string, string>;
+  model: ForecastModel | null;
+  money: Map<string, JobMoney> | null;
+  labor: Map<string, JobLaborHours> | null;
+}
+
+export async function fetchJobsBoardData(options: { admin: boolean }): Promise<JobsBoardData> {
+  const [{ jobs, status }, nextDates, artUrls, model, financeRows, labor] = await Promise.all([
+    fetchPipelineJobs(),
+    fetchNextDates(),
+    fetchArtworkUrls(),
+    fetchForecastModel(),
+    options.admin ? fetchFinanceEntries() : Promise.resolve(null),
+    options.admin ? fetchLaborHoursByJob() : Promise.resolve(null),
+  ]);
+  return {
+    jobs,
+    status,
+    nextDates,
+    artUrls,
+    model,
+    money: financeRows ? moneyByJobFromEntries(financeRows) : null,
+    labor,
+  };
 }
 
 /**

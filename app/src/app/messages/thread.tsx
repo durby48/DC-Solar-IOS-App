@@ -18,6 +18,7 @@ import {
   type MessageTemplate,
   type StaffProfile,
 } from '@/lib/comms';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { fetchCustomerById } from '@/lib/crm';
 import { useRole } from '@/lib/role';
 import { type Customer } from '@/lib/types';
@@ -39,6 +40,9 @@ import { inAppCallingSupported } from '@/lib/voice';
 export default function ThreadScreen() {
   const router = useRouter();
   const role = useRole();
+  // Threads carry prices and addresses: admin-only, like the phone section
+  // that normally opens them. A deep link gets the alert and goes back.
+  const gate = useAdminOnlyScreen();
   const params = useLocalSearchParams<{
     customerId?: string;
     contactId?: string;
@@ -187,7 +191,16 @@ export default function ThreadScreen() {
     </>
   );
 
-  if (loading) {
+  if (gate.blocked) {
+    return (
+      <>
+        <Stack.Screen options={{ title: paramName ?? 'Conversation' }} />
+        <View style={styles.center} />
+      </>
+    );
+  }
+
+  if (loading || gate.phase === 'loading') {
     return (
       <>
         <Stack.Screen options={{ title: paramName ?? 'Conversation' }} />
@@ -218,7 +231,7 @@ export default function ThreadScreen() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.cream },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceAlt },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',

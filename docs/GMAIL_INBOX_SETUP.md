@@ -1,50 +1,56 @@
-# Gmail inbox — setup and operating notes
+# Gmail in the app — setup and operating notes
 
-Goal: Devon opens **Work → Email** in the app and reads `devon@dcsolarkc.com`
-without leaving for the Gmail app, on a phone or on app.dcsolarkc.com.
+Goal: Devon opens **Work → Email** in the app and has `devon@dcsolarkc.com` —
+read, search, star, archive, label, draft, reply, send — without leaving for
+the Gmail app, on a phone or on app.dcsolarkc.com.
 
-**Read-only, and that is the feature.** The Google credential behind this holds
-one scope — `https://www.googleapis.com/auth/gmail.readonly` — so the app
-*cannot* send, reply, archive, label, star or delete, no matter what a bug
-does. Every button that would change the mailbox (Reply, Open in Gmail) is a
-deep link that hands off to Gmail, where those actions already live and already
-have an audit trail.
+**Gmail is the store, and that is the feature.** There is no table, no cache
+and no offline copy. The app never writes a subject line, a body or an
+attachment to Supabase or to the device. Drafts you write in the app are
+Gmail drafts; labels are Gmail labels; Archive is Gmail's archive. Close the
+screen and it is gone; the only thing kept anywhere is the Google access
+token, in the edge function's memory, for the few minutes an isolate lives.
 
-**Nothing is stored.** There is no table, no cache and no offline copy. The app
-never writes a subject line, a body or an attachment to Supabase or to the
-device. Close the screen and it is gone; the only thing kept anywhere is the
-Google access token, in the edge function's memory, for the few minutes an
-isolate lives.
+Status as of **2026-09-12: live, on `gmail.modify`.** The service account,
+the domain-wide delegation, the `GMAIL_SA_JSON` secret and the `gmail-inbox`
+function are in place. On 2026-09-12 the owner changed the delegation's scope
+list from `gmail.readonly,gmail.send` to `gmail.modify` (one scope) to match
+function v10. Nothing below needs doing again unless a key is rotated or a
+third mailbox is added.
 
-Status as of 2026-08-22: **live.** The service account, the domain-wide
-delegation, the `GMAIL_SA_JSON` secret and the `gmail-inbox` function are all in
-place and verified. Nothing below needs doing again unless a key is rotated or
-a third mailbox is added.
-
-Time to add a new mailbox: about 5 minutes, and steps 1 and 2 need Devon signed
-in as the Workspace admin — a Claude session cannot do them.
+History: read-only (`gmail.readonly`) from 2026-08-22; `gmail-send` with
+`gmail.send` added 2026-09-07 for the CRM's reply box; both folded into
+`gmail-inbox` v10 under `gmail.modify` on 2026-09-12. `gmail-send` is still
+deployed (frozen, same scope) so an older iOS bundle keeps sending.
 
 ---
 
-## Who can read what
+## Who can do what
 
-Two gates, both server-side, both in `supabase/functions/gmail-inbox/index.ts`:
+Three gates, all server-side, all in `supabase/functions/gmail-inbox/index.ts`:
 
-1. The caller must be an **owner or operator** in `employees`. The function
+1. `verify_jwt` is TRUE — an anonymous request never reaches the code.
+2. The caller must be an **owner or operator** in `employees`. The function
    re-checks this with the service role; `verify_jwt` alone is not
    authorization, because every customer-portal account also holds a valid JWT.
-2. The caller's **app identity** must appear in the function's `MAILBOXES`
+3. The caller's **app identity** must appear in the function's `MAILBOXES`
    constant, which maps it to exactly one Workspace mailbox.
 
-| App account (how they sign in) | Mailbox they can read |
+| App account (how they sign in) | Mailbox they use |
 |---|---|
 | `devonsd311@gmail.com` | `devon@dcsolarkc.com` |
 | `inettleton18@gmail.com` | `isaiah@dcsolarkc.com` |
 
-Anyone else — including another owner — gets `403 no_mailbox` and the app says
-*"No mailbox is linked to your account."* That is the default, and it is
-deliberate: the client never names a mailbox and cannot, so a session belonging
-to one person can never ask for another person's mail.
+**Only these two mailboxes exist in the app.** Anyone else — including another
+owner — gets `403 no_mailbox` and the app says *"No mailbox is linked to your
+account."* That is deliberate: the client never names a mailbox and cannot, so
+a session belonging to one person can never touch another person's mail.
+
+What `gmail.modify` lets the function do for that one mailbox: read, search,
+send, create/update/delete drafts, add and remove labels (which is what star,
+archive, mark read and trash are). What it cannot do: permanently delete
+(`gmail.modify` excludes it — Trash is recoverable for 30 days), change
+settings, filters or signatures.
 
 ## Where the credentials live
 
@@ -56,7 +62,7 @@ to one person can never ask for another person's mail.
 
 The key **never** goes in the app bundle. `EXPO_PUBLIC_*` variables are public
 by definition and an OTA update ships the JavaScript to anyone who opens the
-web app; this key can impersonate every mailbox in the domain, so it only ever
+web app; this key can now act as every mailbox in the domain, so it only ever
 exists server-side.
 
 Service account: `gmail-inbox-reader-dcsolar@sharp-bivouac-500823-g3.iam.gserviceaccount.com`
@@ -64,24 +70,32 @@ Client id (the number Google Admin asks for): **`105976483744924526112`**
 
 ---
 
-## 1. Domain-wide delegation (Devon, Google Admin, ~3 min)
+## 1. Domain-wide delegation (Devon, Google Admin, ~2 min) — done 2026-09-12
 
-Already done for this domain — this is here for a rebuild or a key rotation.
+Here for a rebuild, a key rotation, or if the scope is ever reverted.
 
 1. https://admin.google.com → **Security → Access and data control → API
    controls → Manage Domain Wide Delegation**.
-2. **Add new**, client id `105976483744924526112`.
-3. OAuth scopes: `https://www.googleapis.com/auth/gmail.readonly` — that one,
-   and nothing else. Adding `gmail.send` or `gmail.modify` here would give the
-   key in the function the run of every mailbox in the domain; the app has no
-   code path that needs it.
-4. **Authorise.**
+2. Find (or **Add new**) client id `105976483744924526112`.
+3. OAuth scopes — exactly this, one scope:
 
-If this step is missing or the scope is wrong, the function's token request
-fails and the app shows Google's own words back:
+   ```
+   https://www.googleapis.com/auth/gmail.modify
+   ```
 
-> Google refused the delegation (unauthorized_client). In Google Admin →
-> Security → API controls → Domain-wide delegation, add client id … with scope …
+   It covers read, send, drafts and labels. Do not add `https://mail.google.com/`
+   (full access, includes permanent delete) — the app has no code path that
+   needs it.
+4. **Authorise.** Takes effect within a few minutes; no redeploy is needed
+   because the function requests the scope per token.
+
+If this step is missing or the scope is wrong, Google answers
+`unauthorized_client`, the function returns **`503 scope_missing`**, and the
+app prints the instruction back:
+
+> Email is not fully switched on yet. In Google Admin → Security → API
+> controls → Domain-wide delegation, edit client id 105976483744924526112 and
+> set its scope to https://www.googleapis.com/auth/gmail.modify.
 
 That message means step 1, every time. It is never a Supabase problem.
 
@@ -115,11 +129,15 @@ metadata = {"entrypoint_path":"index.ts","name":"gmail-inbox","verify_jwt":true}
 file     = supabase/functions/gmail-inbox/index.ts
 ```
 
+Redeploy `gmail-send` the same way (slug `gmail-send`) so its scope matches;
+it is otherwise frozen.
+
 **`verify_jwt` must be TRUE.** It is not the authorization — the admin re-check
 inside the function is — but it keeps anonymous traffic off the Google quota.
 
-Smoke it: `OPTIONS` should answer `200` with the CORS headers, and a `POST`
-with no `Authorization` header should answer `401`.
+Smoke it: `OPTIONS` should answer `200` with the CORS headers, a `POST` with
+no `Authorization` header should answer `401`, and a signed-in admin's
+`{ "action": "labels" }` should list Inbox, Sent, Drafts… with counts.
 
 ---
 
@@ -128,15 +146,16 @@ with no `Authorization` header should answer `401`.
 1. Google Admin: nothing to do. Domain-wide delegation is per *client id*, not
    per mailbox — the existing grant already covers every address in
    dcsolarkc.com.
-2. Add one line to `MAILBOXES` in `supabase/functions/gmail-inbox/index.ts`,
+2. Add one line to `MAILBOXES` in `supabase/functions/gmail-inbox/index.ts`
+   **and the identical line in `supabase/functions/gmail-send/index.ts`**,
    mapping the person's **app sign-in address** (the one on their `employees`
    row) to their **Workspace address**.
 3. Make sure that person is `owner` or `operator` in `employees` — a viewer is
    refused before the mailbox lookup even runs.
-4. Redeploy the function (step 4).
+4. Redeploy both functions (step 4).
 
 The app sign-in address and the mailbox are usually different — Devon signs in
-with a personal Gmail and reads a company address — which is exactly why the
+with a personal Gmail and uses a company address — which is exactly why the
 map is explicit rather than derived.
 
 ## Rotating the key
@@ -154,45 +173,28 @@ request time and caches only the short-lived access token.
 
 | Screen | File | What it shows |
 |---|---|---|
-| `/inbox` | `app/src/app/inbox.tsx` | Thread list: sender, subject, snippet, relative time, unread dot, star, paperclip. Search box (real Gmail search syntax — `from:`, `has:attachment`, `after:` all work), Inbox / Unread / Starred chips, pull to refresh, Load more. |
-| `/inbox/[threadId]` | `app/src/app/inbox/[threadId].tsx` | Every message in the thread, oldest first, headers plus selectable plain-text body, attachments you can download and share, Reply in Gmail / Open in Gmail. |
+| `/inbox` | `app/src/app/inbox.tsx` | **Wide (≥ 900 px):** folder rail (Inbox with unread count, Starred, Sent, Drafts, All mail, Trash, Spam, then every custom label) · thread list with search box (real Gmail syntax — `from:`, `has:attachment`, `after:`), checkboxes and a bulk bar (Archive / Read / Star / Label / Trash) · reading pane. **Phone:** folder strip, list, tap to open, long-press menu, purple compose button. Pull to refresh, Load more. |
+| `/inbox/[threadId]` | `app/src/app/inbox/[threadId].tsx` | One conversation, oldest first, expand/collapse per message, attachments to download or share, Reply / Reply all / Forward, and Archive · Star · Mark unread · Move to label · Trash · Open in Gmail in the toolbar. Opening marks the thread read, like Gmail. |
+| `/inbox/compose` | `app/src/app/inbox/compose.tsx` | To / Cc / Bcc (comma-separated, validated), subject, body. Autosaves to a Gmail draft 3 s after you stop typing; Send sends that draft; Discard deletes it. Opening a row in Drafts edits it. Text only — the caption says so. |
+| CRM → record → Email | `app/src/components/crm/workspace/EmailPane.tsx` | The record's threads, one thread with a quick reply box, star / archive, and New / Full reply / Forward into the composer with the address prefilled. |
 
 Client wrapper: `app/src/lib/gmail.ts`. It never throws — every failure comes
-back as a sentence for the screen to print.
+back as a sentence for the screen to print. Shared UI: `app/src/components/email/`.
 
-Two details worth knowing:
+Details worth knowing:
 
 - **Bodies are always plain text.** The function prefers `text/plain`, and
   flattens HTML to text when a sender only supplied HTML — scripts, styles and
   comments removed contents-and-all before anything else. There is no WebView
   and no remote content, so opening a message fires no tracking pixel.
+- **Outbound mail is plain text too**, built server-side (RFC 5322) with every
+  recipient validated and every header CRLF-stripped. Attachments cannot be
+  sent from the app yet.
 - **The paperclip in the list is a hint, not a promise.** Gmail's cheap
-  metadata format returns headers only, with no part list, so the list infers
-  attachments from the message's top-level MIME type. Opening the thread pulls
-  the real list. Fetching every full message just to draw a paperclip would
-  cost megabytes per page.
+  metadata format returns headers only, so the list infers attachments from
+  the message's top-level MIME type. Opening the thread pulls the real list.
+- **Trash is Gmail's Trash** — recoverable for 30 days, with Restore in the
+  app's Trash folder. Nothing the app does is permanent.
 
 Attachments are capped at 10 MB through the function; anything larger says so
-and points at Gmail.
-
----
-
-## Sending (CRM Phase 7, 2026-09-07)
-
-The CRM's Email pane (`/workspace` → a record → `SMS | Email`) reads the
-record's threads through `gmail-inbox` (unchanged, still `gmail.readonly`) and
-**sends replies through a separate function, `gmail-send`**, which asks Google
-for a token with exactly one scope, `https://www.googleapis.com/auth/gmail.send`.
-Same three gates, same `MAILBOXES` map (keep the two copies identical), and
-the caller can only ever send from their own mapped mailbox.
-
-**One Workspace admin step (Devon):** in the domain-wide delegation entry for
-client id `105976483744924526112`, set the scopes to
-
-```
-https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.send
-```
-
-Until then `gmail-send` answers `503 scope_missing` and the app's Send button
-shows *"Sending from the app is not switched on yet…"*. Reading is unaffected.
-Design and the audit behind it: `docs/CRM_EMAIL.md`.
+and points at Gmail. Design and the audit behind all of it: `docs/CRM_EMAIL.md`.

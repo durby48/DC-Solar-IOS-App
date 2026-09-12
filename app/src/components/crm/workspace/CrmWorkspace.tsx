@@ -7,7 +7,8 @@ import { DetailPanel } from '@/components/crm/workspace/DetailPanel';
 import { RecordList, type ListMode } from '@/components/crm/workspace/RecordList';
 import { TasksPane } from '@/components/crm/workspace/TasksPane';
 import { WorkspaceCenter } from '@/components/crm/workspace/WorkspaceCenter';
-import { colors, spacing } from '@/constants/theme';
+import { PipelineBoard } from '@/components/PipelineBoard';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { fetchAssignmentsByJob, type Assignment } from '@/lib/assignments';
 import {
   fetchCommsSettings,
@@ -40,8 +41,11 @@ import { fetchRecordEmailThreads, type RecordEmailResult } from '@/lib/crmEmail'
 import { fetchCustomerDocuments, type CustomerDocument } from '@/lib/customers';
 import { fetchLeadAppointments, type LeadAppointment } from '@/lib/leadAppointments';
 import { fetchEmployeeOptions } from '@/lib/myhours';
+import { fetchJobsBoardData, type JobsBoardData } from '@/lib/pipeline';
 import { useRole } from '@/lib/role';
+import { isCompanyJob, stageOrDefault } from '@/lib/stages';
 import { countDueNow, fetchTasks, type Task } from '@/lib/tasks';
+import { type Job } from '@/lib/types';
 
 /**
  * The CRM workspace: list · conversation/activity · details, on one screen.
@@ -61,6 +65,15 @@ import { countDueNow, fetchTasks, type Task } from '@/lib/tasks';
  * Web-first (2026-09-07): reachable from the CRM tab, which the tab bar only
  * shows on web. The route still renders on a phone (a deep link, a future
  * native tab) and just gets the narrow layout.
+ *
+ * JOBS LENS (2026-09-12). A fifth chip on the list swaps the centre and
+ * detail columns for the Pipeline's stage-column board (`PipelineBoard`,
+ * the same component the Pipeline tab renders at desk width), fed by
+ * `fetchJobsBoardData` — loaded the first time the lens is opened, refetched
+ * after a card moves column. Clicking a card, or the customer line on it,
+ * selects that customer in the list and returns to the record lens, so the
+ * board is a way INTO a record, not a second Pipeline. The lens is remembered
+ * with the selection. The Pipeline tab stays the crew's field view.
  */
 
 const WIDE = 1100;
@@ -82,7 +95,7 @@ function remembered(): { selectedKey: string | null; kind: ListMode } {
     const kind = parsed.kind;
     return {
       selectedKey: typeof parsed.selectedKey === 'string' ? parsed.selectedKey : null,
-      kind: kind === 'customer' || kind === 'lead' || kind === 'tasks' ? kind : 'all',
+      kind: kind === 'customer' || kind === 'lead' || kind === 'tasks' || kind === 'jobs' ? kind : 'all',
     };
   } catch {
     return { selectedKey: null, kind: 'all' };
@@ -120,6 +133,9 @@ export function CrmWorkspace() {
   // Every task the caller may read (RLS: all for admins). The record's own
   // tasks are a filter over this, so a tick anywhere refreshes one read.
   const [tasks, setTasks] = useState<Task[]>([]);
+  // The Jobs lens's board data. Null until the lens is first opened.
+  const [board, setBoard] = useState<JobsBoardData | null>(null);
+  const [boardLoading, setBoardLoading] = useState(false);
 
   // Per-selection loads.
   const [messages, setMessages] = useState<CommsMessage[]>([]);
@@ -161,13 +177,51 @@ export function CrmWorkspace() {
     setDocuments(d ?? new Map());
   }, [loadTasks]);
 
+  const loadBoard = useCallback(async () => {
+    setBoardLoading(true);
+    const data = await fetchJobsBoardData({ admin: role?.isAdmin === true });
+    setBoard(data);
+    setBoardLoading(false);
+  }, [role?.isAdmin]);
+
   useFocusEffect(
     useCallback(() => {
       void loadList();
-    }, [loadList]),
+      // A stage edit made elsewhere (job editor, Pipeline tab) should be on
+      // the board when the tab regains focus — but only if it is showing.
+      if (kind === 'jobs') void loadBoard();
+    }, [loadList, loadBoard, kind]),
   );
 
+  // First open of the Jobs lens (including a remembered one).
+  useEffect(() => {
+    if (kind === 'jobs' && board === null && !boardLoading) void loadBoard();
+  }, [kind, board, boardLoading, loadBoard]);
+
   const selected = useMemo(() => records.find((r) => r.key === selectedKey) ?? null, [records, selectedKey]);
+
+  /** A board card (or its customer line) → that customer, in the record lens. */
+  const selectCustomerFromBoard = useCallback(
+    (customerId: string) => {
+      const key = `customer:${customerId}`;
+      setKind('all');
+      setDetailOpen(false);
+      if (records.some((r) => r.key === key)) {
+        setSelectedKey(key);
+      } else {
+        // Archived, or created since the list loaded: the record screen still has it.
+        router.push({ pathname: '/crm/[id]', params: { id: customerId } });
+      }
+    },
+    [records, router],
+  );
+  const openJobFromBoard = useCallback(
+    (job: Job) => {
+      if (job.customer_id) selectCustomerFromBoard(job.customer_id);
+      else router.push({ pathname: '/job/[id]', params: { id: job.id } });
+    },
+    [router, selectCustomerFromBoard],
+  );
 
   // Restore the last record once the list is in; remember every change after.
   useEffect(() => {
@@ -297,8 +351,33 @@ export function CrmWorkspace() {
   );
 
   const visible = useMemo(
-    () => filterRecords(records, kind === 'tasks' ? '' : search, kind === 'tasks' ? 'all' : kind),
+    () =>
+      filterRecords(
+        records,
+        kind === 'tasks' || kind === 'jobs' ? '' : search,
+        kind === 'tasks' || kind === 'jobs' ? 'all' : kind,
+      ),
     [records, search, kind],
+  );
+  // On the Jobs lens the search box filters the board, not the list.
+  const boardJobs = useMemo(() => {
+    if (!board) return [];
+    const q = search.trim().toLowerCase();
+    if (!q) return board.jobs;
+    return board.jobs.filter(
+      (j) =>
+        j.name.toLowerCase().includes(q) ||
+        j.job_number?.toLowerCase().includes(q) ||
+        j.customer?.name.toLowerCase().includes(q) ||
+        j.address?.toLowerCase().includes(q),
+    );
+  }, [board, search]);
+  const openJobCount = useMemo(
+    () =>
+      board
+        ? board.jobs.filter((j) => !isCompanyJob(j) && stageOrDefault(j.stage, j.status) !== 'Complete').length
+        : undefined,
+    [board],
   );
   const taskBadge = useMemo(() => countDueNow(tasks), [tasks]);
   const totals = useMemo(
@@ -312,7 +391,7 @@ export function CrmWorkspace() {
   if (role && !role.isAdmin) {
     return (
       <View style={styles.center}>
-        <Ionicons name="lock-closed" size={26} color={colors.ocean} />
+        <Ionicons name="lock-closed" size={26} color={hubColors.crm.fg} />
         <Text style={styles.centerTitle}>Admins only</Text>
         <Text style={styles.centerBody}>
           The CRM workspace carries customer conversations, which hold prices and addresses, so it is
@@ -325,7 +404,7 @@ export function CrmWorkspace() {
   if (listStatus === 'loading') {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color={colors.ocean} />
+        <ActivityIndicator color={hubColors.crm.fg} />
       </View>
     );
   }
@@ -358,6 +437,8 @@ export function CrmWorkspace() {
       onKind={setKind}
       onNewLead={() => router.push('/leads' as never)}
       taskBadge={taskBadge}
+      jobsLens
+      jobCount={openJobCount}
       tasksPane={
         <TasksPane
           tasks={tasks}
@@ -424,12 +505,96 @@ export function CrmWorkspace() {
     />
   ) : null;
 
+  // The Jobs lens: the Pipeline's board where the centre and detail columns
+  // were. Same props as the Pipeline tab hands it, plus the two callbacks
+  // that turn a click into a selection here instead of a navigation.
+  const boardPane = (
+    <View style={styles.boardPane}>
+      <View style={styles.boardHead}>
+        <View style={styles.boardTitleRow}>
+          <View style={styles.boardDot} />
+          <Text style={styles.boardTitle}>Jobs board</Text>
+          {board ? (
+            <Text style={styles.boardMeta}>
+              {openJobCount ?? 0} open · click a card to open its customer
+            </Text>
+          ) : null}
+        </View>
+        <View style={styles.boardActions}>
+          <Pressable
+            onPress={() => void loadBoard()}
+            disabled={boardLoading}
+            hitSlop={6}
+            accessibilityLabel="Refresh the board"
+            style={({ pressed }) => [styles.boardAction, pressed && styles.pressed]}>
+            {boardLoading ? (
+              <ActivityIndicator size="small" color={hubColors.pipeline.fg} />
+            ) : (
+              <Ionicons name="refresh" size={15} color={hubColors.pipeline.fg} />
+            )}
+          </Pressable>
+          <Pressable
+            onPress={() => router.push('/pipeline' as never)}
+            hitSlop={6}
+            accessibilityLabel="Open the Pipeline tab"
+            style={({ pressed }) => [styles.boardAction, pressed && styles.pressed]}>
+            <Text style={styles.boardActionText}>Pipeline</Text>
+            <Ionicons name="open-outline" size={13} color={hubColors.pipeline.fg} />
+          </Pressable>
+          {role?.isAdmin ? (
+            <Pressable
+              onPress={() => router.push('/job-editor' as never)}
+              hitSlop={6}
+              accessibilityLabel="New project"
+              style={({ pressed }) => [styles.boardAction, styles.boardActionPrimary, pressed && styles.pressed]}>
+              <Ionicons name="add" size={15} color={colors.white} />
+              <Text style={[styles.boardActionText, styles.boardActionTextPrimary]}>New project</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+      {board ? (
+        <>
+          <PipelineBoard
+            jobs={boardJobs}
+            nextDates={board.nextDates}
+            money={board.money}
+            artUrls={board.artUrls}
+            labor={board.labor}
+            model={board.model}
+            isAdmin={role?.isAdmin === true}
+            onChanged={() => void loadBoard()}
+            onOpenJob={openJobFromBoard}
+            onOpenCustomer={selectCustomerFromBoard}
+          />
+          {board.status === 'unavailable' ? (
+            <Text style={styles.boardEmpty}>Could not load the pipeline. Refresh to retry.</Text>
+          ) : board.jobs.length === 0 ? (
+            <Text style={styles.boardEmpty}>No projects yet.</Text>
+          ) : boardJobs.length === 0 ? (
+            <Text style={styles.boardEmpty}>No project matches that search.</Text>
+          ) : null}
+        </>
+      ) : (
+        <View style={styles.center}>
+          <ActivityIndicator color={hubColors.pipeline.fg} />
+        </View>
+      )}
+    </View>
+  );
+
   if (layout === 'wide') {
     return (
       <View style={styles.row}>
         <View style={[styles.col, styles.listCol]}>{list}</View>
-        <View style={[styles.col, styles.centerCol]}>{center}</View>
-        <View style={[styles.col, styles.detailCol]}>{detail ?? <View style={styles.detailEmpty} />}</View>
+        {kind === 'jobs' ? (
+          <View style={[styles.col, styles.centerCol]}>{boardPane}</View>
+        ) : (
+          <>
+            <View style={[styles.col, styles.centerCol]}>{center}</View>
+            <View style={[styles.col, styles.detailCol]}>{detail ?? <View style={styles.detailEmpty} />}</View>
+          </>
+        )}
       </View>
     );
   }
@@ -438,17 +603,30 @@ export function CrmWorkspace() {
     return (
       <View style={styles.row}>
         <View style={[styles.col, styles.listColMedium]}>{list}</View>
-        <View style={[styles.col, styles.centerCol]}>{detailOpen && detail ? detail : center}</View>
+        <View style={[styles.col, styles.centerCol]}>
+          {kind === 'jobs' ? boardPane : detailOpen && detail ? detail : center}
+        </View>
       </View>
     );
   }
 
-  // Narrow: one column at a time.
+  // Narrow: one column at a time. The board scrolls sideways on its own.
+  if (kind === 'jobs') {
+    return (
+      <View style={styles.single}>
+        <Pressable onPress={() => setKind('all')} style={({ pressed }) => [styles.back, pressed && styles.pressed]}>
+          <Ionicons name="chevron-back" size={16} color={hubColors.crm.fg} />
+          <Text style={styles.backText}>All records</Text>
+        </Pressable>
+        <View style={styles.single}>{boardPane}</View>
+      </View>
+    );
+  }
   if (!selected) return <View style={styles.single}>{list}</View>;
   return (
     <View style={styles.single}>
       <Pressable onPress={() => setSelectedKey(null)} style={({ pressed }) => [styles.back, pressed && styles.pressed]}>
-        <Ionicons name="chevron-back" size={16} color={colors.ocean} />
+        <Ionicons name="chevron-back" size={16} color={hubColors.crm.fg} />
         <Text style={styles.backText}>All records</Text>
       </Pressable>
       <View style={styles.single}>{detailOpen && detail ? detail : center}</View>
@@ -457,20 +635,50 @@ export function CrmWorkspace() {
 }
 
 const styles = StyleSheet.create({
-  row: { flex: 1, flexDirection: 'row', backgroundColor: colors.cream },
-  single: { flex: 1, backgroundColor: colors.cream },
+  row: { flex: 1, flexDirection: 'row', backgroundColor: colors.surfaceAlt },
+  single: { flex: 1, backgroundColor: colors.surfaceAlt },
   col: { height: '100%' },
   listCol: { width: 320, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.line },
   listColMedium: { width: 280, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.line },
   centerCol: { flex: 1, minWidth: 0 },
   detailCol: { width: 340, borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: colors.line },
   detailEmpty: { flex: 1, backgroundColor: colors.canvas },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm, padding: spacing.xl, backgroundColor: colors.cream },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm, padding: spacing.xl, backgroundColor: colors.surfaceAlt },
   centerTitle: { color: colors.ink, fontSize: 16, fontWeight: '800', textAlign: 'center' },
   centerBody: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center', lineHeight: 18, maxWidth: 360 },
   retry: { marginTop: spacing.sm, backgroundColor: colors.sun, borderRadius: 999, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm },
   retryText: { color: colors.ink, fontSize: 13, fontWeight: '800' },
   back: { flexDirection: 'row', alignItems: 'center', gap: 4, padding: spacing.sm, paddingHorizontal: spacing.md },
-  backText: { color: colors.ocean, fontSize: 13, fontWeight: '700' },
+  backText: { color: hubColors.crm.fg, fontSize: 13, fontWeight: '700' },
   pressed: { opacity: 0.6 },
+
+  // ---- Jobs lens ----
+  boardPane: { flex: 1, backgroundColor: colors.surfaceAlt, paddingTop: spacing.md },
+  boardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  boardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 1 },
+  boardDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: hubColors.pipeline.fg },
+  boardTitle: { color: colors.ink, fontSize: 16, fontWeight: '800' },
+  boardMeta: { color: colors.inkSoft, fontSize: 12, fontWeight: '600', flexShrink: 1 },
+  boardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  boardAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 28,
+    paddingHorizontal: spacing.sm + 2,
+    borderRadius: radii.pill,
+    backgroundColor: hubColors.pipeline.bg,
+  },
+  boardActionPrimary: { backgroundColor: hubColors.pipeline.fg },
+  boardActionText: { color: hubColors.pipeline.deep, fontSize: 12, fontWeight: '700' },
+  boardActionTextPrimary: { color: colors.white },
+  boardEmpty: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center', padding: spacing.lg },
 });

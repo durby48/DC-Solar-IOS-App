@@ -115,10 +115,10 @@ const appTheme = {
   colors: {
     ...DefaultTheme.colors,
     primary: colors.ocean,
-    background: colors.cream,
-    card: colors.cream,
+    background: colors.surfaceAlt,
+    card: colors.surface,
     text: colors.ink,
-    border: colors.tan,
+    border: colors.border,
   },
 };
 
@@ -168,7 +168,7 @@ export default function RootLayout() {
         </SafeAreaView>
         <Stack
           screenOptions={{
-            headerStyle: { backgroundColor: colors.cream },
+            headerStyle: { backgroundColor: colors.surface },
             // Ocean-tinted plain back arrow (no route-name label); the title
             // itself stays ink via headerTitleStyle below.
             headerTintColor: colors.ocean,
@@ -176,7 +176,7 @@ export default function RootLayout() {
             headerBackTitle: '',
             headerTitleStyle: { fontWeight: '700', color: colors.ink },
             headerShadowVisible: false,
-            contentStyle: { backgroundColor: colors.cream },
+            contentStyle: { backgroundColor: colors.surfaceAlt },
             ...(Platform.OS === 'web' ? { headerLeft: () => <WebBackButton /> } : {}),
           }}>
           <Stack.Screen name="index" options={{ headerShown: false }} />
@@ -207,6 +207,10 @@ export default function RootLayout() {
           <Stack.Screen name="leads/[id]" options={{ title: 'Lead' }} />
           <Stack.Screen name="document-builder" options={{ title: 'New document' }} />
           <Stack.Screen name="job-editor" options={{ title: 'Project' }} />
+          {/* 2026-09-12 overhaul: hub front pages (Human Resources, Systems
+              Management) and the Gmail compose screen. */}
+          <Stack.Screen name="hub/[key]" options={{ title: '' }} />
+          <Stack.Screen name="inbox/compose" options={{ title: 'New Email' }} />
         </Stack>
       </ThemeProvider>
     </GestureHandlerRootView>
@@ -226,7 +230,7 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 100,
   },
-  errorScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24, backgroundColor: colors.cream },
+  errorScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24, backgroundColor: colors.surfaceAlt },
   errorTitle: { color: colors.ink, fontSize: 18, fontWeight: '800' },
   errorBody: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center' },
   errorButton: { marginTop: 8, backgroundColor: colors.sun, borderRadius: 999, paddingHorizontal: 22, paddingVertical: 10 },

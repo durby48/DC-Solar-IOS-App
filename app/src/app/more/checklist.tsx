@@ -16,7 +16,7 @@ import {
   SectionHeader,
   SkeletonList,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import {
   addChecklistItem,
   deactivateChecklistItem,
@@ -284,6 +284,7 @@ export default function ChecklistScreen() {
             <SectionHeader
               title="Today's check"
               icon="clipboard-outline"
+              accent={hubColors.systems.fg}
               action={
                 isAdmin && (itemsState !== 'ok' || items.length > 0)
                   ? {
@@ -413,6 +414,7 @@ export default function ChecklistScreen() {
             <SectionHeader
               title="Recent checks"
               icon="time-outline"
+              accent={hubColors.systems.fg}
               style={styles.sectionHeader}
             />
             {runs.length === 0 ? (

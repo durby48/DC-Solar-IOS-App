@@ -26,7 +26,7 @@ import {
   SectionHeader,
   SkeletonList,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
 import { haptics } from '@/lib/haptics';
 import {
@@ -367,7 +367,7 @@ export default function ReceiptsScreen() {
           <>
             {isAdmin ? (
               <View style={styles.section}>
-                <SectionHeader title="Pending review" icon="hourglass-outline" />
+                <SectionHeader title="Pending review" icon="hourglass-outline" accent={hubColors.systems.fg} />
                 {pendingState === 'loading' ? (
                   <SkeletonList count={2} height={120} />
                 ) : pendingState === 'unavailable' ? (
@@ -471,7 +471,7 @@ export default function ReceiptsScreen() {
             ) : null}
 
             <View style={styles.section}>
-              <SectionHeader title="Submit receipt" icon="camera-outline" />
+              <SectionHeader title="Submit receipt" icon="camera-outline" accent={hubColors.systems.fg} />
               <Card style={styles.formCard}>
                 {photo ? (
                   <View style={styles.photoRow}>
@@ -637,7 +637,7 @@ export default function ReceiptsScreen() {
             </View>
 
             <View style={styles.section}>
-              <SectionHeader title="My receipts" icon="receipt-outline" />
+              <SectionHeader title="My receipts" icon="receipt-outline" accent={hubColors.systems.fg} />
               {mineState === 'loading' ? (
                 <SkeletonList count={3} height={64} />
               ) : mineState === 'unavailable' ? (

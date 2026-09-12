@@ -1,8 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Stack, useFocusEffect } from 'expo-router';
+import { Stack, router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 
+import { LogHoursSheet } from '@/components/LogHoursSheet';
 import {
   AnimatedPressable,
   AppText,
@@ -16,7 +17,7 @@ import {
   SkeletonList,
   StatTile,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import {
   fetchHoursData,
   fetchPayrollRuns,
@@ -55,14 +56,18 @@ function stateLabel(state: PayrollState, pre: boolean): string {
   }
 }
 
+/** Human Resources hub accent — the Hours tab lives under HR on Home. */
+const hr = hubColors.hr;
+
 /**
  * Where the period sits in the cycle, in color. Unchanged meanings — this
- * map now feeds `<Pill>` instead of a local `styles.stateChip`.
+ * map now feeds `<Pill>` instead of a local `styles.stateChip`. "Current"
+ * wears the HR green (was ocean); the other three keep their stage colours.
  */
 function stateChipStyle(state: PayrollState) {
   switch (state) {
     case 'current':
-      return { bg: colors.skySoft, fg: colors.ocean };
+      return { bg: hr.bg, fg: hr.deep };
     case 'awaiting-submit':
       return { bg: colors.amberSoft, fg: colors.amberDeep };
     case 'submitted':
@@ -70,6 +75,48 @@ function stateChipStyle(state: PayrollState) {
     case 'paid':
       return { bg: colors.mintSoft, fg: colors.mintDeep };
   }
+}
+
+/** Prev/Next period pager in the HR green (the kit `Chip` has no HR tone). */
+function PagerChip({
+  label,
+  icon,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  icon: 'chevron-back' | 'chevron-forward';
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <AnimatedPressable
+      onPress={onPress}
+      disabled={disabled}
+      haptic="tapLight"
+      scaleTo={0.94}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      accessibilityLabel={label}
+      style={({ pressed }) => [
+        styles.pagerChip,
+        { backgroundColor: pressed ? hr.fg : hr.bg },
+        disabled && styles.pagerChipDisabled,
+      ]}>
+      {({ pressed }: { pressed: boolean }) => {
+        const fg = pressed ? colors.white : hr.deep;
+        return (
+          <>
+            {icon === 'chevron-back' ? <Ionicons name={icon} size={14} color={fg} /> : null}
+            <AppText variant="caption" color={fg}>
+              {label}
+            </AppText>
+            {icon === 'chevron-forward' ? <Ionicons name={icon} size={14} color={fg} /> : null}
+          </>
+        );
+      }}
+    </AnimatedPressable>
+  );
 }
 
 export default function HoursScreen() {
@@ -87,6 +134,10 @@ export default function HoursScreen() {
   const [runMessage, setRunMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [openNames, setOpenNames] = useState<Set<string>>(new Set());
+  // The multi-employee "Log hours" sheet (LogHoursSheet) — one save writes a
+  // row per ticked person.
+  const [logOpen, setLogOpen] = useState(false);
+  const [logMessage, setLogMessage] = useState<string | null>(null);
 
   const periods = useMemo(() => listPayrollPeriods(), []);
   // Default to the current (last) period.
@@ -189,6 +240,10 @@ export default function HoursScreen() {
 
   const chipStyle = stateChipStyle(state);
 
+  const openJob = (jobId: string) => {
+    router.push({ pathname: '/job/[id]', params: { id: jobId, focus: 'hours' } });
+  };
+
   return (
     <>
       {/* Root-stack header, same convention as every more/* screen: the
@@ -208,10 +263,9 @@ export default function HoursScreen() {
           <>
             <Card tone="sunk" style={styles.periodCard}>
               <View style={styles.periodPagerRow}>
-                <Chip
+                <PagerChip
                   label="Prev"
                   icon="chevron-back"
-                  tone="olive"
                   disabled={periodIndex === 0}
                   onPress={() => setPeriodIndex((i) => Math.max(0, i - 1))}
                 />
@@ -226,10 +280,9 @@ export default function HoursScreen() {
                     style={styles.stateChip}
                   />
                 </View>
-                <Chip
+                <PagerChip
                   label="Next"
                   icon="chevron-forward"
-                  tone="olive"
                   disabled={periodIndex === periods.length - 1}
                   onPress={() => setPeriodIndex((i) => Math.min(periods.length - 1, i + 1))}
                 />
@@ -385,6 +438,48 @@ export default function HoursScreen() {
               ) : null}
             </Card>
 
+            {/* Manual logging — one sheet, any number of people, one save.
+                Replaces "write the hours, pick a person, save, repeat". */}
+            {logOpen ? (
+              <LogHoursSheet
+                title="Log hours"
+                onCancel={() => {
+                  setLogOpen(false);
+                  setLogMessage(null);
+                }}
+                onSaved={(outcome) => {
+                  const people = outcome.rows.filter((r) => r.ok).length;
+                  setLogMessage(
+                    `${formatHours(outcome.hours)} logged for ${people} ${people === 1 ? 'person' : 'people'} on ${formatPayrollDate(outcome.occurredOn)}.`,
+                  );
+                  if (outcome.ok) setLogOpen(false);
+                  void load();
+                }}
+              />
+            ) : (
+              <View style={styles.logRow}>
+                <Button
+                  label="Log hours"
+                  icon="add-circle"
+                  size="sm"
+                  variant="secondary"
+                  onPress={() => {
+                    setLogMessage(null);
+                    setLogOpen(true);
+                  }}
+                />
+                {logMessage ? (
+                  <AppText variant="caption" color={colors.success} style={styles.logMessage}>
+                    {logMessage}
+                  </AppText>
+                ) : (
+                  <AppText variant="caption" color={colors.textMuted} style={styles.logMessage}>
+                    Tick several people to log the same hours for each in one save.
+                  </AppText>
+                )}
+              </View>
+            )}
+
             {overview.employees.length === 0
               ? placeholder('No hours in this period.')
               : overview.employees.map((emp, index) => {
@@ -479,12 +574,45 @@ export default function HoursScreen() {
                             </View>
                             {emp.jobs.map((job) => (
                               <View key={job.jobId ?? 'none'} style={styles.jobRow}>
-                                <Pill
-                                  label={job.label}
-                                  bg={colors.oliveSoft}
-                                  fg={colors.oliveDeep}
-                                  style={styles.jobChip}
-                                />
+                                {job.jobId ? (
+                                  // The DC-26### chip is a link: opens the job
+                                  // scrolled to its hours section.
+                                  <AnimatedPressable
+                                    onPress={() => openJob(job.jobId as string)}
+                                    haptic="tapLight"
+                                    scaleTo={0.96}
+                                    hitSlop={6}
+                                    accessibilityRole="link"
+                                    accessibilityLabel={`Open ${job.label} hours`}
+                                    style={({ pressed }) => [
+                                      styles.jobLink,
+                                      { backgroundColor: pressed ? hr.fg : hr.bg },
+                                    ]}>
+                                    {({ pressed }: { pressed: boolean }) => (
+                                      <>
+                                        <AppText
+                                          variant="caption"
+                                          color={pressed ? colors.white : hr.deep}
+                                          numberOfLines={1}
+                                          style={styles.jobLinkText}>
+                                          {job.label}
+                                        </AppText>
+                                        <Ionicons
+                                          name="chevron-forward"
+                                          size={12}
+                                          color={pressed ? colors.white : hr.fg}
+                                        />
+                                      </>
+                                    )}
+                                  </AnimatedPressable>
+                                ) : (
+                                  <Pill
+                                    label={job.label}
+                                    bg={colors.slateSoft}
+                                    fg={colors.slateDeep}
+                                    style={styles.jobChip}
+                                  />
+                                )}
                                 <View style={styles.jobNumbers}>
                                   <AppText
                                     variant="caption"
@@ -506,6 +634,7 @@ export default function HoursScreen() {
                               style={styles.jobListHint}>
                               &quot;Paid before&quot; = hours on the job from earlier,
                               already-paid periods — carry-over jobs show both sides.
+                              Tap a job to open it at its hours.
                             </AppText>
                           </View>
                         ) : null}
@@ -654,6 +783,38 @@ const styles = StyleSheet.create({
   },
   jobChip: {
     flexShrink: 1,
+  },
+  jobLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    borderRadius: radii.pill,
+    paddingLeft: spacing.sm + 2,
+    paddingRight: spacing.xs + 2,
+    paddingVertical: spacing.xs,
+    flexShrink: 1,
+  },
+  jobLinkText: {
+    flexShrink: 1,
+  },
+  pagerChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs + 2,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm + 4,
+    paddingVertical: spacing.xs + 2,
+  },
+  pagerChipDisabled: {
+    opacity: 0.45,
+  },
+  logRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  logMessage: {
+    flex: 1,
   },
   jobNumber: {
     fontVariant: ['tabular-nums'],

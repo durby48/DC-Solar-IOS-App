@@ -290,7 +290,7 @@ export default function RecentsScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.cream },
+  screen: { flex: 1, backgroundColor: colors.surfaceAlt },
   center: { alignItems: 'center', justifyContent: 'center' },
   container: { padding: spacing.lg, paddingBottom: spacing.xxl },
   headerArea: { gap: spacing.sm, paddingBottom: spacing.md },

@@ -18,6 +18,11 @@ export type StatTone = number | 'olive';
  *
  * `decimals`/`prefix`/`separator` are passed through to `CountUp` rather than
  * a formatter callback — see the note there about worklets.
+ *
+ * `edge` (2026-09-12 overhaul) mirrors `Tile`'s colour edge: a 1.5px border
+ * in the tone's saturated hue, so a grid of tinted tiles on the white page
+ * reads as crisp blocks of colour rather than soft washes. Pass `true` for
+ * the tone colour, or a colour string to override it.
  */
 export function StatTile({
   label,
@@ -28,6 +33,7 @@ export function StatTile({
   tone = 0,
   countUp = true,
   compact = false,
+  edge = false,
   style,
 }: {
   label: string;
@@ -41,9 +47,12 @@ export function StatTile({
   countUp?: boolean;
   /** Tighter padding for a dense row of tiles. */
   compact?: boolean;
+  /** A 1.5px colour edge: `true` for the tone's hue, or an explicit colour. */
+  edge?: boolean | string;
   style?: StyleProp<ViewStyle>;
 }) {
   const palette = paletteFor(tone);
+  const edgeColor = edge === true ? palette.fg : edge || null;
 
   return (
     <View
@@ -51,6 +60,7 @@ export function StatTile({
         styles.tile,
         compact ? styles.compact : null,
         { backgroundColor: palette.bg },
+        edgeColor ? { borderWidth: 1.5, borderColor: edgeColor } : null,
         style,
       ]}>
       <AppText variant="section" color={palette.fg} numberOfLines={2}>

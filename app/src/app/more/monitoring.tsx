@@ -14,7 +14,8 @@ import {
   SectionHeader,
   SkeletonList,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { haptics } from '@/lib/haptics';
 import {
   addMonitoringLogin,
@@ -96,6 +97,7 @@ export default function MonitoringScreen() {
   const auth = useAuthEmail();
   const role = useRole();
   const isAdmin = role?.isAdmin ?? false;
+  const gate = useAdminOnlyScreen();
 
   const [listState, setListState] = useState<'loading' | 'ok' | 'missing' | 'unavailable'>(
     'loading',
@@ -439,11 +441,20 @@ export default function MonitoringScreen() {
     );
   };
 
+  if (gate.blocked) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Monitoring Logins' }} />
+        <Screen edges={[]}>{null}</Screen>
+      </>
+    );
+  }
+
   return (
     <>
       <Stack.Screen options={{ title: 'Monitoring Logins' }} />
       <Screen edges={[]}>
-        {auth.state === 'loading' ? (
+        {auth.state === 'loading' || gate.phase === 'loading' ? (
           <SkeletonList count={3} height={120} />
         ) : auth.state === 'out' ? (
           <Card>
@@ -455,7 +466,7 @@ export default function MonitoringScreen() {
           </Card>
         ) : (
           <View style={styles.section}>
-            <SectionHeader title="Monitoring portals" icon="pulse" />
+            <SectionHeader title="Monitoring portals" icon="pulse" accent={hubColors.systems.fg} />
             {listState === 'loading' ? (
               <SkeletonList count={3} height={120} />
             ) : listState === 'unavailable' ? (

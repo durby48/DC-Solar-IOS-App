@@ -5,6 +5,7 @@ import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-na
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import {
   fetchDirectory,
   formatPhone,
@@ -42,6 +43,7 @@ type Row =
 
 export default function ComposeScreen() {
   const router = useRouter();
+  const gate = useAdminOnlyScreen();
   const [query, setQuery] = useState('');
   const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
 
@@ -145,6 +147,15 @@ export default function ComposeScreen() {
     );
   };
 
+  if (gate.blocked || gate.phase === 'loading') {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'New Message' }} />
+        <View style={styles.screen} />
+      </>
+    );
+  }
+
   return (
     <>
       <Stack.Screen options={{ title: 'New Message' }} />
@@ -189,7 +200,7 @@ export default function ComposeScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.cream },
+  screen: { flex: 1, backgroundColor: colors.surfaceAlt },
   toRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -198,7 +209,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm + 2,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.tan,
+    borderBottomColor: colors.border,
   },
   toLabel: { color: colors.inkSoft, fontSize: 15, fontWeight: '700' },
   toInput: { flex: 1, color: colors.ink, fontSize: 16, fontWeight: '500', paddingVertical: 6 },

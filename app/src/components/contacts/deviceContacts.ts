@@ -1,0 +1,46 @@
+/**
+ * Reading the phone's own address book — the shared contract, and the web
+ * answer.
+ *
+ * TWO FILES, ONE API (the `lib/voice.ts` / `voice.native.ts` pattern):
+ *   deviceContacts.native.ts  iOS/Android: `expo-contacts/legacy`, paged.
+ *   deviceContacts.ts         this file. TypeScript resolves the import here,
+ *                             so the types live here; Metro only reaches it on
+ *                             web, where there is no address book to read and
+ *                             the import screen says to use the iPhone app.
+ *
+ * `expo-contacts` is a NATIVE module (config plugin + NSContactsUsageDescription
+ * in app.json) and is therefore build 31 — a JS-only push cannot add it. The
+ * native file requires it lazily inside a try/catch so an older binary that
+ * runs newer JS gets "unsupported", not a red screen.
+ */
+
+/** One person from the phone, flattened to what the directory can hold. */
+export interface DeviceContact {
+  /** The OS identifier — stable per phone/iCloud account; becomes `external_id`. */
+  id: string;
+  /** Display name as the phone formats it; never empty (falls back to org). */
+  name: string;
+  org: string | null;
+  title: string | null;
+  /** Every number on the card, as typed on the phone; the first is preferred. */
+  phones: string[];
+  emails: string[];
+}
+
+export type DeviceContactsResult =
+  | { status: 'ok'; contacts: DeviceContact[] }
+  /** The person said no, or Settings has it off. */
+  | { status: 'denied' }
+  /** Web, or a binary without the native module. */
+  | { status: 'unsupported' }
+  | { status: 'error'; message: string };
+
+/** False on web and on a build without expo-contacts. */
+export function deviceContactsSupported(): boolean {
+  return false;
+}
+
+export async function readDeviceContacts(): Promise<DeviceContactsResult> {
+  return { status: 'unsupported' };
+}

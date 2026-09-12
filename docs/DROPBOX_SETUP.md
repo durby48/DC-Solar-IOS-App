@@ -1,235 +1,311 @@
-# Dropbox photo folders — setup checklist
+# Dropbox — setup, job folders and photo mirroring
 
-Goal: Devon drops photos into two Dropbox folders and they appear in the app —
-Employee of the Month picks from a real library, and Sales → Marketing shows
-real job photos instead of nothing.
+Two things run between the app and Dropbox, both through the one
+`dropbox-sync` edge function and the one Dropbox app:
 
-**One way only.** Nothing in this pipeline ever writes to Dropbox, and the sync
-never deletes a storage object. A file that disappears from Dropbox gets
-`archived_at` stamped on its row and the bytes stay put; losing a marketing
-photo because somebody tidied a folder is not a failure mode worth having.
+1. **Library, Dropbox → app (since 2026-08-22).** Devon drops photos into
+   `EOM/` and `Marketing/` and a nightly sync mirrors them into the app
+   (Employee of the Month picker, Sales → Photos). One way; never deletes.
+2. **Job folders, app → Dropbox (since 2026-09-12).** Every project made in
+   the pipeline gets its own Dropbox folder, and every photo a crew uploads
+   to that job is copied into it. Append-only: the function creates folders
+   and adds files, and **never deletes, moves or overwrites anything in
+   Dropbox**. Deleting a photo in the app does not touch the Dropbox copy —
+   Dropbox is the archive.
 
-Cost: **$0.** A free Dropbox Basic account is enough. Time: about 15 minutes,
-all of it Devon's, and none of it can be done by a Claude session because it
-needs Devon signed in to Dropbox.
+## Current status (checked live 2026-09-12)
 
-Until step 5 the `dropbox-sync` function answers `503 not_configured` — that is
-the designed behaviour, not a bug.
+| Piece | State |
+|---|---|
+| Dropbox app credentials (`integration_secrets`, provider `dropbox`) | **Connected.** Client id, secret and refresh token present; access token refreshed by the nightly run at 07:30 UTC today. |
+| Nightly library sync (`dropbox-sync-daily`, `30 7 * * *`) | **Active, healthy.** `/eom` 5 files, `/marketing` 13 files, `last_error` null, `media_assets` 18 rows. |
+| Extensions | `pg_cron` 1.6.4 and `pg_net` 0.20.3 installed. |
+| Edge-function secrets | `DROPBOX_SYNC_SECRET` set (also `NOTIFY_SECRET`, Twilio, Gmail, Gemini, PDF ones). Nothing Dropbox-specific is missing there. |
+| Jobs / photos to backfill | 36 non-internal jobs, 102 job photos. |
+| **Write scope** | **Almost certainly missing.** The August setup ticked only `files.metadata.read` + `files.content.read` on purpose. Creating folders and uploading needs `files.content.write`. Until Devon adds it and re-mints the refresh token (steps A–B below), every folder/photo attempt is recorded as `failed` with an error that says exactly this, and nothing else in the app is affected. |
+
+## What Devon has to do once (~5 min)
+
+**A. Add the write scope.** https://www.dropbox.com/developers/apps → the
+`DC Solar KC` app → **Permissions** → tick `files.content.write` (keep the two
+read scopes) → **Submit**. Scopes must be submitted *before* the next step —
+a token minted first carries the old scope set.
+
+**B. Mint a new refresh token** — a token's scopes are frozen when it is
+issued, so the existing one cannot gain the write scope. Same as the original
+step 4:
+
+```
+https://www.dropbox.com/oauth2/authorize?client_id=<APP_KEY>&response_type=code&token_access_type=offline
+```
+
+then
+
+```
+curl -X POST https://api.dropbox.com/oauth2/token \
+  -u "<APP_KEY>:<APP_SECRET>" \
+  -d code=<THE_CODE> -d grant_type=authorization_code
+```
+
+Check that `scope` in the reply lists `files.content.write`. Store it with the
+same statement as before (the `access_token = null, expires_at = null` part
+forces the function to mint a fresh access token under the new scope):
+
+```
+curl -X POST "https://api.supabase.com/v1/projects/kjamxfezsathrsbztiln/database/query" \
+  -H "Authorization: Bearer <SUPABASE_PAT>" -H "Content-Type: application/json" \
+  -d '{"query":"update public.integration_secrets set refresh_token = '"'"'<REFRESH_TOKEN>'"'"', access_token = null, expires_at = null, updated_at = now() where company = '"'"'dc-solar'"'"' and provider = '"'"'dropbox'"'"';"}'
+```
+
+The PAT lives in `C:\Durbin Enterprises\config\secrets\supabase-access-token.txt`.
+Never paste the app secret or the refresh token into a file inside this repo.
+
+**C. Run the backfill** (below) so the 36 existing jobs get folders and the
+102 existing photos land in them.
 
 ---
 
-## 1. Create the Dropbox app (Devon, ~5 min)
+## Job folders + photo mirroring — how it works
 
-1. https://www.dropbox.com/developers/apps → **Create app**.
-2. Choose the API: **Scoped access**.
-3. Type of access: **App folder** — *not* Full Dropbox. This is the important
-   click. App-folder access means Dropbox creates one folder
-   (`Dropbox/Apps/DC Solar KC/`) and the app can never see anything outside it.
-   Full-Dropbox access would hand a refresh token the run of every file Devon
-   owns, forever.
-4. Name it `DC Solar KC` (Dropbox app names are globally unique — add a suffix
-   if it is taken; the name is only used for the folder).
+```
+jobs INSERT (not is_internal)
+  └─ trigger jobs_dropbox_folder_trg
+       inserts dropbox_job_folders (status 'queued')
+       pg_net POST {action:'ensure_job_folder', job_id}  ──▶ dropbox-sync
+                                                              creates /DC Solar/Jobs/<job_number> - <customer>
+                                                              records id + path, status 'ready'
+job_photos INSERT
+  └─ trigger job_photos_dropbox_mirror_trg
+       inserts dropbox_photo_mirrors (status 'queued')
+       pg_net POST {action:'mirror_photo', photo_id}  ─────▶ dropbox-sync
+                                                              ensures the job folder first,
+                                                              downloads the object from job-photos (service role),
+                                                              files/upload  mode=add  autorename=true,
+                                                              records Dropbox id/path/rev, status 'mirrored'
+every 15 min  (pg_cron dropbox-mirror-retry)
+  └─ POST {action:'retry_mirrors'} ─────────────────────────▶ drains queued/failed rows with < 5 attempts
+```
 
-## 2. Permissions — exactly two (Devon, ~2 min)
+**The rows are the queue; the HTTP call is only a nudge.** pg_net is
+asynchronous and both trigger functions swallow every error, so creating a
+job or uploading a photo can never fail because of Dropbox. If the call is
+lost, Dropbox is down, the scope is missing, or Dropbox was not connected at
+all when the photo was taken, the row stays `queued`/`failed` and the cron
+picks it up — up to 5 attempts, then it waits for a backfill with
+`reset_failed`.
 
-**Permissions** tab → tick **only**:
+**Folder naming.** `/DC Solar/Jobs/<job_number> - <customer name>`, e.g.
+`/DC Solar/Jobs/DC-26037 - Cromwell Environmental`. No customer → the job
+name; slashes become dashes, control characters and trailing dots go, capped
+at 120 chars. The Dropbox app has *App folder* access, so on disk that is
+`Dropbox/Apps/DC Solar KC/DC Solar/Jobs/…`. A folder that already exists
+(made by hand, or by an attempt that never got recorded) is **adopted by id**,
+never duplicated.
 
-- `files.metadata.read`
-- `files.content.read`
+**File naming.** The app stores `<jobId>/<epochMs>-IMG_7718.jpg`; Dropbox gets
+`2026-09-08 IMG_7718.jpg` (the day it was added). Same name on the same day →
+Dropbox's autorename appends ` (1)`; nothing is ever overwritten.
 
-Then **Submit**. Do not tick any `.write` scope: the function has no code path
-that writes to Dropbox, so a write scope would be permission the system cannot
-use and an attacker could.
+**Internal jobs** (`is_internal = true`) get no folder and their photos are
+marked `skipped`.
 
-⚠️ Scopes must be saved **before** the authorization step below. A token minted
-before the scopes are submitted carries the old (empty) scope set and every
-`files/list_folder` call comes back `missing_scope`.
+**Not done on purpose (future steps):** renaming a job or changing its number
+does **not** rename the Dropbox folder — the mapping is by job id, so photos
+keep landing in the original folder. Deleting a job cascades the bookkeeping
+rows but leaves Dropbox untouched. Photos taken *before* a job existed, or
+attached to internal jobs, are never mirrored.
 
-## 3. Make the folders and move the photos in (Devon, ~5 min)
+### Tables (migration `2026-09-12_dropbox_job_folders.sql`)
 
-Inside `Dropbox/Apps/DC Solar KC/`, create exactly two folders:
+- **`dropbox_job_folders`** — `job_id` (PK → jobs), `path_display`,
+  `path_lower`, `dropbox_folder_id`, `status` (`queued`/`ready`/`failed`/
+  `skipped`), `attempts`, `last_error`. Admin SELECT only; the service role
+  writes. Cascades when the job is deleted.
+- **`dropbox_photo_mirrors`** — one row per photo: `photo_id` (→ job_photos,
+  SET NULL on delete so the record of what went to Dropbox survives an
+  app-side delete), `job_id`, `storage_path`, `status` (`queued`/`mirrored`/
+  `failed`/`skipped`), `attempts`, `last_error`, `dropbox_id`,
+  `dropbox_path_display`, `dropbox_rev`, `content_hash`, `size_bytes`,
+  `mirrored_at`. Admin SELECT only.
+- **`dropbox_sync_post(jsonb)`** — the ONE place the shared secret lives in
+  SQL; triggers and the retry cron all go through it. Not executable by
+  `anon`/`authenticated`.
+- **`dropbox_enqueue_backlog(p_jobs, p_photos, p_reset_failed)`** — the
+  backfill's enqueue half (service role only).
+
+These live beside, not inside, `dropbox_folders`: that table's primary key is
+`(company, usage)` and the nightly sync treats every row of it as a folder to
+pull photos *from*.
+
+### The function's contract
+
+`POST /functions/v1/dropbox-sync` — auth is unchanged: `x-sync-secret:
+<DROPBOX_SYNC_SECRET>` (cron, triggers) **or** an owner/operator Bearer JWT
+("Sync now"; `verify_jwt` is FALSE, the JWT is re-checked inside).
+
+| Body | Does | Replies |
+|---|---|---|
+| `{}` or `{usage, full, limit}` | the original nightly library sync — unchanged | `{ok, results:[…]}` |
+| `{action:'ensure_job_folder', job_id}` | create/adopt the job's folder | `{ok, path}`; 422 permanent / 502 retryable |
+| `{action:'mirror_photo', photo_id}` | folder first, then copy the photo | `{ok, path}`; 422 / 502 |
+| `{action:'retry_mirrors', limit?}` | drain queued/failed (< 5 attempts), 25 per call by default, max 100 | `{ok, folders:{tried,ready,failed}, photos:{tried,mirrored,failed}, errors:[…]}` |
+| `{action:'backfill_job_folders', limit?, reset_failed?}` | enqueue every job without a row, then drain | as above + `enqueued`, `pending`, `hint` |
+| `{action:'backfill_photo_mirrors', limit?, reset_failed?}` | enqueue every photo without a row, then drain | same |
+
+Every action answers **`503 not_configured`** when `integration_secrets` has
+no Dropbox row — rows stay queued, nothing is counted as an attempt. A missing
+write scope comes back as `502` with the message
+`Dropbox refused: the app lacks the files.content.write scope …`, and the
+drain stops at the first such error so it does not burn attempts on the rest.
+Photo bytes and tokens are never logged.
+
+### The one-time backfill (after steps A–B)
+
+`DROPBOX_SYNC_SECRET` is the edge-function secret. As of 2026-09-12 there is
+**no** `dropbox-sync-secret.txt` in `C:\Durbin Enterprises\config\secrets\`
+(the August doc said there was); read the value from
+`GET https://api.supabase.com/v1/projects/kjamxfezsathrsbztiln/secrets` with
+the PAT, or from `select command from cron.job where jobname =
+'dropbox-sync-daily'`, and save it there so the next migration apply has it.
+
+```
+SECRET=<DROPBOX_SYNC_SECRET>
+
+curl -X POST "https://kjamxfezsathrsbztiln.supabase.co/functions/v1/dropbox-sync" \
+  -H "x-sync-secret: $SECRET" -H "content-type: application/json" \
+  -d '{"action":"backfill_job_folders","limit":50,"reset_failed":true}'
+
+curl -X POST "https://kjamxfezsathrsbztiln.supabase.co/functions/v1/dropbox-sync" \
+  -H "x-sync-secret: $SECRET" -H "content-type: application/json" \
+  -d '{"action":"backfill_photo_mirrors","limit":50,"reset_failed":true}'
+```
+
+Repeat the second call until `pending.photos` is 0 (102 photos ÷ 50 per call
+= three calls), or just let the 15-minute cron finish it. Both are
+re-runnable: a job that already has a `ready` folder and a photo already
+`mirrored` cost no Dropbox call at all.
+
+### Watching it
+
+```sql
+select status, count(*) from public.dropbox_job_folders group by status;
+select status, count(*) from public.dropbox_photo_mirrors group by status;
+
+select j.job_number, f.status, f.attempts, f.path_display, f.last_error
+  from public.dropbox_job_folders f join public.jobs j on j.id = f.job_id
+ order by f.updated_at desc limit 20;
+
+select id, status_code, created from net._http_response order by created desc limit 5;
+
+select jobid, jobname, schedule, active from cron.job
+ where jobname in ('dropbox-sync-daily', 'dropbox-mirror-retry');
+```
+
+Pause the retry loop without dropping anything:
+`update cron.job set active = false where jobname = 'dropbox-mirror-retry';`
+
+### Rotating `DROPBOX_SYNC_SECRET`
+
+The secret is embedded in SQL in exactly two places — `dropbox_sync_post()`
+(this migration) and the body of `dropbox-sync-daily` (the 2026-08-22 cron
+migration). Rotate = set the new function secret, then re-run both migration
+files with the placeholder substituted. The `cron` schema is not readable by
+`authenticated` (verified), so neither copy is reachable from the app.
+
+---
+
+## Original setup — the library sync (kept for reference)
+
+Cost **$0** (a free Dropbox Basic account); about 15 minutes, all Devon's.
+Until it is done the function answers `503 not_configured` — designed
+behaviour, not a bug.
+
+### 1. Create the Dropbox app
+
+https://www.dropbox.com/developers/apps → **Create app** → **Scoped access**
+→ **App folder** (*not* Full Dropbox: the app can only ever see
+`Dropbox/Apps/DC Solar KC/`) → name it `DC Solar KC`.
+
+### 2. Permissions — three
+
+**Permissions** tab → tick `files.metadata.read`, `files.content.read` and
+(since 2026-09-12) `files.content.write` → **Submit**. Scopes must be saved
+**before** minting a token.
+
+### 3. Make the library folders
 
 ```
 Dropbox/Apps/DC Solar KC/EOM/
 Dropbox/Apps/DC Solar KC/Marketing/
 ```
 
-Case does not matter — the sync uses Dropbox's `path_lower`, and
-`public.dropbox_folders` is already seeded with `/eom` and `/marketing`.
-Subfolders are fine; the sync is recursive.
+`public.dropbox_folders` is seeded with `/eom` and `/marketing`
+(case-insensitive). Subfolders are fine; only `.jpg .jpeg .png .heic .webp`
+are picked up. Job folders go under `DC Solar/Jobs/` next to these — the
+nightly sync never looks there.
 
-Only `.jpg`, `.jpeg`, `.png`, `.heic` and `.webp` files are picked up.
-Everything else in there is ignored, so a `notes.txt` or a Lightroom catalogue
-does no harm.
+### 4. Mint the refresh token
 
-## 4. Mint the refresh token (Devon, ~5 min, one time)
+Authorize with `token_access_type=offline`, exchange the code at
+`https://api.dropbox.com/oauth2/token` with `-u "<APP_KEY>:<APP_SECRET>"`,
+keep the `refresh_token` (exact commands in steps A–B above).
 
-The **Settings** tab has the **App key** and **App secret**. With those:
+### 5. Store the credentials
 
-**4a. Authorize.** Open this in a browser, signed in as the Dropbox account that
-owns the photos. `token_access_type=offline` is what makes Dropbox issue a
-refresh token instead of a four-hour access token:
-
-```
-https://www.dropbox.com/oauth2/authorize?client_id=<APP_KEY>&response_type=code&token_access_type=offline
-```
-
-Click **Allow** and copy the short code Dropbox shows on the next page. It is
-single-use and expires in a few minutes.
-
-**4b. Exchange it for a refresh token:**
+They go in `public.integration_secrets`, **not** in edge-function secrets —
+the access token expires every four hours and the function has to *store*
+the refreshed one:
 
 ```
-curl -X POST https://api.dropbox.com/oauth2/token \
-  -u "<APP_KEY>:<APP_SECRET>" \
-  -d code=<THE_CODE_FROM_4a> \
-  -d grant_type=authorization_code
+insert into public.integration_secrets (company, provider, client_id, client_secret, refresh_token)
+values ('dc-solar', 'dropbox', '<APP_KEY>', '<APP_SECRET>', '<REFRESH_TOKEN>')
+on conflict (company, provider) do update
+  set client_id = excluded.client_id, client_secret = excluded.client_secret,
+      refresh_token = excluded.refresh_token, access_token = null, expires_at = null,
+      updated_at = now();
 ```
 
-The reply looks like:
-
-```json
-{
-  "access_token": "sl.u.AF…",
-  "expires_in": 14400,
-  "refresh_token": "3g8…",
-  "scope": "files.content.read files.metadata.read",
-  "account_id": "dbid:AA…",
-  "uid": "…"
-}
-```
-
-Keep the **`refresh_token`**. It does not expire unless it is revoked. Ignore
-the `access_token` — the function mints its own and stores it.
-
-If `scope` in that reply does not list both `files.*.read` scopes, go back to
-step 2, submit them, and redo 4a/4b.
-
-## 5. Store the credentials in the database (Devon or a Claude session, ~2 min)
-
-They go in `public.integration_secrets`, **not** in edge-function secrets. This
-is not a style preference: the Dropbox access token expires every four hours and
-the function has to *store* the refreshed one. The Management API secrets
-endpoint is a deploy-time store, not a runtime one.
-
-```
-curl -X POST "https://api.supabase.com/v1/projects/kjamxfezsathrsbztiln/database/query" \
-  -H "Authorization: Bearer <SUPABASE_PAT>" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"insert into public.integration_secrets (company, provider, client_id, client_secret, refresh_token) values ('"'"'dc-solar'"'"', '"'"'dropbox'"'"', '"'"'<APP_KEY>'"'"', '"'"'<APP_SECRET>'"'"', '"'"'<REFRESH_TOKEN>'"'"') on conflict (company, provider) do update set client_id = excluded.client_id, client_secret = excluded.client_secret, refresh_token = excluded.refresh_token, access_token = null, expires_at = null, updated_at = now();"}'
-```
-
-(`access_token = null, expires_at = null` on the update forces the next run to
-refresh, which is how you recover from a rotated app secret.)
-
-The PAT lives in `C:\Durbin Enterprises\config\secrets\supabase-access-token.txt`.
-Never paste the app secret or the refresh token into a file inside this repo.
-
-## 6. Run the first sync (~2 min)
-
-`DROPBOX_SYNC_SECRET` is already set as an edge-function secret; the value is in
-`C:\Durbin Enterprises\config\secrets\dropbox-sync-secret.txt`.
+### 6. First library sync
 
 ```
 curl -X POST "https://kjamxfezsathrsbztiln.supabase.co/functions/v1/dropbox-sync" \
-  -H "x-sync-secret: <DROPBOX_SYNC_SECRET>" \
-  -H "content-type: application/json" \
+  -H "x-sync-secret: <DROPBOX_SYNC_SECRET>" -H "content-type: application/json" \
   -d '{"usage":"all","full":true}'
 ```
 
-Expect:
+Run it twice: the second run must come back `imported: 0` with `skipped`
+equal to the file count — that proves the cursor and the id+rev
+de-duplication work.
 
-```json
-{"ok":true,"results":[
-  {"usage":"eom","scanned":37,"imported":37,"updated":0,"skipped":0,"archived":0,"cursor":"AAF…","error":null},
-  {"usage":"marketing","scanned":112,"imported":112,"updated":0,"skipped":0,"archived":0,"cursor":"AAG…","error":null}
-]}
-```
+### 7. The nightly schedule
 
-**Run it a second time. Every folder should come back `imported: 0` with
-`skipped` equal to the file count.** That is the real test — it proves the
-cursor and the id+rev de-duplication both work, and that a nightly run costs
-almost nothing.
+`2026-08-22_pg_cron_dropbox.sql` schedules **`dropbox-sync-daily`** at
+`30 7 * * *` UTC (about 2:30 a.m. Kansas City).
 
-Before the credentials exist the same call answers:
-
-```json
-{"ok":false,"code":"not_configured","error":"Dropbox is not connected yet: …"}
-```
-
-with HTTP 503, and with no auth at all it answers 401.
-
-## 7. The nightly schedule (already applied)
-
-`supabase/migrations/2026-08-22_pg_cron_dropbox.sql` installs `pg_cron` and
-schedules **`dropbox-sync-daily`** at `30 7 * * *`. pg_cron runs in the
-database's timezone (UTC), so that is about **2:30 a.m. in Kansas City**. It
-posts to the function with the same `x-sync-secret` header.
-
-```sql
-select jobid, jobname, schedule, active from cron.job where jobname = 'dropbox-sync-daily';
-
-select runid, status, return_message, start_time
-  from cron.job_run_details
- where jobid = (select jobid from cron.job where jobname = 'dropbox-sync-daily')
- order by start_time desc limit 5;
-
-select usage, last_synced_at, file_count, last_error from public.dropbox_folders;
-```
-
-Pause it without dropping anything:
-`update cron.job set active = false where jobname = 'dropbox-sync-daily';`
-
-The admin **"Sync now"** button in the app calls the same function with the
-signed-in owner/operator's JWT instead of the secret — `verify_jwt` is FALSE on
-this function, so that JWT is re-checked against `employees.role` inside the
-function. The header is not authorization by itself and neither is the JWT.
-
----
-
-## How a sync actually behaves
+### How the library sync behaves
 
 | Situation | What happens |
 |---|---|
 | First run | Full `files/list_folder`, everything downloaded, cursor stored |
 | Nothing changed | `list_folder/continue` returns no entries — near-zero cost |
 | Same file, same rev | skipped without downloading |
-| File edited in Dropbox (new rev) | re-downloaded **to the same storage path**, so every signed URL already handed out keeps working |
-| Same photo re-uploaded under a new name | matched on Dropbox's `content_hash`, skipped and logged |
+| File edited in Dropbox (new rev) | re-downloaded **to the same storage path**, so signed URLs keep working |
+| Same photo re-uploaded under a new name | matched on `content_hash`, skipped |
 | File deleted from Dropbox | `media_assets.archived_at` stamped. **The storage object is never removed** |
-| A run fails halfway | the cursor is *not* advanced and the error lands in `dropbox_folders.last_error` — the next run re-reads what it missed |
-| `{"full": true}` | ignores the cursor and rescans the whole folder |
+| A run fails halfway | cursor not advanced; error in `dropbox_folders.last_error` |
+| `{"full": true}` | ignores the cursor and rescans |
 
 ## What is stored where — do not shortcut this
 
-- **`integration_secrets`** — the Dropbox app key, app secret and refresh token.
-  **RLS is enabled and there are ZERO policies**, which makes the table
-  structurally unreachable from any anon or authenticated key, including
-  Devon's. Only the service role — the `dropbox-sync` function — can read it.
-  That is deliberate and it is not an oversight to fix. Verify it by
-  impersonating the **owner** and expecting zero rows.
-- **`dropbox_folders`** — sync state only, no credentials. Member read (the crew
-  can see when photos last came in), admin write.
-- **`media_assets`** — the library index. Member SELECT (marketing shots and EOM
-  photos are not money), admin INSERT/UPDATE/DELETE split per verb. The sync
-  itself runs as the service role and bypasses all of it.
-- **The bytes** go into the existing private **`job-photos`** bucket at
-  `eom/library/<dropboxId>.<ext>` and `marketing/<YYYY>/<dropboxId>.<ext>`.
-  That bucket has no UPDATE policy, so a stable path can only be rewritten by
-  the service role — which is exactly who writes these. **Never upload to those
-  two prefixes from the client**, and make sure "delete this month's Employee of
-  the Month" never removes an `eom/library/*` object.
-- **`DROPBOX_SYNC_SECRET`** is an edge-function secret and is also embedded in
-  the pg_cron job body. The `cron` schema is not readable by the `authenticated`
-  role (verified — even the owner gets `permission denied for schema cron`), so
-  that is not a leak, but it does mean **rotating the secret means re-running
-  the cron migration**, not just changing the function secret.
-
-## Owner follow-ups this produces
-
-| Value | Where it comes from | Goes where |
-|---|---|---|
-| App key | Dropbox app → Settings | `integration_secrets.client_id` |
-| App secret | Dropbox app → Settings | `integration_secrets.client_secret` |
-| Refresh token | step 4b | `integration_secrets.refresh_token` |
-| (already generated + set) | — | `DROPBOX_SYNC_SECRET` edge-function secret |
+- **`integration_secrets`** — app key, secret, refresh token. **RLS enabled,
+  ZERO policies**: unreachable from any anon or authenticated key, including
+  Devon's. Only the service role (the function) reads it. Deliberate.
+- **`dropbox_folders`** — library sync state. Member read, admin write.
+- **`media_assets`** — the library index. Member SELECT, admin writes.
+- **`dropbox_job_folders`, `dropbox_photo_mirrors`** — job-folder bookkeeping.
+  Admin SELECT only, service-role writes.
+- **The bytes** — the private **`job-photos`** bucket: `eom/library/…`,
+  `marketing/<YYYY>/…` (library), `<jobId>/…` (crew uploads, the ones that get
+  mirrored *to* Dropbox). Never upload to the library prefixes from a client.
+- **`DROPBOX_SYNC_SECRET`** — edge-function secret, embedded in
+  `dropbox_sync_post()` and the daily cron body (see *Rotating* above).

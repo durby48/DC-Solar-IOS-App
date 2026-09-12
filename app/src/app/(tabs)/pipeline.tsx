@@ -1,9 +1,11 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   FlatList,
   Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -26,7 +28,7 @@ import {
   EmptyState,
   Pill,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { type FetchStatus } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
 import { type Job } from '@/lib/types';
@@ -109,6 +111,10 @@ function formatHours(h: number): string {
  * right layout on a phone and is explicitly not to change: same art sibling,
  * same paging ScrollView at the same `pageWidth`, same two pages in the same
  * order, same page dots.
+ *
+ * 2026-09-12 cross-link: the customer line on page 1 is its own Pressable
+ * and opens `/crm/[id]` (the responder stops there, so the page's own press
+ * — open the job — does not fire). Nothing else about the card moved.
  */
 function PipelineCard({
   job,
@@ -165,6 +171,10 @@ function PipelineCard({
       : null;
 
   const open = () => router.push({ pathname: '/job/[id]', params: { id: job.id } });
+  const customerId = job.customer_id;
+  const openCustomer = customerId
+    ? () => router.push({ pathname: '/crm/[id]', params: { id: customerId } })
+    : null;
 
   return (
     <Card padded={false} style={styles.card}>
@@ -193,12 +203,28 @@ function PipelineCard({
             {job.name}
           </AppText>
           {job.customer?.name ? (
-            <View style={styles.customerRow}>
+            <Pressable
+              onPress={(e) => {
+                e.stopPropagation();
+                openCustomer?.();
+              }}
+              disabled={!openCustomer}
+              hitSlop={4}
+              accessibilityRole={openCustomer ? 'button' : undefined}
+              accessibilityLabel={openCustomer ? `Open customer ${job.customer.name}` : undefined}
+              style={({ pressed }) => [styles.customerRow, pressed && styles.customerPressed]}>
               <CustomerAvatar customer={job.customer} size={26} />
-              <AppText variant="bodyStrong" color={colors.textSecondary} numberOfLines={1}>
+              <AppText
+                variant="bodyStrong"
+                color={openCustomer ? hubColors.crm.fg : colors.textSecondary}
+                numberOfLines={1}
+                style={styles.customerName}>
                 {job.customer.name}
               </AppText>
-            </View>
+              {openCustomer ? (
+                <Ionicons name="chevron-forward" size={13} color={hubColors.crm.fg} />
+              ) : null}
+            </Pressable>
           ) : null}
           {job.address ? (
             <AppText variant="body" color={colors.textSecondary}>
@@ -670,6 +696,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+    alignSelf: 'flex-start',
+  },
+  customerName: {
+    flexShrink: 1,
+  },
+  customerPressed: {
+    opacity: 0.6,
   },
   typeChipRow: {
     flexDirection: 'row',

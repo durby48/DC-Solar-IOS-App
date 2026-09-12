@@ -15,8 +15,11 @@
  * column. If that address is empty there is nothing to search and the pane
  * says so; it does not guess from a name.
  *
- * Sending goes through `gmail-send` (see lib/gmail.ts::sendEmail); the sent
- * message shows up here on the next fetch because Gmail put it in the thread.
+ * Sending, drafts, archive and star all go through `gmail-inbox` too (see
+ * lib/gmail.ts); a sent message shows up here on the next fetch because Gmail
+ * put it in the thread. Since v10 (2026-09-12) the function's scope is
+ * `gmail.modify`, so the pane can archive / star a thread and hand a reply
+ * to the full composer at `/inbox/compose`.
  */
 
 import { fetchInboxThreads, isNoMailbox, type InboxThread } from '@/lib/gmail';
@@ -52,7 +55,7 @@ export async function fetchRecordEmailThreads(email: string | null | undefined):
   if (noMailboxMessage) return { status: 'no_mailbox', message: noMailboxMessage };
   const result = await fetchInboxThreads({
     q: `{from:${address} to:${address} cc:${address}}`,
-    label: 'ALL',
+    folder: 'all',
     maxResults: 25,
   });
   if (!result.ok) {

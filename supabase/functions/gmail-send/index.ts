@@ -1,13 +1,15 @@
 /**
  * gmail-send — send one plain-text email from the caller's OWN Workspace
- * mailbox, for the CRM's Email pane (Phase 7C, 2026-09-07).
+ * mailbox (Phase 7C, 2026-09-07).
  *
- * A SEPARATE FUNCTION FROM gmail-inbox, ON PURPOSE. gmail-inbox is
- * `gmail.readonly` and its header says never to widen that. This function
- * asks Google for a token with exactly one other scope, `gmail.send` —
- * it can send as the mapped mailbox and do nothing else: not read, not
- * delete, not label. The read path keeps its guarantee; this one has its
- * own, smaller one.
+ * v4 (2026-09-12): LEGACY, KEPT FOR OLDER BUNDLES. The app now sends through
+ * `gmail-inbox` (`action: 'send'`, and the draft actions), which asks Google
+ * for `gmail.modify` — the one scope the domain-wide delegation for client id
+ * 105976483744924526112 lists since 2026-09-12. This function asks for the
+ * SAME scope so an iOS build still running the pre-v10 JavaScript keeps
+ * sending; its request shape and response are unchanged. When no bundle
+ * calls it any more it can be deleted. Do not add features here — add them
+ * to gmail-inbox.
  *
  * SAME THREE GATES AS gmail-inbox: verify_jwt TRUE, then the caller is
  * re-checked against `employees.role` with the service role (a customer
@@ -15,16 +17,11 @@
  * mapped to the ONE mailbox it may send from. The client never names a
  * From address and cannot. Keep `MAILBOXES` identical to gmail-inbox's.
  *
- * WHAT GOOGLE MUST ALLOW. The domain-wide delegation grant for client id
- * 105976483744924526112 lists scopes; `gmail.send` has to be on that list
- * (docs/GMAIL_INBOX_SETUP.md, "Sending"). Until Devon adds it, Google
- * answers `unauthorized_client` and this function returns 503
- * `scope_missing` with the exact instruction — the app shows that sentence
- * rather than pretending it sent.
+ * Until the delegation lists the scope, Google answers `unauthorized_client`
+ * and this returns 503 `scope_missing` with the exact instruction.
  *
  * NOTHING IS STORED HERE. The sent message lives in Gmail (Sent, and in the
- * thread when `threadId` is given), which is where gmail-inbox reads it back
- * from. There is no second copy to drift.
+ * thread when `threadId` is given).
  *
  * ACTION (JSON body): `{ action: 'send', to, cc?, subject, text, threadId?,
  * inReplyTo?, references? }` → `{ ok, mailbox, id, threadId }`.
@@ -38,7 +35,7 @@ const MAILBOXES: Record<string, string> = {
   'inettleton18@gmail.com': 'isaiah@dcsolarkc.com',
 };
 
-const SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+const SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
@@ -151,8 +148,8 @@ async function googleToken(mailbox: string, sa: ServiceAccount): Promise<string>
   if (!response.ok || !body.access_token) {
     if (body.error === 'unauthorized_client') {
       throw new ScopeMissing(
-        'Sending is not enabled yet. In Google Admin → Security → API controls → Domain-wide ' +
-          `delegation, edit client id ${sa.client_id ?? '(see the key file)'} and add the scope ${SCOPE}.`,
+        'Email is not fully switched on yet. In Google Admin → Security → API controls → Domain-wide ' +
+          `delegation, edit client id ${sa.client_id ?? '(see the key file)'} and set its scope to ${SCOPE}.`,
       );
     }
     throw new Error(`Google token request failed: ${body.error ?? response.status} ${body.error_description ?? ''}`.trim());

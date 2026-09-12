@@ -230,7 +230,7 @@ export function PhoneActionSheet({
 
 const styles = StyleSheet.create({
   sheet: {
-    backgroundColor: colors.canvas,
+    backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: spacing.sm,
     gap: spacing.xs,

@@ -18,6 +18,11 @@ type IconName = keyof typeof Ionicons.glyphMap;
  *
  * `danger` recolours the icon and title for destructive rows (Sign out,
  * Delete) so they never look like just another entry.
+ *
+ * `locked` (2026-09-12 overhaul) draws the row as an admin-only door: a lock
+ * glyph where the chevron would be, muted title and icon — but it stays
+ * PRESSABLE, because the press is where the "contact your administrator"
+ * explanation lives (`lib/adminGate.ts`). Every role sees the same rows.
  */
 export function ListRow({
   title,
@@ -31,6 +36,7 @@ export function ListRow({
   danger = false,
   divider = false,
   disabled = false,
+  locked = false,
   chevron,
   style,
 }: {
@@ -50,13 +56,19 @@ export function ListRow({
   /** Hairline under the row. Set on every row but the last of a group. */
   divider?: boolean;
   disabled?: boolean;
+  /** Admin-only for this person: lock glyph, muted, still pressable. */
+  locked?: boolean;
   /** Defaults to true when the row navigates. */
   chevron?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
-  const tint = iconColor ?? (danger ? colors.danger : colors.accentPrimary);
-  const square = iconBackground ?? (danger ? colors.dangerSoft : colors.oliveSoft);
-  const showChevron = chevron ?? Boolean(onPress);
+  const tint = locked
+    ? colors.textMuted
+    : (iconColor ?? (danger ? colors.danger : colors.accentPrimary));
+  const square = locked
+    ? colors.surfaceSunk
+    : (iconBackground ?? (danger ? colors.dangerSoft : colors.oliveSoft));
+  const showChevron = !locked && (chevron ?? Boolean(onPress));
 
   const body = (
     <>
@@ -69,7 +81,7 @@ export function ListRow({
       <View style={styles.text}>
         <AppText
           variant="bodyStrong"
-          color={danger ? colors.danger : colors.textPrimary}
+          color={danger ? colors.danger : locked ? colors.textSecondary : colors.textPrimary}
           numberOfLines={1}>
           {title}
         </AppText>
@@ -89,6 +101,12 @@ export function ListRow({
       ) : null}
 
       {right}
+
+      {locked ? (
+        <View style={styles.lock}>
+          <Ionicons name="lock-closed" size={12} color={colors.textMuted} />
+        </View>
+      ) : null}
 
       {showChevron ? (
         <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
@@ -113,7 +131,9 @@ export function ListRow({
       // A full-width row barely reads as scaling; keep it subtle.
       scaleTo={0.985}
       accessibilityRole="button"
-      accessibilityLabel={badge ? `${title}, ${badge} new` : title}
+      accessibilityLabel={
+        locked ? `${title}, admin only` : badge ? `${title}, ${badge} new` : title
+      }
       style={shape}>
       {body}
     </AnimatedPressable>
@@ -156,6 +176,14 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 11,
     lineHeight: 14,
+  },
+  lock: {
+    width: 22,
+    height: 22,
+    borderRadius: radii.pill,
+    backgroundColor: colors.surfaceSunk,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   disabled: {
     opacity: 0.45,

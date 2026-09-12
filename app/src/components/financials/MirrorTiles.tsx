@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { AnimatedPressable, AppText, Card, CountUp, FadeInUp, SectionHeader, StatTile } from '@/components/ui';
-import { colors, spacing } from '@/constants/theme';
+import { colors, hubColors, spacing } from '@/constants/theme';
 import type { CompanyTotals } from '@/lib/pipeline';
 
 /**
@@ -79,7 +79,7 @@ export function MirrorTiles({
 
   return (
     <View style={styles.section}>
-      <SectionHeader title="Pipeline money" icon="trending-up" />
+      <SectionHeader title="Pipeline money" icon="trending-up" accent={hubColors.systems.fg} />
 
       <View style={styles.grid}>
         {tiles.map((tile, index) => (
@@ -101,6 +101,7 @@ export function MirrorTiles({
                 tone={tile.tone}
                 compact={tile.third}
                 countUp
+                edge
                 style={styles.tile}
               />
               {tile.view ? (

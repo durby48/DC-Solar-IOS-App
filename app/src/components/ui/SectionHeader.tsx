@@ -14,12 +14,17 @@ type IconName = keyof typeof Ionicons.glyphMap;
  *
  * Deliberately quiet: `typography.section` is 12pt olive-on-cream, so it
  * organises the page without competing with the content it labels.
+ *
+ * `accent` (2026-09-12 overhaul) recolours the eyebrow and adds a short
+ * colour bar on its left — the Home and Menu sections carry their hub's hue
+ * (`hubColors[key].fg`) so a block of rows reads as belonging to that hub.
  */
 export function SectionHeader({
   title,
   subtitle,
   icon,
   action,
+  accent,
   style,
 }: {
   title: string;
@@ -28,16 +33,20 @@ export function SectionHeader({
   icon?: IconName;
   /** A single text affordance on the right of the row. */
   action?: { label: string; onPress: () => void; icon?: IconName };
+  /** Eyebrow colour plus a small bar on the left, e.g. a hub colour. */
+  accent?: string;
   style?: StyleProp<ViewStyle>;
 }) {
+  const tint = accent ?? colors.accentPrimary;
   return (
     <View style={[styles.wrap, style]}>
       <View style={styles.left}>
+        {accent ? <View style={[styles.bar, { backgroundColor: accent }]} /> : null}
         {icon ? (
-          <Ionicons name={icon} size={15} color={colors.accentPrimary} style={styles.icon} />
+          <Ionicons name={icon} size={15} color={tint} style={styles.icon} />
         ) : null}
         <View style={styles.titles}>
-          <AppText variant="section" color={colors.accentPrimary}>
+          <AppText variant="section" color={tint}>
             {title}
           </AppText>
           {subtitle ? (
@@ -85,6 +94,13 @@ const styles = StyleSheet.create({
   icon: {
     // Optical alignment with the cap height of an uppercase eyebrow.
     marginTop: -1,
+  },
+  /** The hub colour bar: short, rounded, sits on the eyebrow's baseline. */
+  bar: {
+    width: 4,
+    height: 14,
+    borderRadius: 2,
+    marginRight: 2,
   },
   titles: {
     flexShrink: 1,

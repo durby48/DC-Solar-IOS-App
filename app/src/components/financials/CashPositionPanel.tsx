@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { AppText, Card, ListRow, SectionHeader } from '@/components/ui';
-import { colors, spacing } from '@/constants/theme';
+import { colors, hubColors, spacing } from '@/constants/theme';
 import { formatShortDate } from '@/lib/dates';
 import { formatRounded, formatSigned } from './format';
 
@@ -57,7 +57,7 @@ export function CashPositionPanel({
   if (bankBalance === null) {
     return (
       <View style={styles.section}>
-        <SectionHeader title="Cash position" icon="wallet" />
+        <SectionHeader title="Cash position" icon="wallet" accent={hubColors.systems.fg} />
         <Card>
           <AppText variant="body" color={colors.textMuted}>
             No bank balance recorded yet. Add one and this panel will reconcile it against the
@@ -101,7 +101,7 @@ export function CashPositionPanel({
 
   return (
     <View style={styles.section}>
-      <SectionHeader title="Cash position" icon="wallet" />
+      <SectionHeader title="Cash position" icon="wallet" accent={hubColors.systems.fg} />
       <Card padded={false}>
         {visible.map((row, index) => {
           const expandable = (row.detail?.length ?? 0) > 0;

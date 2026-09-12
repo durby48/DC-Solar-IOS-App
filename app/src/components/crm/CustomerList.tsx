@@ -794,7 +794,7 @@ export function CustomerList({
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surfaceAlt,
   },
   container: {
     padding: spacing.lg,
@@ -916,7 +916,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     gap: spacing.xs,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.tan,
+    borderTopColor: colors.border,
     paddingTop: spacing.sm,
   },
   leadDetail: { color: colors.ink, fontSize: 14, fontWeight: '600' },
@@ -974,14 +974,14 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: colors.tan,
+    borderColor: colors.borderStrong,
     borderRadius: radii.sm,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm,
     color: colors.ink,
     fontSize: 15,
     fontWeight: '600',
-    backgroundColor: colors.cream,
+    backgroundColor: colors.surface,
   },
   inputMultiline: { minHeight: 64, textAlignVertical: 'top' },
   formButtons: {

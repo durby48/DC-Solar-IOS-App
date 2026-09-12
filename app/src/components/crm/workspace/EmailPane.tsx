@@ -1,42 +1,50 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { colors, radii, spacing } from '@/constants/theme';
+import { composeRouteParams } from '@/components/email';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { bareSubject, isOurAddress, type RecordEmailResult } from '@/lib/crmEmail';
+import { type WorkspaceRecord } from '@/lib/crmWorkspace';
 import {
+  archiveThreads,
+  composeParamsFor,
   fetchThread,
   gmailThreadUrl,
   openInGmail,
   saveAttachment,
   sendEmail,
+  starThreads,
+  unarchiveThreads,
+  unstarThreads,
   type InboxThread,
   type MailAttachment,
   type MailMessage,
   type MailThread,
 } from '@/lib/gmail';
-import { type WorkspaceRecord } from '@/lib/crmWorkspace';
 
 /**
- * The Email side of the CRM's `SMS | Email` switch (Phase 7, 2026-09-07).
+ * The Email side of the CRM's `SMS | Email` switch (Phase 7, 2026-09-07;
+ * v10 2026-09-12).
  *
- * Three views in one column, Chatwoot-style: the record's threads (newest
- * first, direction and unread state on the row), one thread (oldest first,
- * plain-text bodies, attachments you can download, a reply box at the
- * bottom), and a compose box for a fresh email. Everything is read live
- * from the caller's own Gmail mailbox and nothing is stored — see
- * lib/crmEmail.ts for why.
+ * Two views in one column, Chatwoot-style: the record's threads (newest
+ * first, direction and unread state on the row) and one thread (oldest
+ * first, plain-text bodies, attachments you can download, a quick reply box
+ * at the bottom). A fresh email, or a reply that needs Cc/Bcc or the quoted
+ * original, opens the full composer at `/inbox/compose` with the address
+ * prefilled. Everything is read live from the caller's own Gmail mailbox and
+ * nothing is stored — see lib/crmEmail.ts for why.
  *
  * Direction is decided by address: a message from the mapped mailbox (or
  * anything @dcsolarkc.com) is ours and sits on the right, like an SMS
  * bubble; everything else is theirs.
  *
- * Sending is honest. Until the Workspace admin adds the gmail.send scope the
- * function answers `scope_missing`, and that sentence is what the Send
- * button shows — the reply is not "sent" anywhere else.
+ * Since the function's scope is `gmail.modify`, the thread bar can also star
+ * and archive — the same Gmail state `/inbox` shows.
  */
 
-type PaneView = { kind: 'list' } | { kind: 'thread'; id: string } | { kind: 'compose' };
+type PaneView = { kind: 'list' } | { kind: 'thread'; id: string };
 
 function when(iso: string): string {
   const d = new Date(iso);
@@ -84,16 +92,17 @@ export function EmailPane({
   /** A thread the Activity tab asked to open. */
   openThreadId: string | null;
   onOpenThread: (id: string | null) => void;
-  /** After a send: the list and the Activity need a fresh read. */
+  /** After a send or a mailbox change: the list and the Activity need a fresh read. */
   onChanged: () => void;
 }) {
+  const router = useRouter();
   const [view, setView] = useState<PaneView>(openThreadId ? { kind: 'thread', id: openThreadId } : { kind: 'list' });
   const [thread, setThread] = useState<MailThread | null>(null);
   const [threadError, setThreadError] = useState<string | null>(null);
   const [threadLoading, setThreadLoading] = useState(false);
   const [busyAttachment, setBusyAttachment] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
-  const [subject, setSubject] = useState('');
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -109,7 +118,6 @@ export function EmailPane({
     setView({ kind: 'list' });
     setThread(null);
     setDraft('');
-    setSubject('');
     setSendError(null);
     setSentNote(null);
   }, [record.key]);
@@ -182,22 +190,49 @@ export function EmailPane({
     onChanged();
   };
 
-  const sendNew = async () => {
-    if (!record.email) return;
-    setSending(true);
-    setSendError(null);
-    const result = await sendEmail({ to: record.email, subject, text: draft });
-    setSending(false);
+  /** New email to the record, in the full composer. */
+  const composeNew = () => {
+    router.push({
+      pathname: '/inbox/compose',
+      params: composeRouteParams({ mode: 'new', to: record.email ?? '' }),
+    });
+  };
+
+  /** Reply to the newest message in the full composer, quoted, with Cc/Bcc available. */
+  const composeReply = (mode: 'reply' | 'replyAll' | 'forward') => {
+    if (!thread) return;
+    const newest = thread.messages[thread.messages.length - 1];
+    if (!newest) return;
+    router.push({
+      pathname: '/inbox/compose',
+      params: composeRouteParams(composeParamsFor(mode, thread, newest, mailbox)),
+    });
+  };
+
+  const toggleStar = async () => {
+    if (!thread || busyAction) return;
+    setBusyAction('star');
+    const result = thread.starred ? await unstarThreads([thread.id]) : await starThreads([thread.id]);
+    setBusyAction(null);
     if (!result.ok) {
-      setSendError(result.message);
+      setThreadError(result.message);
       return;
     }
-    setDraft('');
-    setSubject('');
-    setSentNote(`Sent from ${result.mailbox}`);
+    setThread({ ...thread, starred: !thread.starred });
     onChanged();
-    if (result.threadId) open(result.threadId);
-    else setView({ kind: 'list' });
+  };
+
+  const toggleArchive = async () => {
+    if (!thread || busyAction) return;
+    setBusyAction('archive');
+    const result = thread.inInbox ? await archiveThreads([thread.id]) : await unarchiveThreads([thread.id]);
+    setBusyAction(null);
+    if (!result.ok) {
+      setThreadError(result.message);
+      return;
+    }
+    setThread({ ...thread, inInbox: !thread.inInbox });
+    onChanged();
   };
 
   // ----- states that end the pane early --------------------------------------
@@ -205,7 +240,7 @@ export function EmailPane({
   if (email === null) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color={colors.ocean} />
+        <ActivityIndicator color={hubColors.crm.fg} />
         <Text style={styles.muted}>Looking for email with {record.name}…</Text>
       </View>
     );
@@ -244,45 +279,6 @@ export function EmailPane({
     );
   }
 
-  // ----- compose ---------------------------------------------------------------
-
-  if (view.kind === 'compose') {
-    return (
-      <View style={styles.column}>
-        <View style={styles.bar}>
-          <Pressable onPress={back} hitSlop={8} style={styles.barButton}>
-            <Ionicons name="chevron-back" size={16} color={colors.ocean} />
-            <Text style={styles.barButtonText}>Threads</Text>
-          </Pressable>
-          <Text style={styles.barTitle} numberOfLines={1}>
-            New email · from {email.mailbox}
-          </Text>
-        </View>
-        <ScrollView contentContainerStyle={styles.composeBody} keyboardShouldPersistTaps="handled">
-          <Text style={styles.label}>To</Text>
-          <Text style={styles.fixed}>{record.email}</Text>
-          <Text style={styles.label}>Subject</Text>
-          <TextInput value={subject} onChangeText={setSubject} placeholder="Subject" placeholderTextColor={colors.inkSoft} style={styles.input} />
-          <Text style={styles.label}>Message</Text>
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={`Hi ${record.name.split(' ')[0]},`}
-            placeholderTextColor={colors.inkSoft}
-            multiline
-            style={[styles.input, styles.bodyInput]}
-          />
-          {sendError ? <Text style={styles.error}>{sendError}</Text> : null}
-          <View style={styles.composeActions}>
-            <Pressable onPress={() => void sendNew()} disabled={sending || !draft.trim()} style={({ pressed }) => [styles.send, (pressed || sending || !draft.trim()) && styles.pressed]}>
-              {sending ? <ActivityIndicator color={colors.ink} size="small" /> : <Text style={styles.sendText}>Send</Text>}
-            </Pressable>
-          </View>
-        </ScrollView>
-      </View>
-    );
-  }
-
   // ----- one thread --------------------------------------------------------------
 
   if (view.kind === 'thread') {
@@ -290,19 +286,33 @@ export function EmailPane({
       <View style={styles.column}>
         <View style={styles.bar}>
           <Pressable onPress={back} hitSlop={8} style={styles.barButton}>
-            <Ionicons name="chevron-back" size={16} color={colors.ocean} />
+            <Ionicons name="chevron-back" size={16} color={hubColors.crm.fg} />
             <Text style={styles.barButtonText}>Threads</Text>
           </Pressable>
           <Text style={styles.barTitle} numberOfLines={1}>
             {thread?.subject ?? 'Loading…'}
           </Text>
+          {thread ? (
+            <>
+              <Pressable onPress={() => void toggleStar()} hitSlop={8} accessibilityLabel={thread.starred ? 'Unstar' : 'Star'} disabled={busyAction !== null}>
+                <Ionicons name={thread.starred ? 'star' : 'star-outline'} size={16} color={thread.starred ? colors.amber : colors.inkSoft} />
+              </Pressable>
+              <Pressable onPress={() => void toggleArchive()} hitSlop={8} accessibilityLabel={thread.inInbox ? 'Archive' : 'Move to Inbox'} disabled={busyAction !== null}>
+                {busyAction === 'archive' ? (
+                  <ActivityIndicator size="small" color={hubColors.crm.fg} />
+                ) : (
+                  <Ionicons name={thread.inInbox ? 'archive-outline' : 'mail-open-outline'} size={16} color={colors.inkSoft} />
+                )}
+              </Pressable>
+            </>
+          ) : null}
           <Pressable onPress={() => void openInGmail(gmailThreadUrl(view.id))} hitSlop={8} accessibilityLabel="Open in Gmail">
-            <Ionicons name="open-outline" size={16} color={colors.ocean} />
+            <Ionicons name="open-outline" size={16} color={hubColors.crm.fg} />
           </Pressable>
         </View>
         {threadLoading && !thread ? (
           <View style={styles.center}>
-            <ActivityIndicator color={colors.ocean} />
+            <ActivityIndicator color={hubColors.crm.fg} />
           </View>
         ) : threadError && !thread ? (
           <View style={styles.center}>
@@ -320,6 +330,7 @@ export function EmailPane({
                   <View style={styles.messageHead}>
                     <Text style={styles.messageFrom} numberOfLines={1}>
                       {ours ? `You · ${m.fromAddress}` : m.fromName || m.fromAddress}
+                      {m.draft ? ' · draft' : ''}
                     </Text>
                     <Text style={styles.messageWhen}>{when(m.date)}</Text>
                   </View>
@@ -341,9 +352,9 @@ export function EmailPane({
                           disabled={busyAttachment === a.attachmentId}
                           style={({ pressed }) => [styles.attachment, pressed && styles.pressed]}>
                           {busyAttachment === a.attachmentId ? (
-                            <ActivityIndicator size="small" color={colors.ocean} />
+                            <ActivityIndicator size="small" color={hubColors.crm.fg} />
                           ) : (
-                            <Ionicons name={a.mimeType.startsWith('image/') ? 'image-outline' : 'document-attach-outline'} size={14} color={colors.ocean} />
+                            <Ionicons name={a.mimeType.startsWith('image/') ? 'image-outline' : 'document-attach-outline'} size={14} color={hubColors.crm.fg} />
                           )}
                           <Text style={styles.attachmentText} numberOfLines={1}>
                             {a.filename}
@@ -374,12 +385,20 @@ export function EmailPane({
             ) : sentNote ? (
               <Text style={styles.sent}>{sentNote}</Text>
             ) : (
-              <Text style={styles.muted} numberOfLines={1}>
-                Sends as {email.mailbox}
-              </Text>
+              <View style={styles.replyLinks}>
+                <Pressable onPress={() => composeReply('reply')} hitSlop={6} disabled={!thread}>
+                  <Text style={styles.link}>Full reply</Text>
+                </Pressable>
+                <Pressable onPress={() => composeReply('forward')} hitSlop={6} disabled={!thread}>
+                  <Text style={styles.link}>Forward</Text>
+                </Pressable>
+                <Text style={styles.muted} numberOfLines={1}>
+                  as {email.mailbox}
+                </Text>
+              </View>
             )}
             <Pressable onPress={() => void sendReply()} disabled={sending || !draft.trim() || !thread} style={({ pressed }) => [styles.send, (pressed || sending || !draft.trim()) && styles.pressed]}>
-              {sending ? <ActivityIndicator color={colors.ink} size="small" /> : <Text style={styles.sendText}>Reply</Text>}
+              {sending ? <ActivityIndicator color={colors.white} size="small" /> : <Text style={styles.sendText}>Reply</Text>}
             </Pressable>
           </View>
         </View>
@@ -400,14 +419,10 @@ export function EmailPane({
           {email.mailbox}
         </Text>
         <Pressable
-          onPress={() => {
-            setSendError(null);
-            setSentNote(null);
-            setView({ kind: 'compose' });
-          }}
+          onPress={composeNew}
           style={({ pressed }) => [styles.compose, pressed && styles.pressed]}
           accessibilityLabel="New email">
-          <Ionicons name="create-outline" size={14} color={colors.ink} />
+          <Ionicons name="pencil" size={13} color={colors.white} />
           <Text style={styles.composeText}>New</Text>
         </Pressable>
       </View>
@@ -431,6 +446,7 @@ export function EmailPane({
                       {bareSubject(t.subject)}
                     </Text>
                     {t.messageCount > 1 ? <Text style={styles.count}>{t.messageCount}</Text> : null}
+                    {t.starred ? <Ionicons name="star" size={12} color={colors.amber} /> : null}
                     {t.hasAttachments ? <Ionicons name="attach" size={13} color={colors.inkSoft} /> : null}
                     <Text style={styles.rowTime}>{relative(t.date)}</Text>
                   </View>
@@ -449,7 +465,7 @@ export function EmailPane({
 }
 
 const styles = StyleSheet.create({
-  column: { flex: 1, backgroundColor: colors.cream },
+  column: { flex: 1, backgroundColor: colors.surfaceAlt },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm, padding: spacing.lg },
   muted: { color: colors.inkSoft, fontSize: 12, fontWeight: '600', flexShrink: 1 },
   emptyTitle: { color: colors.ink, fontSize: 15, fontWeight: '800', textAlign: 'center' },
@@ -467,11 +483,11 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
   },
   barButton: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  barButtonText: { color: colors.ocean, fontSize: 13, fontWeight: '700' },
+  barButtonText: { color: hubColors.crm.fg, fontSize: 13, fontWeight: '700' },
   barTitle: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: '700' },
   mailbox: { color: colors.inkSoft, fontSize: 11, fontWeight: '600', maxWidth: 160 },
-  compose: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.sun, borderRadius: radii.pill, paddingHorizontal: spacing.sm + 2, paddingVertical: 5 },
-  composeText: { color: colors.ink, fontSize: 12, fontWeight: '800' },
+  compose: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: hubColors.crm.fg, borderRadius: radii.pill, paddingHorizontal: spacing.sm + 2, paddingVertical: 5 },
+  composeText: { color: colors.white, fontSize: 12, fontWeight: '800' },
   list: { paddingBottom: spacing.xl },
   row: {
     flexDirection: 'row',
@@ -483,9 +499,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
-  rowPressed: { backgroundColor: colors.skySoft },
+  rowPressed: { backgroundColor: hubColors.crm.bg },
   dot: { width: 8, height: 8, borderRadius: 4, marginTop: 6, backgroundColor: 'transparent' },
-  dotUnread: { backgroundColor: colors.ocean },
+  dotUnread: { backgroundColor: hubColors.crm.fg },
   rowBody: { flex: 1, gap: 2 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   rowSubject: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: '600' },
@@ -496,7 +512,7 @@ const styles = StyleSheet.create({
   rowWho: { color: colors.ink, fontWeight: '700' },
   messages: { padding: spacing.md, gap: spacing.sm, paddingBottom: spacing.lg },
   message: { borderRadius: radii.md, padding: spacing.sm + 2, gap: 4, maxWidth: '92%' },
-  messageOurs: { alignSelf: 'flex-end', backgroundColor: colors.skySoft },
+  messageOurs: { alignSelf: 'flex-end', backgroundColor: hubColors.crm.bg },
   messageTheirs: { alignSelf: 'flex-start', backgroundColor: colors.white, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line },
   messageHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   messageFrom: { flex: 1, color: colors.ink, fontSize: 12, fontWeight: '800' },
@@ -505,9 +521,11 @@ const styles = StyleSheet.create({
   messageBody: { color: colors.ink, fontSize: 13, fontWeight: '500', lineHeight: 19 },
   attachments: { gap: 4, marginTop: 4 },
   attachment: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.canvas, borderRadius: radii.sm, paddingHorizontal: spacing.sm, paddingVertical: 6 },
-  attachmentText: { flex: 1, color: colors.ocean, fontSize: 12, fontWeight: '700' },
+  attachmentText: { flex: 1, color: hubColors.crm.fg, fontSize: 12, fontWeight: '700' },
   replyBox: { padding: spacing.sm, gap: spacing.xs, backgroundColor: colors.white, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   replyActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  replyLinks: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
+  link: { color: hubColors.crm.fg, fontSize: 12, fontWeight: '800' },
   input: {
     backgroundColor: colors.canvas,
     borderRadius: radii.sm,
@@ -520,13 +538,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   replyInput: { minHeight: 64, maxHeight: 180, textAlignVertical: 'top' },
-  bodyInput: { minHeight: 180, textAlignVertical: 'top' },
-  composeBody: { padding: spacing.md, gap: spacing.xs },
-  composeActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: spacing.sm },
-  label: { color: colors.inkSoft, fontSize: 10, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase', marginTop: spacing.xs },
-  fixed: { color: colors.ink, fontSize: 14, fontWeight: '600' },
-  send: { backgroundColor: colors.sun, borderRadius: radii.pill, paddingHorizontal: spacing.lg, paddingVertical: 7, minWidth: 80, alignItems: 'center' },
-  sendText: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  send: { backgroundColor: hubColors.crm.fg, borderRadius: radii.pill, paddingHorizontal: spacing.lg, paddingVertical: 7, minWidth: 80, alignItems: 'center' },
+  sendText: { color: colors.white, fontSize: 13, fontWeight: '800' },
   error: { flex: 1, color: colors.danger, fontSize: 12, fontWeight: '700' },
   sent: { flex: 1, color: colors.olive, fontSize: 12, fontWeight: '700' },
   sentBanner: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, backgroundColor: colors.oliveSoft },

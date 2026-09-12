@@ -16,7 +16,8 @@ import {
   SectionHeader,
   SkeletonList,
 } from '@/components/ui';
-import { colors, radii, spacing } from '@/constants/theme';
+import { colors, hubColors, radii, spacing } from '@/constants/theme';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { createLead } from '@/lib/leads';
 import { fetchOpenLeads, type Lead, type LeadStatus } from '@/lib/sales';
 import * as haptics from '@/lib/haptics';
@@ -50,6 +51,7 @@ export function leadStatusTone(status: LeadStatus): { bg: string; fg: string } {
 export default function LeadsScreen() {
   const router = useRouter();
   const role = useRole();
+  const gate = useAdminOnlyScreen();
 
   const [leads, setLeads] = useState<Lead[] | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -146,6 +148,15 @@ export default function LeadsScreen() {
     }
   };
 
+  if (gate.blocked) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Sales Pipeline' }} />
+        <Screen edges={[]}>{null}</Screen>
+      </>
+    );
+  }
+
   return (
     <>
       <Stack.Screen options={{ title: 'Sales Pipeline' }} />
@@ -220,9 +231,9 @@ export default function LeadsScreen() {
           </Card>
         ) : null}
 
-        {!loaded ? (
+        {!loaded || gate.phase === 'loading' ? (
           <SkeletonList count={4} height={84} />
-        ) : !role ? null : groups.length === 0 ? (
+        ) : !role?.isAdmin ? null : groups.length === 0 ? (
           <Card>
             <EmptyState
               icon="person-add"
@@ -236,6 +247,7 @@ export default function LeadsScreen() {
               <SectionHeader
                 title={LEAD_STATUS_LABELS[group.status]}
                 subtitle={`${group.leads.length} ${group.leads.length === 1 ? 'lead' : 'leads'}`}
+                accent={hubColors.crm.fg}
               />
               <Card padded={false}>
                 {group.leads.map((lead, index) => {

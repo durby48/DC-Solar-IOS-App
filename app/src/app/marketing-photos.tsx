@@ -6,6 +6,7 @@ import { StyleSheet, View } from 'react-native';
 import { MediaGallery } from '@/components/MediaGrid';
 import { AppText, Card } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
+import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -29,6 +30,9 @@ import { supabase } from '@/lib/supabase';
  */
 export default function MarketingPhotosScreen() {
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  // Admin-only by the hub map: a crew member who deep-links here is told
+  // to ask their administrator and sent back, and the gallery never mounts.
+  const gate = useAdminOnlyScreen();
 
   useEffect(() => {
     let cancelled = false;
@@ -43,6 +47,15 @@ export default function MarketingPhotosScreen() {
       sub.subscription.unsubscribe();
     };
   }, []);
+
+  if (gate.blocked || gate.phase === 'loading') {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'Marketing photos' }} />
+        <View style={styles.screen} />
+      </>
+    );
+  }
 
   return (
     <>
