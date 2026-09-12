@@ -85,7 +85,7 @@ export default function ImportContactsScreen() {
       answer.status === 'denied'
         ? 'Contacts access was declined. Turn it on in Settings → DC Solar → Contacts, then try again.'
         : answer.status === 'unsupported'
-          ? 'This build cannot read the address book yet — it needs build 31 or later from the App Store / TestFlight.'
+          ? 'The address-book import is switched off in this build: the contacts module in build 31 crashed the app at launch, so it is out until Expo ships a fixed version. Contacts can still be added by hand.'
           : answer.message,
     );
   };
@@ -298,7 +298,7 @@ export default function ImportContactsScreen() {
             )}
           </Pressable>
           {!deviceContactsSupported() ? (
-            <Text style={styles.hint}>Needs build 31 or later — this build cannot read the address book.</Text>
+            <Text style={styles.hint}>Address-book import is temporarily off (see the note above).</Text>
           ) : null}
           {readError ? <Text style={styles.error}>{readError}</Text> : null}
         </View>

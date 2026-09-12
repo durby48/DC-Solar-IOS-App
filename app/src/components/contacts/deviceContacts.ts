@@ -10,7 +10,12 @@
  *                             the import screen says to use the iPhone app.
  *
  * `expo-contacts` is a NATIVE module (config plugin + NSContactsUsageDescription
- * in app.json) and is therefore build 31 — a JS-only push cannot add it. The
+ * in app.json). 2026-09-12: expo-contacts 57.0.5 links Apple's Swift Testing
+ * framework (LC_LOAD_DYLIB @rpath/Testing.framework/Testing), which iPhones
+ * do not ship, so build 31 died in dyld before any JS ran. The package stays
+ * installed for Metro but is EXCLUDED from native autolinking
+ * (package.json expo.autolinking.exclude) until a fixed release; then remove
+ * the exclude, re-add the plugin to app.json and bump the runtime. The
  * native file requires it lazily inside a try/catch so an older binary that
  * runs newer JS gets "unsupported", not a red screen.
  */
