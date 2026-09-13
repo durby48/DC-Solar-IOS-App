@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs, router, useNavigation, useSegments } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { TabIcon } from '@/components/ui';
 import { colors, fonts, hubColors, spacing } from '@/constants/theme';
@@ -46,24 +46,40 @@ const TAB_TITLES: Record<string, string> = {
   contacts: 'Contacts',
 };
 
-/** The header's back control when there is nothing underneath to go back to. */
-function HomeBackButton() {
+/**
+ * The header's back control — ALWAYS this one, on every platform (2026-09-13).
+ *
+ * The default arrow calls a plain `goBack`, which on the web walked back
+ * through the phone's OWN tab history (Contacts → Keypad → …) and never left
+ * the section — Devon: "no way to back out of messages / recents / keypad /
+ * contacts". This pops the whole `/phone` route off the root stack instead,
+ * and when there is nothing under it (a refresh, a pasted link, a
+ * notification tap) it lands on the CRM tab, where these records belong.
+ */
+function PhoneBackButton({ onPress }: { onPress: () => void }) {
   return (
     <Pressable
-      onPress={() => {
-        try {
-          router.replace('/(tabs)' as never);
-        } catch {
-          // Already leaving.
-        }
-      }}
+      onPress={onPress}
       hitSlop={8}
       accessibilityRole="button"
-      accessibilityLabel="Back to Home"
+      accessibilityLabel="Back"
       style={({ pressed }) => [styles.headerBack, pressed && styles.pressed]}>
       <Ionicons name="chevron-back" size={26} color={colors.ocean} />
     </Pressable>
   );
+}
+
+/** Leave the phone section: pop /phone, or go to the CRM tab if nothing is under it. */
+function leavePhone(navigation: { canGoBack: () => boolean; goBack: () => void }) {
+  try {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+  } catch {
+    // Fall through to the CRM tab.
+  }
+  router.replace('/(tabs)/workspace' as never);
 }
 
 export default function PhoneLayout() {
@@ -75,7 +91,8 @@ export default function PhoneLayout() {
   // member anywhere else under /phone gets the same alert + exit as before.
   const segments = useSegments();
   const currentTab = segments[segments.length - 1] ?? 'keypad';
-  const onContacts = currentTab === 'contacts';
+  // `crm` is only a redirect to the CRM tab, so it is open to everyone too.
+  const onContacts = currentTab === 'contacts' || currentTab === 'crm';
   const roleGate = useRoleGate();
   const isAdmin = roleGate.role?.isAdmin === true;
   const blocked = roleGate.phase === 'ready' && !isAdmin && !onContacts;
@@ -100,11 +117,11 @@ export default function PhoneLayout() {
   // the back arrow is on no matter what the root declaration says.
   useEffect(() => {
     try {
-      const nothingUnderneath = Platform.OS !== 'web' && !navigation.canGoBack();
       navigation.setOptions({
         headerShown: true,
         title: TAB_TITLES[currentTab] ?? 'Phone',
-        ...(nothingUnderneath ? { headerLeft: () => <HomeBackButton /> } : {}),
+        headerBackVisible: false,
+        headerLeft: () => <PhoneBackButton onPress={() => leavePhone(navigation)} />,
       });
     } catch {
       // Not mounted inside a stack (never, in practice).
@@ -156,6 +173,29 @@ export default function PhoneLayout() {
         {/* `/phone` → keypad. Exists so a hard load of the bare path has a
             page to serve; hidden from the bar so it is not a fifth tab. */}
         <Tabs.Screen name="index" options={{ href: null }} />
+        {/* CRM FIRST (2026-09-13, Devon: "all this data belongs within the
+            CRM"). Not a phone tab: pressing it leaves the phone section and
+            selects the app's CRM tab. `crm.tsx` only exists so the button has
+            a route; a direct load of /phone/crm redirects the same way. */}
+        <Tabs.Screen
+          name="crm"
+          options={{
+            title: 'CRM',
+            tabBarIcon: ({ focused }) => (
+              <TabIcon name="briefcase" focused={focused} color={hubColors.crm.fg} />
+            ),
+          }}
+          listeners={{
+            tabPress: (event) => {
+              event.preventDefault();
+              try {
+                router.navigate('/(tabs)/workspace' as never);
+              } catch {
+                router.replace('/(tabs)/workspace' as never);
+              }
+            },
+          }}
+        />
         {/* Order is Devon's: Messages · Recents · Keypad · Contacts. Keypad
             stays the default tab; the bar order is separate from that. */}
         <Tabs.Screen
