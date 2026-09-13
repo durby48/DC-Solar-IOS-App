@@ -33,19 +33,30 @@ export function CustomerPicker({
   const [customers, setCustomers] = useState<PickedCustomer[] | null>(null);
   const [search, setSearch] = useState('');
 
+  // `loading` must NOT be a dependency of this effect. It used to be, and
+  // `setLoading(true)` re-ran the effect: the re-run's cleanup marked the
+  // in-flight fetch cancelled, then the re-run bailed out because loading was
+  // true — so the answer was thrown away and the spinner never stopped (the
+  // "customer group just spins" bug, web and iOS alike).
   useEffect(() => {
-    if (!open || customers !== null || loading) return;
+    if (!open || customers !== null) return;
     let cancelled = false;
     setLoading(true);
-    void fetchCrmCustomers().then((result) => {
-      if (cancelled) return;
-      setCustomers(result.status === 'ok' ? result.customers.map((c) => ({ id: c.id, name: c.name })) : []);
-      setLoading(false);
-    });
+    fetchCrmCustomers()
+      .then((result) => {
+        if (cancelled) return;
+        setCustomers(result.status === 'ok' ? result.customers.map((c) => ({ id: c.id, name: c.name })) : []);
+      })
+      .catch(() => {
+        if (!cancelled) setCustomers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [open, customers, loading]);
+  }, [open, customers]);
 
   if (locked) {
     return (
