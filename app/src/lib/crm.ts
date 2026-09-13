@@ -329,6 +329,40 @@ export async function archiveCustomer(id: string): Promise<MutationResult> {
  * re-typed the customer while they were archived, restoring puts two rows with
  * the same `(company, lower(name))` back in play. The message says so.
  */
+export type DeleteCustomerResult =
+  | { ok: true; name: string }
+  /** `history` set: the customer has jobs / money / a portal login — archive instead. */
+  | { ok: false; message: string; history?: string };
+
+/**
+ * Permanently delete a customer through `delete_customer()` (migration
+ * 2026-09-13_delete_customer_rpc.sql). Only a customer with NO jobs, payments,
+ * logged hours, portal login or documents can go; anything else comes back
+ * with `history` ("12 jobs, 25 payments and invoices") and the caller offers
+ * Archive, which hides the customer but keeps the books intact. Notes and
+ * tasks go with the customer; texts and filed contacts stay, unlinked.
+ */
+export async function deleteCustomer(id: string): Promise<DeleteCustomerResult> {
+  try {
+    const { data, error } = await supabase.rpc('delete_customer', { p_customer_id: id });
+    if (error) {
+      const match = /has_history:(.*)$/.exec(error.message ?? '');
+      if (match) {
+        const history = match[1].trim();
+        return {
+          ok: false,
+          history,
+          message: `This customer has ${history}, so it can't be deleted — that would detach real jobs and money from the books. Archive hides it everywhere instead.`,
+        };
+      }
+      return { ok: false, message: error.message || 'Could not delete the customer.' };
+    }
+    return { ok: true, name: typeof data === 'string' ? data : 'Customer' };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not delete the customer.' };
+  }
+}
+
 export async function unarchiveCustomer(id: string, name?: string): Promise<MutationResult> {
   try {
     const { data, error } = await supabase

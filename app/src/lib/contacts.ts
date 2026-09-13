@@ -413,6 +413,26 @@ export async function archiveContact(id: string): Promise<ContactResult> {
   }
 }
 
+/**
+ * Admin: permanently delete a company contact (2026-09-13). RLS
+ * (`contacts_admin_delete`) allows owners/operators only; texts to or from
+ * the contact stay in the thread history, unlinked (`messages.contact_id` is
+ * ON DELETE SET NULL). A re-import from the iPhone would bring them back as a
+ * new row, which is the expected meaning of "delete".
+ */
+export async function deleteContact(id: string): Promise<ContactResult> {
+  try {
+    const { data, error } = await supabase.from('contacts').delete().eq('id', id).select('id');
+    if (error) return writeError(error, 'delete');
+    if (!data || data.length === 0) {
+      return { ok: false, code: 'forbidden', message: 'Only owners and operators can delete contacts.' };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not delete the contact.' };
+  }
+}
+
 /** Admin: bring an archived contact back. */
 export async function unarchiveContact(id: string): Promise<ContactResult> {
   try {

@@ -675,12 +675,14 @@ export default function ContactsScreen() {
           tagSuggestions={tagChips}
           onSaved={() => void onSaved('Saved.')}
           onCancel={closeEditor}
+          onDeleted={() => void onSaved(`${editor.contact.name} was deleted.`)}
         />
       ) : editor?.kind === 'customer' ? (
         <CustomerEditor
           customerId={editor.id}
           onSaved={(name) => void onSaved(`${name} updated.`)}
           onCancel={closeEditor}
+          onDeleted={(message) => void onSaved(message)}
         />
       ) : editor?.kind === 'crew' ? (
         <CrewContactEditor

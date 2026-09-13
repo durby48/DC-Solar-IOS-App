@@ -18,6 +18,7 @@
 
 // Type & layout
 export { AppText } from './AppText';
+export { ConfirmDeleteButton } from './ConfirmDeleteButton';
 export { Screen } from './Screen';
 export { Card, type CardElevation, type CardTone } from './Card';
 export { SectionHeader } from './SectionHeader';

@@ -3,8 +3,9 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 
 import { CustomerPicker, type PickedCustomer } from '@/components/contacts/CustomerPicker';
 import { TagPicker } from '@/components/contacts/TagPicker';
+import { ConfirmDeleteButton } from '@/components/ui';
 import { colors, radii, shadows, spacing } from '@/constants/theme';
-import { createContact, updateContact, type CompanyContact } from '@/lib/contacts';
+import { createContact, deleteContact, updateContact, type CompanyContact } from '@/lib/contacts';
 
 /**
  * Add or edit one contact, inline. Name · company · title · phone · email ·
@@ -28,6 +29,7 @@ export function ContactEditor({
   flat = false,
   onSaved,
   onCancel,
+  onDeleted,
 }: {
   /** Edit this row; null adds a new one. */
   contact?: CompanyContact | null;
@@ -40,6 +42,8 @@ export function ContactEditor({
   flat?: boolean;
   onSaved: (id: string) => void;
   onCancel: () => void;
+  /** Offer Delete on an existing contact (2026-09-13); omit to hide it. */
+  onDeleted?: () => void;
 }) {
   const [name, setName] = useState(contact?.name ?? '');
   const [org, setOrg] = useState(contact?.org ?? '');
@@ -55,6 +59,20 @@ export function ContactEditor({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const remove = async () => {
+    if (!contact || !onDeleted) return;
+    setError(null);
+    setDeleting(true);
+    const result = await deleteContact(contact.id);
+    setDeleting(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    onDeleted();
+  };
 
   const save = async () => {
     setError(null);
@@ -157,11 +175,22 @@ export function ContactEditor({
           {saving ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.saveText}>Save</Text>}
         </Pressable>
       </View>
+      {contact && onDeleted ? (
+        <View style={styles.danger}>
+          <ConfirmDeleteButton label="Delete contact" busy={deleting} onConfirm={() => void remove()} />
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  danger: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    paddingTop: spacing.sm,
+    marginTop: spacing.xs,
+  },
   form: {
     backgroundColor: colors.surface,
     borderRadius: radii.md,

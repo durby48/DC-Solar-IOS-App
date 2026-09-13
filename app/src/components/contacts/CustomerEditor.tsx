@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { ConfirmDeleteButton } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
-import { fetchCustomerById, updateCustomer } from '@/lib/crm';
+import { archiveCustomer, deleteCustomer, fetchCustomerById, updateCustomer } from '@/lib/crm';
 
 /**
  * Edit a CUSTOMER's own card from the directory: name · phone · email ·
@@ -18,10 +19,16 @@ export function CustomerEditor({
   customerId,
   onSaved,
   onCancel,
+  onDeleted,
 }: {
   customerId: string;
   onSaved: (name: string) => void;
   onCancel: () => void;
+  /**
+   * Offer Delete (2026-09-13). Called with a message once the customer is
+   * deleted, or archived instead; omit to hide the control.
+   */
+  onDeleted?: (message: string) => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
@@ -32,6 +39,35 @@ export function CustomerEditor({
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  /** Set when delete was refused because of jobs / money: offer Archive. */
+  const [history, setHistory] = useState<string | null>(null);
+
+  const remove = async () => {
+    if (!onDeleted) return;
+    setError(null);
+    setDeleting(true);
+    const result = await deleteCustomer(customerId);
+    setDeleting(false);
+    if (result.ok) {
+      onDeleted(`${result.name} was deleted.`);
+      return;
+    }
+    setHistory(result.history ?? null);
+    setError(result.message);
+  };
+
+  const archiveInstead = async () => {
+    if (!onDeleted) return;
+    setDeleting(true);
+    const result = await archiveCustomer(customerId);
+    setDeleting(false);
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+    onDeleted(`${name.trim() || 'The customer'} is archived: hidden everywhere, books untouched.`);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -150,11 +186,40 @@ export function CustomerEditor({
           {saving ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.saveText}>Save</Text>}
         </Pressable>
       </View>
+      {onDeleted ? (
+        <View style={styles.danger}>
+          {history ? (
+            <Pressable
+              onPress={() => void archiveInstead()}
+              disabled={deleting}
+              style={({ pressed }) => [styles.archiveInstead, pressed && styles.pressed]}>
+              <Text style={styles.archiveInsteadText}>Archive instead</Text>
+            </Pressable>
+          ) : (
+            <ConfirmDeleteButton label="Delete customer" busy={deleting} onConfirm={() => void remove()} />
+          )}
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  danger: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    paddingTop: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  archiveInstead: {
+    alignSelf: 'flex-start',
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  archiveInsteadText: { color: colors.textPrimary, fontSize: 13, fontWeight: '800' },
   center: { paddingVertical: spacing.xl, alignItems: 'center' },
   form: { gap: spacing.sm },
   input: {

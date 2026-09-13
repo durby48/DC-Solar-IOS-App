@@ -22,7 +22,7 @@ import { CustomerContacts } from '@/components/contacts/CustomerContacts';
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { PhoneActionSheet } from '@/components/PhoneActionSheet';
 import { StatusPill } from '@/components/StatusPill';
-import { WheelPickerSheet, type WheelOption } from '@/components/ui';
+import { ConfirmDeleteButton, WheelPickerSheet, type WheelOption } from '@/components/ui';
 import { colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
 import { fetchEnrolledCustomerIds, inviteCustomer } from '@/lib/account';
 import {
@@ -41,6 +41,7 @@ import {
 import {
   addCustomerNote,
   archiveCustomer,
+  deleteCustomer,
   deleteCustomerNote,
   fetchCrmCustomers,
   fetchCustomerAvatarUrls,
@@ -248,6 +249,7 @@ export default function CustomerDetailScreen() {
   const [inviteBusy, setInviteBusy] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   // Merge
   const [showMerge, setShowMerge] = useState(false);
@@ -575,6 +577,25 @@ export default function CustomerDetailScreen() {
     } else {
       notify(setStatus, 'error', archived ? 'Could not restore' : 'Could not archive', result.message);
     }
+  };
+
+  const pressDelete = async () => {
+    if (!customer) return;
+    setStatus(null);
+    setDeleteBusy(true);
+    const result = await deleteCustomer(customer.id);
+    setDeleteBusy(false);
+    if (result.ok) {
+      notify(setStatus, 'success', 'Deleted', `${result.name} was deleted.`);
+      router.replace('/customers');
+      return;
+    }
+    notify(
+      setStatus,
+      'error',
+      result.history ? 'Archive instead' : 'Could not delete',
+      result.message,
+    );
   };
 
   const openMerge = async () => {
@@ -1154,6 +1175,17 @@ export default function CustomerDetailScreen() {
               )}
             </View>
           ) : null}
+
+          {/* Permanent delete (2026-09-13). The server refuses any customer
+              with jobs, money, hours, a portal login or documents and says
+              so; Archive (above) is the answer for those. */}
+          <View style={[styles.rowBorderTop, styles.deleteRow]}>
+            <ConfirmDeleteButton
+              label="Delete customer"
+              busy={deleteBusy}
+              onConfirm={() => void pressDelete()}
+            />
+          </View>
         </View>
       ) : null}
     </>
@@ -1993,6 +2025,7 @@ const styles = StyleSheet.create({
   },
   manageText: { color: colors.ocean, fontSize: 14, fontWeight: '700' },
   manageTextDanger: { color: colors.danger },
+  deleteRow: { paddingTop: spacing.sm },
   mergeArea: { gap: spacing.xs, paddingTop: spacing.xs },
   mergeRow: {
     flexDirection: 'row',

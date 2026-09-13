@@ -302,6 +302,11 @@ export function CustomerContacts({
                 void reload();
               }}
               onCancel={() => setEditing(null)}
+              onDeleted={() => {
+                setEditing(null);
+                setNote({ kind: 'ok', text: `${contact.name} was deleted.` });
+                void reload();
+              }}
             />
           );
         }
