@@ -68,7 +68,7 @@ Passed: `npx tsc --noEmit`; `npx expo export --platform web`; `expo config --typ
 - If any other Gemini text workflow appears, point it at the same model setting.
 
 ### Status
-Code complete and pushed; database migration applied; `card-forge` deployed. iOS build 33 was building on EAS at the time of writing — see the dated entry above START HERE for the IPA check and TestFlight submission result.
+**Shipped to TestFlight, awaiting on-device testing.** Code is on `main` (web auto-deploys), the migration is applied, and `card-forge` v20 is deployed. EAS build `4c583124-f521-43b5-a817-a41a3f17bbc5` (build 33, runtime 5) FINISHED. Before submitting, the IPA was scanned: all 22 Mach-O binaries were checked and **none reference `Testing.framework`**; `ExpoContacts.framework` is embedded; `Info.plist` shows `CFBundleVersion 33` and carries `NSContactsUsageDescription`. Submitted to App Store Connect (submission `09a5f988-5574-4ec8-b30b-b03462ade889`), where Apple is processing it; install from TestFlight once that finishes. First on-device checks, in order: the app launches (the build-31 failure mode); Contacts → Add contact → Import from iPhone (permission prompt); Edit mode; a crew row's editor; Card catalog → Sync jobs → cards; Financials → Receivables.
 
 ## START HERE (state as of 2026-09-12, night)
 
