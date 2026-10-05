@@ -7,7 +7,7 @@ import { Pill } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { type CustomerJob } from '@/lib/crm';
 import { updateJobStage } from '@/lib/jobs';
-import { STAGES, STAGE_COLORS, isStage, type Stage } from '@/lib/stages';
+import { STAGE_COLORS, isStage, stagesForJob, type Stage } from '@/lib/stages';
 
 /**
  * The one job that matters right now, as a card at the top of the detail
@@ -97,7 +97,7 @@ export function StagePillControl({
 
       {picking ? (
         <View style={styles.stageList}>
-          {STAGES.map((s) => {
+          {stagesForJob(job).map((s) => {
             const c = STAGE_COLORS[s];
             const active = s === stage;
             return (

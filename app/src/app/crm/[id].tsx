@@ -73,7 +73,7 @@ import { haptics } from '@/lib/haptics';
 import { updateJobStage } from '@/lib/jobs';
 import { shareDocument, viewDocument } from '@/lib/pdf';
 import { useRole } from '@/lib/role';
-import { STAGES, labelForJob, stageOrDefault, type Stage } from '@/lib/stages';
+import { labelForJob, stageOrDefault, stagesForJob, type Stage } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
 import { type Customer } from '@/lib/types';
 
@@ -95,7 +95,8 @@ import { type Customer } from '@/lib/types';
 type Segment = 'overview' | 'contacts' | 'jobs' | 'documents' | 'money' | 'comms' | 'notes';
 
 /** The eight pipeline stages as wheel rows, in board order. */
-const STAGE_OPTIONS: readonly WheelOption<Stage>[] = STAGES.map((s) => ({ value: s, label: s }));
+const stageOptions = (job: { job_type?: string | null }): readonly WheelOption<Stage>[] =>
+  stagesForJob(job).map((s) => ({ value: s, label: s }));
 
 const ALL_SEGMENTS: { key: Segment; label: string; adminOnly: boolean }[] = [
   { key: 'overview', label: 'Overview', adminOnly: false },
@@ -1277,7 +1278,7 @@ export default function CustomerDetailScreen() {
       <WheelPickerSheet
         visible={stagePick !== null}
         title={stagePick ? `Stage · ${stagePick.job.job_number ?? stagePick.job.name}` : 'Stage'}
-        options={STAGE_OPTIONS}
+        options={stageOptions(stagePick?.job ?? {})}
         value={stagePick?.stage ?? 'Pending Estimate'}
         onChange={(stage) => setStagePick((p) => (p ? { ...p, stage } : p))}
         onClose={() => void commitStage()}

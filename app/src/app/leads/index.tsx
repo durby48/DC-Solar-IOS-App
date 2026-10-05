@@ -34,18 +34,30 @@ export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   new: 'New',
   contacted: 'Contacted',
   interested: 'Interested',
+  scheduled: 'Visit booked',
+  visit_done: 'Visit done',
   estimating: 'Projection',
   won: 'Won',
   lost: 'Lost',
 };
 
-export const LEAD_STATUS_ORDER: LeadStatus[] = ['new', 'contacted', 'interested', 'estimating', 'won', 'lost'];
+export const LEAD_STATUS_ORDER: LeadStatus[] = [
+  'new',
+  'contacted',
+  'interested',
+  'scheduled',
+  'visit_done',
+  'estimating',
+  'won',
+  'lost',
+];
 
 export function leadStatusTone(status: LeadStatus): { bg: string; fg: string } {
   if (status === 'won') return { bg: colors.mintSoft, fg: colors.mintDeep };
   if (status === 'lost') return { bg: colors.coralSoft, fg: colors.coralDeep };
   if (status === 'estimating') return { bg: colors.amberSoft, fg: colors.amber };
   if (status === 'interested') return { bg: colors.violetSoft, fg: colors.violet };
+  if (status === 'scheduled' || status === 'visit_done') return { bg: colors.mintSoft, fg: colors.mintDeep };
   if (status === 'contacted') return { bg: colors.tealSoft, fg: colors.teal };
   return { bg: colors.skySoft, fg: colors.ocean };
 }

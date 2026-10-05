@@ -37,7 +37,7 @@ import {
 import { todayISO } from '@/lib/dates';
 import { type Customer } from '@/lib/types';
 import { getRole, type RoleInfo } from '@/lib/role';
-import { STAGES, stageOrDefault, statusForStage, type Stage } from '@/lib/stages';
+import { stageOrDefault, stagesForJob, statusForStage, type Stage } from '@/lib/stages';
 import { isValidISODate } from '@/lib/time';
 
 /**
@@ -394,7 +394,7 @@ export default function JobEditorScreen() {
               Stage
             </AppText>
             <View style={styles.chipRow}>
-              {STAGES.map((s) => (
+              {stagesForJob({ job_type: jobType }).map((s) => (
                 <Chip
                   key={s}
                   label={s}

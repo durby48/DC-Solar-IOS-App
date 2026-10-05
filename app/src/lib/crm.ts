@@ -56,7 +56,7 @@ const UUID_RE = /^[0-9a-fA-F-]{36}$/;
  * Safe inside a PostgREST embed too: `select('*, customers(' + CUSTOMER_COLUMNS + ')')`.
  */
 export const CUSTOMER_COLUMNS =
-  'id, name, phone, phone_e164, email, address, notes, company, photo_path, archived_at, sms_opt_out_at';
+  'id, name, phone, phone_e164, email, address, notes, company, photo_path, archived_at, sms_opt_out_at, possible_duplicate_of';
 
 export type MutationResult = { ok: true } | { ok: false; message: string };
 
@@ -648,6 +648,10 @@ export interface CustomerJob {
   completed_on: string | null;
   is_internal: boolean | null;
   created_at: string | null;
+  /** 'Cleaning' / 'Inspection' mark a service visit (see `stagesForJob`). */
+  job_type: string | null;
+  /** Service visits: when the card was charged; null = Not paid. */
+  service_paid_at: string | null;
 }
 
 /**
@@ -660,7 +664,7 @@ export async function fetchCustomerJobs(customerId: string): Promise<CustomerJob
     const { data, error } = await supabase
       .from('jobs')
       .select(
-        'id, job_number, name, address, status, stage, scheduled_for, scheduled_end, completed_on, is_internal, created_at',
+        'id, job_number, name, address, status, stage, scheduled_for, scheduled_end, completed_on, is_internal, created_at, job_type, service_paid_at',
       )
       .eq('company', COMPANY)
       .eq('customer_id', customerId)

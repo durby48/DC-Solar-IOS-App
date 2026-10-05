@@ -21,8 +21,23 @@ import { type Job } from '@/lib/types';
 
 const COMPANY = 'dc-solar';
 
-/** `interested` (2026-10-05): the sales rep's step between contacted and booking. */
-export type LeadStatus = 'new' | 'contacted' | 'interested' | 'estimating' | 'won' | 'lost';
+/**
+ * 2026-10-05: `interested` is the sales rep's step before booking; `scheduled`
+ * and `visit_done` are set ONLY by the service-visit functions (book /
+ * cancel / done in 2026-10-05_service_visits.sql), never by a status tap.
+ */
+export type LeadStatus =
+  | 'new'
+  | 'contacted'
+  | 'interested'
+  | 'scheduled'
+  | 'visit_done'
+  | 'estimating'
+  | 'won'
+  | 'lost';
+
+/** Statuses a person can tap a lead into; the rest follow its service visit. */
+export const VISIT_DRIVEN_STATUSES: readonly LeadStatus[] = ['scheduled', 'visit_done'];
 
 export interface Lead {
   id: string;
@@ -259,6 +274,11 @@ export async function fetchSalesData(): Promise<SalesData | null> {
  *
  * Deliberately not filtered by `status`: a lead marked `lost` that nobody
  * converted still belongs in front of Devon, and its status chip says so.
+ *
+ * Booked leads (2026-10-05) stay too: a lead with a service visit has a
+ * `converted_job_id` but is not a customer until the visit is paid, so
+ * `scheduled` / `visit_done` leads are included. The CRM decides who sees the
+ * lead and who sees the customer record behind it (`CrmWorkspace`).
  */
 export async function fetchOpenLeads(): Promise<Lead[]> {
   try {
@@ -268,7 +288,7 @@ export async function fetchOpenLeads(): Promise<Lead[]> {
         'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source',
       )
       .eq('company', COMPANY)
-      .is('converted_job_id', null)
+      .or('converted_job_id.is.null,status.in.(scheduled,visit_done)')
       .order('created_at', { ascending: false });
     if (error || !data) return [];
     return (data as unknown as Lead[]).map((l) => ({

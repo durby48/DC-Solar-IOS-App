@@ -6,6 +6,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 import { CustomerContacts } from '@/components/contacts/CustomerContacts';
 import { AppointmentComposer, AppointmentItem } from '@/components/crm/workspace/Appointments';
 import { CurrentJobCard, StagePillControl } from '@/components/crm/workspace/CurrentJobCard';
+import { BookVisitForm, VisitCard } from '@/components/crm/workspace/ServiceVisit';
 import { TaskComposer } from '@/components/crm/workspace/TaskComposer';
 import { TaskItem } from '@/components/crm/workspace/TaskItem';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
@@ -18,7 +19,7 @@ import { todayISO } from '@/lib/dates';
 import { isUpcoming, type LeadAppointment } from '@/lib/leadAppointments';
 import { updateLead } from '@/lib/leads';
 import { useRole } from '@/lib/role';
-import { assignLead, setLeadStatus, type LeadStatus } from '@/lib/sales';
+import { assignLead, setLeadStatus, VISIT_DRIVEN_STATUSES, type LeadStatus } from '@/lib/sales';
 import { type Task } from '@/lib/tasks';
 
 /**
@@ -27,7 +28,9 @@ import { type Task } from '@/lib/tasks';
  * admins' side (projections, conversion into a customer and a job). The
  * four contact fields are what a visit cannot be booked without.
  */
-const SALES_STATUSES: LeadStatus[] = ['new', 'contacted', 'interested', 'lost'];
+const SALES_STATUSES: LeadStatus[] = ['new', 'contacted', 'interested', 'scheduled', 'visit_done', 'lost'];
+/** A lead in one of these can be booked (B1); the database re-checks. */
+const BOOKABLE: readonly LeadStatus[] = ['new', 'contacted', 'interested'];
 const SALES_STATUS_LABEL: Partial<Record<LeadStatus, string>> = { new: 'Prospect', lost: 'Closed out' };
 const REQUIRED_FIELDS = [
   ['name', 'Name'],
@@ -133,6 +136,8 @@ export function DetailPanel({
   const [editing, setEditing] = useState(false);
   const [closingOut, setClosingOut] = useState(false);
   const [closeReason, setCloseReason] = useState('');
+  const [booking, setBooking] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -149,6 +154,8 @@ export function DetailPanel({
     setError(null);
     setClosingOut(false);
     setCloseReason('');
+    setBooking(false);
+    setNotice(null);
     setAddingTask(false);
     setShowDoneTasks(false);
     setAddingAppt(false);
@@ -191,6 +198,8 @@ export function DetailPanel({
 
   const moveLead = async (status: LeadStatus) => {
     if (!record.lead || record.lead.status === status) return;
+    // Visit booked / Visit done follow the service visit, never a tap.
+    if (VISIT_DRIVEN_STATUSES.includes(status)) return;
     setStatusBusy(status);
     const result = await setLeadStatus(record.id, status);
     setStatusBusy(null);
@@ -296,6 +305,14 @@ export function DetailPanel({
             <Fact label="Email" value={record.email} />
             <Fact label="Address" value={record.address} />
             {record.optedOut ? <Text style={styles.warn}>Replied STOP — texting is off. Calling is fine.</Text> : null}
+            {record.duplicateOfName && !isSales ? (
+              <Text style={styles.warn}>
+                Possible duplicate of {record.duplicateOfName} (same phone or email) — merge it from the full customer record.
+              </Text>
+            ) : null}
+            {record.serviceStatus === 'unpaid' && !isSales ? (
+              <Text style={styles.warn}>Not a paying customer yet — booked by sales, card not charged.</Text>
+            ) : null}
             {error ? <Text style={styles.error}>{error}</Text> : null}
           </>
         )}
@@ -315,6 +332,7 @@ export function DetailPanel({
           <View style={styles.statusRow}>
             {(isSales ? SALES_STATUSES : LEAD_STATUS_ORDER).map((s) => {
               const active = record.lead?.status === s;
+              const visitDriven = VISIT_DRIVEN_STATUSES.includes(s);
               return (
                 <Pressable
                   key={s}
@@ -322,7 +340,7 @@ export function DetailPanel({
                     if (isSales && s === 'lost' && !active) setClosingOut(true);
                     else void moveLead(s);
                   }}
-                  disabled={statusBusy !== null}
+                  disabled={statusBusy !== null || visitDriven}
                   style={({ pressed }) => [styles.statusChip, active && styles.statusChipActive, pressed && styles.pressed]}>
                   {statusBusy === s ? (
                     <ActivityIndicator size="small" color={colors.ink} />
@@ -374,6 +392,27 @@ export function DetailPanel({
               </Text>
             </View>
           ) : null}
+          {record.lead.converted_job_id && VISIT_DRIVEN_STATUSES.includes(record.lead.status) ? (
+            <VisitCard jobId={record.lead.converted_job_id} onChanged={onChanged} />
+          ) : BOOKABLE.includes(record.lead.status) ? (
+            booking ? (
+              <BookVisitForm
+                leadId={record.id}
+                onCancel={() => setBooking(false)}
+                onBooked={(message) => {
+                  setBooking(false);
+                  setNotice(message);
+                  onChanged();
+                }}
+              />
+            ) : (
+              <Pressable onPress={() => setBooking(true)} style={({ pressed }) => [styles.bookButton, pressed && styles.pressed]}>
+                <Ionicons name="calendar-outline" size={15} color={colors.textOnAction} />
+                <Text style={styles.bookButtonText}>Book visit</Text>
+              </Pressable>
+            )
+          ) : null}
+          {notice ? <Text style={styles.notice}>{notice}</Text> : null}
           <Fact label="Source" value={record.lead.source} />
           {isSales ? null : (
             <Fact label="Estimated value" value={record.lead.estimated_value != null ? money(record.lead.estimated_value) : null} />
@@ -647,6 +686,18 @@ const styles = StyleSheet.create({
   requiredText: { color: colors.ink, fontSize: 12, fontWeight: '700' },
   requiredVerdict: { color: colors.inkSoft, fontSize: 12, fontWeight: '700', width: '100%' },
   requiredReady: { color: colors.olive },
+  bookButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing.xs,
+    backgroundColor: colors.sun,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 7,
+    borderRadius: radii.pill,
+  },
+  bookButtonText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
+  notice: { color: colors.olive, fontSize: 12, fontWeight: '700' },
   statusChip: { paddingHorizontal: spacing.sm + 2, paddingVertical: 5, borderRadius: radii.pill, backgroundColor: colors.canvas, borderWidth: 1, borderColor: colors.line },
   statusChipActive: { backgroundColor: colors.olive, borderColor: colors.olive },
   statusChipText: { color: colors.inkSoft, fontSize: 12, fontWeight: '700' },

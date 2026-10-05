@@ -29,7 +29,8 @@ import { fetchJob } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
 import { fetchMyJobHours, type JobWithPM } from '@/lib/jobs';
 import { useRole } from '@/lib/role';
-import { stageOrDefault } from '@/lib/stages';
+import { markServiceVisitDone } from '@/lib/serviceVisits';
+import { isServiceJob, stageOrDefault } from '@/lib/stages';
 
 /**
  * One job, everything about it, in the order the crew and the office read it:
@@ -65,6 +66,21 @@ export default function JobDetailScreen() {
   // Bumped when the user logs/edits own hours so the hours card refreshes.
   const [hoursRefresh, setHoursRefresh] = useState(0);
   const role = useRole();
+  // Service visits (2026-10-05): the crew's "Visit done" button.
+  const [doneBusy, setDoneBusy] = useState(false);
+  const [doneError, setDoneError] = useState<string | null>(null);
+  const markDone = async () => {
+    if (!job) return;
+    setDoneBusy(true);
+    setDoneError(null);
+    const result = await markServiceVisitDone(job.id);
+    if (result.ok) {
+      setJob(await fetchJob(job.id));
+    } else {
+      setDoneError(result.message);
+    }
+    setDoneBusy(false);
+  };
 
   // Refetch on every focus so edits made in the job editor show immediately.
   useFocusEffect(
@@ -181,6 +197,34 @@ export default function JobDetailScreen() {
               ) : null}
             </Card>
 
+            {isServiceJob(job) ? (
+              // A service visit booked from the CRM: Paid / Not paid (Stripe
+              // sets it in B2) and, while it is open, the crew's Visit done.
+              <Card style={styles.visitCard}>
+                <View style={styles.topRow}>
+                  <AppText variant="section">{job.job_type} visit</AppText>
+                  <Chip
+                    label={job.service_paid_at ? 'Paid' : 'Not paid'}
+                    tone={job.service_paid_at ? 'olive' : 'danger'}
+                  />
+                </View>
+                {stageOrDefault(job.stage, job.status) === 'Service Call' && role && !role.isSales ? (
+                  <Button
+                    label="Visit done"
+                    icon="checkmark-circle"
+                    onPress={() => void markDone()}
+                    loading={doneBusy}
+                    disabled={doneBusy}
+                  />
+                ) : null}
+                {doneError ? (
+                  <AppText variant="caption" color={colors.danger}>
+                    {doneError}
+                  </AppText>
+                ) : null}
+              </Card>
+            ) : null}
+
             {job.address ? (
               <Card padded={false}>
                 <ListRow
@@ -285,6 +329,9 @@ const styles = StyleSheet.create({
   },
   headerCard: {
     gap: spacing.xs,
+  },
+  visitCard: {
+    gap: spacing.sm,
   },
   topRow: {
     flexDirection: 'row',

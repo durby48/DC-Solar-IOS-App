@@ -14,10 +14,35 @@ export const STAGES = [
   'Pending Install',
   'Pending Permit',
   'Pending Payment',
+  // 2026-10-05: service visits (Cleaning / Inspection) booked from the CRM
+  // sit here until the crew marks them done. Only service jobs use it — see
+  // `stagesForJob`.
+  'Service Call',
   'Complete',
 ] as const;
 
 export type Stage = (typeof STAGES)[number];
+
+/** Job types a sales rep books as a service visit (SV-YY### numbers). */
+export const SERVICE_JOB_TYPES = ['Cleaning', 'Inspection'] as const;
+
+export function isServiceJob(job: { job_type?: string | null } | null | undefined): boolean {
+  return (SERVICE_JOB_TYPES as readonly string[]).includes(job?.job_type ?? '');
+}
+
+/** A service visit's whole life: booked, then done. */
+export const SERVICE_STAGES: readonly Stage[] = ['Service Call', 'Complete'];
+/** Every stage an install/R&R project can be in — never 'Service Call'. */
+export const PROJECT_STAGES: readonly Stage[] = STAGES.filter((s) => s !== 'Service Call');
+
+/**
+ * The stages a picker or the board's ‹ › arrows may move this job between.
+ * A project can never land in 'Service Call' and a service visit only ever
+ * moves between 'Service Call' and 'Complete'.
+ */
+export function stagesForJob(job: { job_type?: string | null } | null | undefined): readonly Stage[] {
+  return isServiceJob(job) ? SERVICE_STAGES : PROJECT_STAGES;
+}
 
 export function isStage(value: unknown): value is Stage {
   return typeof value === 'string' && (STAGES as readonly string[]).includes(value);
@@ -44,6 +69,7 @@ export const STAGE_COLORS: Record<Stage, { bg: string; fg: string }> = {
   'Pending Install': { bg: colors.skySoft, fg: colors.ocean },
   'Pending Permit': { bg: colors.amberSoft, fg: colors.amberDeep },
   'Pending Payment': { bg: colors.coralSoft, fg: colors.coralDeep },
+  'Service Call': { bg: colors.mintSoft, fg: colors.mintDeep },
   // 2026-08-22: Complete moved ocean → olive. Ocean is Pending Install's hue,
   // so a solid ocean "Complete" pill sat two columns from a soft ocean
   // "Pending Install" pill and the board read as if half of it were finished.
@@ -61,6 +87,7 @@ export const STAGE_ACCENT: Record<Stage, string> = {
   'Pending Install': colors.ocean,
   'Pending Permit': colors.amber,
   'Pending Payment': colors.coral,
+  'Service Call': colors.mint,
   Complete: colors.olive,
 };
 
@@ -83,6 +110,7 @@ export const STAGE_GRADIENT: Record<Stage, readonly [string, string]> = {
   'Pending Install': [colors.skySoft, colors.ocean],
   'Pending Permit': [colors.amberSoft, colors.amber],
   'Pending Payment': [colors.coralSoft, colors.coral],
+  'Service Call': [colors.mintSoft, colors.mint],
   Complete: [colors.oliveSoft, colors.olive],
 };
 

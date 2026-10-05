@@ -36,7 +36,7 @@ import {
 } from '@/lib/leads';
 import { viewDocument } from '@/lib/pdf';
 import { useRole } from '@/lib/role';
-import { setLeadStatus, type LeadStatus } from '@/lib/sales';
+import { setLeadStatus, VISIT_DRIVEN_STATUSES, type LeadStatus } from '@/lib/sales';
 import { labelForJob } from '@/lib/stages';
 import { type Customer } from '@/lib/types';
 import { LEAD_STATUS_LABELS, LEAD_STATUS_ORDER, leadStatusTone } from './index';
@@ -380,7 +380,9 @@ export default function LeadDetailScreen() {
                   label={LEAD_STATUS_LABELS[key]}
                   tone="olive"
                   selected={lead.status === key}
-                  onPress={() => void changeStatus(key)}
+                  // "Visit booked" / "Visit done" follow the service visit
+                  // (book / cancel / done) — shown, never tapped into.
+                  onPress={VISIT_DRIVEN_STATUSES.includes(key) ? undefined : () => void changeStatus(key)}
                 />
               ))}
             </View>

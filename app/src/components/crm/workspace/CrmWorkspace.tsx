@@ -375,14 +375,28 @@ export function CrmWorkspace() {
     [selected, messages, notes, jobs, finance, history, recordTasks, appointments, email],
   );
 
+  // One person, one row (2026-10-05). A booked lead also has a customer
+  // record behind it (book_service_visit makes one). Until the visit is paid
+  // the rep keeps working the LEAD and never sees that customer; admins see
+  // the CUSTOMER (tagged Not paid) and not the lead.
+  const roleRecords = useMemo(
+    () =>
+      records.filter((r) =>
+        isSales
+          ? !(r.kind === 'customer' && r.serviceStatus === 'unpaid')
+          : !(r.kind === 'lead' && (r.lead?.status === 'scheduled' || r.lead?.status === 'visit_done')),
+      ),
+    [records, isSales],
+  );
+
   const visible = useMemo(
     () =>
       filterRecords(
-        records,
+        roleRecords,
         kind === 'tasks' || kind === 'jobs' ? '' : search,
         kind === 'tasks' || kind === 'jobs' ? 'all' : kind,
       ),
-    [records, search, kind],
+    [roleRecords, search, kind],
   );
   // On the Jobs lens the search box filters the board, not the list.
   const boardJobs = useMemo(() => {
@@ -407,12 +421,12 @@ export function CrmWorkspace() {
   const taskBadge = useMemo(() => countDueNow(tasks), [tasks]);
   const totals = useMemo(
     () => ({
-      customers: records.filter((r) => r.kind === 'customer').length,
-      leads: records.filter((r) => r.kind === 'lead').length,
-      prospects: records.filter(isProspect).length,
-      working: records.filter((r) => r.kind === 'lead' && !isProspect(r)).length,
+      customers: roleRecords.filter((r) => r.kind === 'customer').length,
+      leads: roleRecords.filter((r) => r.kind === 'lead').length,
+      prospects: roleRecords.filter(isProspect).length,
+      working: roleRecords.filter((r) => r.kind === 'lead' && !isProspect(r)).length,
     }),
-    [records],
+    [roleRecords],
   );
 
   if (role && !role.isAdmin && !role.isSales) {

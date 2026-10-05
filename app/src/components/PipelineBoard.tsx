@@ -27,7 +27,9 @@ import {
   STAGES,
   STAGE_GRADIENT,
   isCompanyJob,
+  isServiceJob,
   stageOrDefault,
+  stagesForJob,
   type Stage,
   type StageLabel,
 } from '@/lib/stages';
@@ -166,7 +168,8 @@ function BoardCard({
   const router = useRouter();
   const [face, setFace] = useState<CardFace>('overview');
   const stage = jobStage(job);
-  const index = STAGES.indexOf(stage);
+  const lane = stagesForJob(job);
+  const index = lane.indexOf(stage);
   // The overhead container. It has no pipeline stage to move between, and its
   // expenses are company costs rather than job costs — so no stage arrows and
   // no per-job money on the card.
@@ -288,6 +291,14 @@ function BoardCard({
               <View style={styles.typeChipRow}>
                 {extra.has_critter_guard ? (
                   <Pill label="Critter" bg={colors.limeSoft} fg={colors.limeDeep} />
+                ) : null}
+                {isServiceJob(job) ? (
+                  // Service visits: paid by card after the visit (Stripe, B2).
+                  job.service_paid_at ? (
+                    <Pill label="Paid" bg={colors.mintSoft} fg={colors.mintDeep} />
+                  ) : (
+                    <Pill label="Not paid" bg={colors.coralSoft} fg={colors.coralDeep} />
+                  )
                 ) : null}
                 {extra.job_type ? (
                   <Pill
@@ -456,7 +467,7 @@ function BoardCard({
               variant="ghost"
               size="sm"
               haptic="tapLight"
-              disabled={index >= STAGES.length - 1 || moving}
+              disabled={index >= lane.length - 1 || moving}
               accessibilityLabel={`Move ${job.name} forward a stage`}
               style={styles.moveButton}
               textStyle={styles.moveGlyph}
@@ -507,8 +518,9 @@ export function PipelineBoard({
     : [...STAGES];
 
   const move = async (job: Job, direction: -1 | 1) => {
-    const current = STAGES.indexOf(jobStage(job));
-    const target = STAGES[current + direction];
+    const lane = stagesForJob(job);
+    const current = lane.indexOf(jobStage(job));
+    const target = lane[current + direction];
     if (!target) return;
     setMovingId(job.id);
     setError(null);

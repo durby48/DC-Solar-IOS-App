@@ -32,6 +32,11 @@ export interface Customer {
    */
   archived_at?: string | null;
   /**
+   * Set when a sales booking created this record for someone whose phone or
+   * email matches an existing customer (2026-10-05). An admin merges or clears.
+   */
+  possible_duplicate_of?: string | null;
+  /**
    * GENERATED column: +1XXXXXXXXXX, or null when `phone` could not be parsed
    * as a US number. Never written by the client — a wrong +1 is a text
    * message to a stranger.
@@ -66,5 +71,9 @@ export interface Job {
   company: string;
   /** The company container (DC-26026): overhead, never a customer project. */
   is_internal?: boolean | null;
+  /** 'R&R', 'Install', … or a service visit's 'Cleaning' / 'Inspection'. */
+  job_type?: string | null;
+  /** Service visits: when the card was charged (null = Not paid). */
+  service_paid_at?: string | null;
   customer?: Customer | null;
 }

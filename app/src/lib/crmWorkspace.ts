@@ -30,6 +30,7 @@ import { isOurAddress } from '@/lib/crmEmail';
 import { type InboxThread } from '@/lib/gmail';
 import { appointmentInstant, KIND_LABEL, OUTCOME_LABEL, type LeadAppointment } from '@/lib/leadAppointments';
 import { fetchOpenLeads, type Lead, type LeadStatus } from '@/lib/sales';
+import { isServiceJob } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
 import { type Task } from '@/lib/tasks';
 import { type Customer } from '@/lib/types';
@@ -53,6 +54,10 @@ export interface WorkspaceJobLite {
   completed_on: string | null;
   created_at: string | null;
   customer_id: string | null;
+  /** 'Cleaning' / 'Inspection' = a service visit (2026-10-05). */
+  job_type?: string | null;
+  /** Service visits: null = Not paid. */
+  service_paid_at?: string | null;
 }
 
 export interface WorkspaceRecord {
@@ -76,18 +81,37 @@ export interface WorkspaceRecord {
   customer: Customer | null;
   lead: Lead | null;
   summary: CustomerSummary | null;
+  /**
+   * Customers only (2026-10-05): 'unpaid' when their only work is booked
+   * service visits nobody has paid for yet — a person a sales rep booked who
+   * is not a customer until the card is charged; 'paid' once one is.
+   */
+  serviceStatus?: 'unpaid' | 'paid' | null;
+  /** Customers only: the name of the existing customer this may duplicate. */
+  duplicateOfName?: string | null;
 }
 
 export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
   new: 'New lead',
   contacted: 'Contacted',
   interested: 'Interested',
+  scheduled: 'Visit booked',
+  visit_done: 'Visit done',
   estimating: 'Estimating',
   won: 'Won',
   lost: 'Lost',
 };
 
-export const LEAD_STATUS_ORDER: LeadStatus[] = ['new', 'contacted', 'interested', 'estimating', 'won', 'lost'];
+export const LEAD_STATUS_ORDER: LeadStatus[] = [
+  'new',
+  'contacted',
+  'interested',
+  'scheduled',
+  'visit_done',
+  'estimating',
+  'won',
+  'lost',
+];
 
 function toE164(raw: string | null | undefined): string | null {
   if (!raw) return null;
@@ -110,7 +134,7 @@ async function fetchJobsByCustomer(): Promise<Map<string, WorkspaceJobLite[]>> {
   try {
     const { data, error } = await supabase
       .from('jobs')
-      .select('id, job_number, name, stage, status, scheduled_for, completed_on, created_at, customer_id, is_internal')
+      .select('id, job_number, name, stage, status, scheduled_for, completed_on, created_at, customer_id, is_internal, job_type, service_paid_at')
       .eq('company', COMPANY);
     if (error || !data) return map;
     for (const row of data as (WorkspaceJobLite & { is_internal?: boolean | null })[]) {
@@ -159,11 +183,20 @@ export async function fetchWorkspaceRecords(): Promise<WorkspaceRecordsResult> {
 
   const records: WorkspaceRecord[] = [];
 
+  const nameById = new Map(customers.map((c) => [c.id, c.name]));
+
   for (const c of customers) {
     const jobs = jobsByCustomer.get(c.id) ?? [];
     const current = pickCurrentJob(jobs);
     const thread = threadByCustomer.get(c.id) ?? null;
     const summary = summaries.get(c.id) ?? null;
+    const service = jobs.length > 0 && jobs.every((j) => isServiceJob(j));
+    const serviceStatus: WorkspaceRecord['serviceStatus'] = service
+      ? jobs.some((j) => j.service_paid_at)
+        ? 'paid'
+        : 'unpaid'
+      : null;
+    const currentUnpaid = current && isServiceJob(current) && !current.service_paid_at;
     records.push({
       key: `customer:${c.id}`,
       kind: 'customer',
@@ -173,7 +206,11 @@ export async function fetchWorkspaceRecords(): Promise<WorkspaceRecordsResult> {
       phoneE164: c.phone_e164 ?? toE164(c.phone),
       email: c.email ?? null,
       address: c.address,
-      subtitle: current ? `${current.job_number ?? current.name} · ${current.stage ?? 'No stage'}` : jobs.length === 0 ? 'No jobs yet' : null,
+      subtitle: current
+        ? `${current.job_number ?? current.name} · ${current.stage ?? 'No stage'}${currentUnpaid ? ' · Not paid' : ''}`
+        : jobs.length === 0
+          ? 'No jobs yet'
+          : null,
       currentJob: current,
       jobCount: jobs.length,
       lastActivityAt: thread?.lastAt ?? summary?.lastActivityAt ?? null,
@@ -182,6 +219,8 @@ export async function fetchWorkspaceRecords(): Promise<WorkspaceRecordsResult> {
       customer: c,
       lead: null,
       summary,
+      serviceStatus,
+      duplicateOfName: c.possible_duplicate_of ? (nameById.get(c.possible_duplicate_of) ?? 'another customer') : null,
     });
   }
 
