@@ -12,6 +12,11 @@
  *                             or a password-reset link if they have a login
  *   remove { email }        → { ok }   owner only: they lose all access, their
  *                             records stay
+ *   numbers                 → { numbers: [{ number, texting_ready, calls_ready }] }
+ *                             DC Solar's Twilio numbers that nobody has yet
+ *                             (not in voice_routes) — the invite form's and the
+ *                             Phone numbers card's dropdown. Read live from
+ *                             Twilio, so a newly bought number just appears.
  *
  * Links are https://app.dcsolarkc.com/join?code=<32 random bytes>; only the
  * SHA-256 of the code is stored, valid 7 days, single use (`accept-invite`).
@@ -65,6 +70,49 @@ function randomCode(): string {
   let bin = '';
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+interface TwilioNumber {
+  number: string;
+  /** In the Messaging Service (A2P campaign) — texts will be delivered. */
+  texting_ready: boolean;
+  /** Has a "call comes in" webhook — calls reach the app. */
+  calls_ready: boolean;
+}
+
+/** Every number on the Twilio account, flagged for half-done setup. */
+async function twilioNumbers(): Promise<TwilioNumber[]> {
+  const sid = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const token = Deno.env.get('TWILIO_AUTH_TOKEN');
+  const service = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
+  if (!sid || !token) throw new Error('Twilio is not connected (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN).');
+  const auth = `Basic ${btoa(`${sid}:${token}`)}`;
+  const res = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/IncomingPhoneNumbers.json?PageSize=200`,
+    { headers: { authorization: auth } },
+  );
+  if (!res.ok) throw new Error(`Twilio said ${res.status} listing numbers.`);
+  const data = (await res.json()) as {
+    incoming_phone_numbers?: { sid: string; phone_number: string; voice_url: string | null; capabilities?: { sms?: boolean; voice?: boolean } }[];
+  };
+  const inService = new Set<string>();
+  if (service) {
+    const sres = await fetch(
+      `https://messaging.twilio.com/v1/Services/${encodeURIComponent(service)}/PhoneNumbers?PageSize=200`,
+      { headers: { authorization: auth } },
+    );
+    if (sres.ok) {
+      const sdata = (await sres.json()) as { phone_numbers?: { sid: string }[] };
+      for (const n of sdata.phone_numbers ?? []) inService.add(n.sid);
+    }
+  }
+  return (data.incoming_phone_numbers ?? [])
+    .filter((n) => n.capabilities?.voice !== false)
+    .map((n) => ({
+      number: n.phone_number,
+      texting_ready: inService.has(n.sid),
+      calls_ready: Boolean(n.voice_url && n.voice_url.trim()),
+    }));
 }
 
 interface AuthUserLite {
@@ -177,6 +225,16 @@ Deno.serve(async (req) => {
       return ok({ employees: rows });
     }
 
+    // --- numbers nobody has yet ------------------------------------------------
+    if (action === 'numbers') {
+      const [all, { data: routes }] = await Promise.all([
+        twilioNumbers(),
+        admin.from('voice_routes').select('number_e164').eq('company', COMPANY),
+      ]);
+      const taken = new Set(((routes ?? []) as { number_e164: string }[]).map((r) => r.number_e164));
+      return ok({ numbers: all.filter((n) => !taken.has(n.number)) });
+    }
+
     // --- invite ---------------------------------------------------------------
     if (action === 'invite') {
       const name = String(body.name ?? '').trim();
@@ -208,6 +266,15 @@ Deno.serve(async (req) => {
       const number = body.number ? toE164(String(body.number)) : null;
       if (body.number && String(body.number).trim() && !number) return fail(400, 'bad_request', 'The DC Solar number should be a 10-digit US number.');
 
+      if (number) {
+        const [all, { data: route }] = await Promise.all([
+          twilioNumbers(),
+          admin.from('voice_routes').select('assigned_to').eq('number_e164', number).maybeSingle(),
+        ]);
+        if (!all.some((n) => n.number === number)) return fail(400, 'bad_request', 'That number is not one of DC Solar\'s Twilio numbers.');
+        if (route) return fail(409, 'number_taken', 'That number already belongs to someone. Pick another, or buy more in Twilio.');
+      }
+
       const { error: empErr } = await admin.from('employees').insert({
         company: COMPANY,
         email,
@@ -224,13 +291,24 @@ Deno.serve(async (req) => {
           .upsert({ company: COMPANY, email, cell_phone: cell, updated_at: new Date().toISOString() }, { onConflict: 'company,email' });
       }
       if (number) {
-        const { error: routeErr } = await admin
-          .from('voice_routes')
-          .upsert(
-            { number_e164: number, company: COMPANY, assigned_to: email, label: role === 'sales' ? 'Sales rep' : name, updated_at: new Date().toISOString() },
-            { onConflict: 'number_e164' },
+        // INSERT, never upsert: a number someone already has is refused, so two
+        // admins cannot hand out the same line (number_e164 is the key).
+        const { error: routeErr } = await admin.from('voice_routes').insert({
+          number_e164: number,
+          company: COMPANY,
+          assigned_to: email,
+          label: role === 'sales' ? `Sales — ${name}` : name,
+        });
+        if (routeErr) {
+          const taken = /duplicate|unique/i.test(routeErr.message);
+          return fail(
+            taken ? 409 : 500,
+            taken ? 'number_taken' : 'save_failed',
+            taken
+              ? `${name} was added, but that number was just given to someone else — assign another in CRM settings → Phone numbers.`
+              : `${name} was added, but the phone number could not be assigned: ${routeErr.message}`,
           );
-        if (routeErr) return fail(500, 'save_failed', `Employee added, but the phone number could not be assigned: ${routeErr.message}`);
+        }
       }
 
       const issued = await issueLink(admin, { email, name, kind: 'invite', createdBy: callerEmail }, appBase);

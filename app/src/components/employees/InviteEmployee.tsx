@@ -2,6 +2,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useState, type ComponentProps } from 'react';
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { NumberDropdown } from '@/components/employees/NumberDropdown';
 import { Chip } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { sendSms } from '@/lib/comms';
@@ -109,7 +110,7 @@ export function InviteEmployeeForm({
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<InviteRole>('sales');
   const [cell, setCell] = useState('');
-  const [number, setNumber] = useState('');
+  const [number, setNumber] = useState<string | null>(null);
   const [payRate, setPayRate] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +124,7 @@ export function InviteEmployeeForm({
       email: email.trim(),
       role,
       cell: cell.trim(),
-      number: role === 'sales' ? number.trim() : '',
+      number: role === 'sales' ? (number ?? '') : '',
       payRate: role === 'viewer' ? payRate.trim() : '',
     });
     setBusy(false);
@@ -173,7 +174,12 @@ export function InviteEmployeeForm({
       </View>
       <Text style={styles.hint}>{ROLES.find((r) => r.key === role)?.hint}</Text>
       {field(cell, setCell, 'Their cell (optional — to text them the link)', { keyboardType: 'phone-pad' })}
-      {role === 'sales' ? field(number, setNumber, 'DC Solar number for them (optional), e.g. 816 631 6725', { keyboardType: 'phone-pad' }) : null}
+      {role === 'sales' ? (
+        <>
+          <Text style={styles.label}>Their DC Solar number</Text>
+          <NumberDropdown value={number} onChange={setNumber} />
+        </>
+      ) : null}
       {role === 'viewer' ? field(payRate, setPayRate, 'Pay rate $/hr (optional)', { keyboardType: 'decimal-pad' }) : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <View style={styles.buttons}>

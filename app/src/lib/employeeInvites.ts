@@ -65,6 +65,19 @@ export function newEmployeeLink(email: string) {
   );
 }
 
+export interface AvailableNumber {
+  number: string;
+  /** In the Twilio Messaging Service — texts will be delivered (else 30034). */
+  texting_ready: boolean;
+  /** Has the "call comes in" webhook — calls reach the app. */
+  calls_ready: boolean;
+}
+
+/** DC Solar's Twilio numbers nobody has been given yet, read live from Twilio. */
+export function fetchAvailableNumbers() {
+  return access<{ numbers: AvailableNumber[] }>({ action: 'numbers' }, 'Could not read the phone numbers from Twilio.');
+}
+
 export function removeEmployeeAccess(email: string) {
   return access<{ removed: string }>({ action: 'remove', email }, 'Could not remove access.');
 }

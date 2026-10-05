@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { NumberDropdown } from '@/components/employees/NumberDropdown';
 import { Chip } from '@/components/ui';
 import { colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
 import { formatPhone } from '@/lib/comms';
@@ -45,7 +46,7 @@ export function PhoneNumbersCard() {
   const [people, setPeople] = useState<Person[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [draftNumber, setDraftNumber] = useState('');
+  const [draftNumber, setDraftNumber] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState('');
   const [draftOwner, setDraftOwner] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,9 +94,9 @@ export function PhoneNumbersCard() {
   };
 
   const addRoute = async () => {
-    const e164 = toE164(draftNumber);
+    const e164 = draftNumber ? toE164(draftNumber) : null;
     if (!e164) {
-      setError('Enter the Twilio number as 10 digits, e.g. 816 555 0123.');
+      setError('Pick one of the available numbers.');
       return;
     }
     if (!draftOwner) {
@@ -113,7 +114,7 @@ export function PhoneNumbersCard() {
       return;
     }
     setAdding(false);
-    setDraftNumber('');
+    setDraftNumber(null);
     setDraftLabel('');
     setDraftOwner(null);
     await load();
@@ -168,14 +169,7 @@ export function PhoneNumbersCard() {
 
       {adding ? (
         <View style={styles.row}>
-          <TextInput
-            value={draftNumber}
-            onChangeText={setDraftNumber}
-            placeholder="Twilio number, e.g. 816 555 0123"
-            placeholderTextColor={colors.inkSoft}
-            keyboardType="phone-pad"
-            style={styles.input}
-          />
+          <NumberDropdown value={draftNumber} onChange={setDraftNumber} allowNone={false} />
           <TextInput
             value={draftLabel}
             onChangeText={setDraftLabel}
