@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CrmWorkspace } from '@/components/crm/workspace/CrmWorkspace';
@@ -20,16 +20,34 @@ import { useRoleGate } from '@/lib/role';
  * claiming one URL is exactly the ambiguity that produced the sign-out
  * redirect loop on `/`. The tab is LABELLED "CRM"; its URL is `/workspace`.
  *
- * TWO SHAPES (2026-09-12 overhaul). On the web this is the three-column
- * `components/crm/workspace/CrmWorkspace`, unchanged, edge to edge. On the
- * phone — where the tab is now offered too — it is the CRM HUB: the hub's
- * entries (Customers, Leads, Sales, Email, Phone, Jobs Board) as a grid of
- * purple-edged tiles, the same grid `hub/[key].tsx` draws for HR and Systems.
- * Every role sees every tile; the admin-only ones are drawn locked and
- * explain themselves on tap (`lib/adminGate.ts`).
+ * TWO SHAPES, CHOSEN BY ROLE (2026-10-05). Admins get the
+ * `components/crm/workspace/CrmWorkspace` — three columns at desk width, one
+ * column at a time on a phone — on the web AND in the iPhone app, so the app
+ * matches app.dcsolarkc.com. Everyone else gets the CRM HUB: the hub's
+ * entries (Customers, Contacts, Leads, Sales, Email, Phone) as a grid of
+ * purple-edged tiles, the same grid `hub/[key].tsx` draws for HR and Systems,
+ * with the admin-only ones drawn locked and explaining themselves on tap
+ * (`lib/adminGate.ts`).
+ *
+ * Until 2026-10-05 the split was by PLATFORM (web = workspace, phone = hub),
+ * which showed crew on the web the workspace's "Admins only" wall and kept
+ * the workspace off the phone entirely. The workspace itself still refuses
+ * non-admins; this only stops sending them there.
+ *
+ * The spinner while the role resolves is deliberate: rendering the hub first
+ * and swapping in the workspace a beat later is the flicker `useRoleGate()`
+ * exists to prevent.
  */
 export default function CrmTab() {
-  if (Platform.OS === 'web') {
+  const gate = useRoleGate();
+  if (gate.phase === 'loading') {
+    return (
+      <View style={[styles.screen, styles.center]}>
+        <ActivityIndicator color={hubColors.crm.fg} />
+      </View>
+    );
+  }
+  if (gate.role?.isAdmin) {
     return (
       <SafeAreaView edges={['top']} style={styles.screen}>
         <View style={styles.screen}>
@@ -103,9 +121,10 @@ function CrmHub() {
 }
 
 const styles = StyleSheet.create({
-  // The web wrapper is unchanged from before the overhaul; the workspace
-  // paints its own columns over it.
+  // The workspace wrapper (web and phone); the workspace paints its own
+  // columns over it.
   screen: { flex: 1, backgroundColor: colors.cream },
+  center: { alignItems: 'center', justifyContent: 'center' },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

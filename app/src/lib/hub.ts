@@ -71,7 +71,7 @@ export const HUBS: readonly Hub[] = [
     title: 'CRM',
     subtitle: 'Customers, leads, email, phone',
     icon: 'briefcase',
-    // The CRM tab: the workspace on the web, the hub list on the phone.
+    // The CRM tab: the workspace for admins, the hub list for everyone else.
     href: '/workspace',
     gate: 'all',
   },

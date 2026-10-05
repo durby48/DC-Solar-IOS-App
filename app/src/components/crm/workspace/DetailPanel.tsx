@@ -206,8 +206,16 @@ export function DetailPanel({
   const upcomingAppts = appointments.filter((a) => isUpcoming(a, today));
   const pastAppts = appointments.filter((a) => !isUpcoming(a, today)).reverse();
 
+  // `automaticallyAdjustKeyboardInsets` is iOS-only (a no-op on the web): the
+  // task and appointment forms sit low in this column, and since 2026-10-05
+  // admins reach the workspace from the iPhone app, where the keyboard would
+  // otherwise cover them.
   return (
-    <ScrollView style={styles.column} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      style={styles.column}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+      automaticallyAdjustKeyboardInsets>
       {onClose ? (
         <Pressable onPress={onClose} style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
           <Ionicons name="chevron-back" size={16} color={hubColors.crm.fg} />

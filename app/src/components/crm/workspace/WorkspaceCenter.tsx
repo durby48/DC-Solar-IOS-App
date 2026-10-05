@@ -310,7 +310,13 @@ export function WorkspaceCenter({
     );
   } else {
     body = (
-      <ScrollView style={styles.notes} contentContainerStyle={styles.notesContent} keyboardShouldPersistTaps="handled">
+      // iOS-only keyboard insets, as in DetailPanel: the iPhone app shows the
+      // workspace to admins since 2026-10-05.
+      <ScrollView
+        style={styles.notes}
+        contentContainerStyle={styles.notesContent}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets>
         {record.kind === 'customer' ? (
           <View style={styles.noteBox}>
             <TextInput
