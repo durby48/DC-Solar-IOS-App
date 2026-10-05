@@ -197,6 +197,8 @@ export default function RootLayout() {
           <Stack.Screen name="security" options={{ title: 'Security' }} />
           {/* Public: where a customer lands from the Stripe card page (B2). */}
           <Stack.Screen name="card-saved" options={{ title: 'DC Solar', headerShown: false }} />
+          {/* Public: an invited employee sets their password (employee invites). */}
+          <Stack.Screen name="join" options={{ title: 'DC Solar', headerShown: false }} />
           <Stack.Screen name="customer" options={{ headerShown: false, gestureEnabled: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="job/[id]" options={{ title: 'Job' }} />

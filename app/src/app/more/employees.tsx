@@ -11,10 +11,17 @@ import {
 } from 'react-native';
 
 import { CrewContactEditor } from '@/components/contacts/CrewContactEditor';
+import { InviteEmployeeForm, LinkPanel } from '@/components/employees/InviteEmployee';
 import { EditorSheet } from '@/components/contacts/EditorSheet';
 import { EmptyState } from '@/components/ui';
 import { colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
 import { useAdminOnlyScreen } from '@/lib/adminGate';
+import {
+  fetchEmployeeStatuses,
+  newEmployeeLink,
+  removeEmployeeAccess,
+  type EmployeeStatus,
+} from '@/lib/employeeInvites';
 import { fetchPaystubs, type EmployeeDocument } from '@/lib/paystubs';
 import { getRole, type EmployeeRole, type RoleInfo } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
@@ -95,6 +102,15 @@ export default function EmployeesScreen() {
   const [editing, setEditing] = useState<EmployeeRow | null>(null);
   /** Bumped after a save so the list re-reads the new name. */
   const [reloadKey, setReloadKey] = useState(0);
+  // Invites (2026-10-05): sign-in status per email, the invite sheet, a fresh
+  // link shown inside an expanded row, and the owner's two-tap remove.
+  const [statuses, setStatuses] = useState<Map<string, EmployeeStatus>>(new Map());
+  const [inviting, setInviting] = useState(false);
+  const [rowLink, setRowLink] = useState<{ email: string; link: string; kind: 'invite' | 'reset' } | null>(null);
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const isOwner = gate.role?.role === 'owner';
 
   /**
    * Load one employee's paystubs on demand. Admins read the whole company
@@ -151,10 +167,61 @@ export default function EmployeesScreen() {
       }
     };
     load();
+    void fetchEmployeeStatuses().then((result) => {
+      if (cancelled || !result.ok) return;
+      setStatuses(new Map(result.employees.map((e) => [e.email.toLowerCase(), e])));
+    });
     return () => {
       cancelled = true;
     };
   }, [gate.state, isAdmin, reloadKey]);
+
+  const makeLink = async (employee: EmployeeRow) => {
+    setRowBusy(employee.email);
+    setRowError(null);
+    setRowLink(null);
+    const result = await newEmployeeLink(employee.email);
+    setRowBusy(null);
+    if (result.ok) {
+      setRowLink({ email: employee.email, link: result.link, kind: result.kind });
+      setReloadKey((k) => k + 1);
+    } else {
+      setRowError(result.message);
+    }
+  };
+
+  const removeAccess = async (employee: EmployeeRow) => {
+    setRowBusy(employee.email);
+    setRowError(null);
+    const result = await removeEmployeeAccess(employee.email);
+    setRowBusy(null);
+    setConfirmRemove(null);
+    if (result.ok) {
+      setExpandedId(null);
+      setReloadKey((k) => k + 1);
+    } else {
+      setRowError(result.message);
+    }
+  };
+
+  const statusLine = (employee: EmployeeRow): { text: string; invited: boolean } | null => {
+    const st = statuses.get(employee.email.toLowerCase());
+    if (!st) return null;
+    if (!st.has_login) {
+      return {
+        text: st.invite_expires_at
+          ? `Invited — not set up yet (link good until ${new Date(st.invite_expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`
+          : 'Invited — link expired, send a new one',
+        invited: true,
+      };
+    }
+    return {
+      text: st.last_sign_in_at
+        ? `Active — last signed in ${new Date(st.last_sign_in_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+        : 'Active — has not signed in yet',
+      invited: false,
+    };
+  };
 
   /** The expanded row: what this employee actually has on file. */
   const renderDocs = (employee: EmployeeRow) => {
@@ -215,6 +282,11 @@ export default function EmployeesScreen() {
           <View style={styles.employeeBody}>
             <Text style={styles.employeeName}>{employee.display_name ?? employee.email}</Text>
             <Text style={styles.employeeEmail}>{employee.email}</Text>
+            {statusLine(employee) ? (
+              <Text style={[styles.statusText, statusLine(employee)?.invited && styles.statusInvited]}>
+                {statusLine(employee)?.text}
+              </Text>
+            ) : null}
           </View>
           <View style={styles.metaColumn}>
             <View style={[styles.roleChip, { backgroundColor: meta.bg }]}>
@@ -239,6 +311,49 @@ export default function EmployeesScreen() {
               <Ionicons name="call-outline" size={16} color={colors.ocean} />
               <Text style={styles.contactButtonText}>Edit contact info</Text>
             </Pressable>
+            <View style={styles.accessRow}>
+              <Pressable
+                onPress={() => void makeLink(employee)}
+                disabled={rowBusy !== null}
+                style={({ pressed }) => [styles.contactButton, pressed && styles.rowPressed]}>
+                <Ionicons name="link-outline" size={16} color={colors.ocean} />
+                <Text style={styles.contactButtonText}>
+                  {rowBusy === employee.email
+                    ? 'Working…'
+                    : statuses.get(employee.email.toLowerCase())?.has_login
+                      ? 'Password reset link'
+                      : 'New setup link'}
+                </Text>
+              </Pressable>
+              {isOwner && employee.role !== 'owner' ? (
+                <Pressable
+                  onPress={() => {
+                    if (confirmRemove === employee.email) void removeAccess(employee);
+                    else setConfirmRemove(employee.email);
+                  }}
+                  disabled={rowBusy !== null}
+                  style={({ pressed }) => [styles.removeButton, pressed && styles.rowPressed]}>
+                  <Ionicons name="person-remove-outline" size={16} color={colors.danger} />
+                  <Text style={styles.removeButtonText}>
+                    {confirmRemove === employee.email ? 'Tap again to remove access' : 'Remove access'}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {confirmRemove === employee.email ? (
+              <Text style={styles.statusText}>
+                They will not be able to sign in. Their leads, notes and calls stay; their DC Solar number is freed.
+              </Text>
+            ) : null}
+            {rowLink && rowLink.email === employee.email ? (
+              <LinkPanel
+                link={rowLink.link}
+                name={employee.display_name ?? employee.email}
+                email={employee.email}
+                kind={rowLink.kind}
+              />
+            ) : null}
+            {rowError && expandedId === employee.id ? <Text style={styles.errorText}>{rowError}</Text> : null}
             {renderDocs(employee)}
           </View>
         ) : null}
@@ -275,6 +390,13 @@ export default function EmployeesScreen() {
           </View>
         ) : !isAdmin ? null : (
           <>
+            <Pressable
+              onPress={() => setInviting(true)}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.inviteButton, pressed && styles.rowPressed]}>
+              <Ionicons name="person-add" size={16} color={colors.textOnAction} />
+              <Text style={styles.inviteButtonText}>Invite employee</Text>
+            </Pressable>
             <Text style={styles.sectionTitle}>Team</Text>
             {listState === 'loading' ? (
               <View style={styles.centerCard}>
@@ -295,6 +417,15 @@ export default function EmployeesScreen() {
           </>
         )}
       </ScrollView>
+      <EditorSheet visible={inviting} title="Invite employee" onClose={() => setInviting(false)}>
+        {inviting ? (
+          <InviteEmployeeForm
+            canInviteOperator={isOwner}
+            onInvited={() => setReloadKey((k) => k + 1)}
+            onClose={() => setInviting(false)}
+          />
+        ) : null}
+      </EditorSheet>
       <EditorSheet
         visible={editing !== null}
         title={editing ? `Contact info · ${editing.display_name ?? editing.email}` : ''}
@@ -324,6 +455,23 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingBottom: spacing.xxl,
   },
+  inviteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing.xs,
+    backgroundColor: colors.sun,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  inviteButtonText: { color: colors.textOnAction, fontSize: 14, fontWeight: '800' },
+  statusText: { color: colors.inkSoft, fontSize: 12, fontWeight: '600', marginTop: 2 },
+  statusInvited: { color: colors.amberDeep },
+  accessRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  removeButton: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs },
+  removeButtonText: { color: colors.danger, fontSize: 13, fontWeight: '700' },
+  errorText: { color: colors.danger, fontSize: 12, fontWeight: '700' },
   sectionTitle: {
     color: hubColors.hr.fg,
     fontSize: 18,

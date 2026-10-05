@@ -16,7 +16,9 @@ import { useRoleGate } from '@/lib/role';
  * security: the database already returns nothing outside their own records
  * (`2026-10-05_sales_role.sql`). Admins and crew are never redirected.
  */
-const ALLOWED = ['/workspace', '/call', '/security', '/set-password'];
+// /join and /card-saved are public pages (an invite or reset link; Stripe's
+// thank-you) that must work even with a rep already signed in on the device.
+const ALLOWED = ['/workspace', '/call', '/security', '/set-password', '/join', '/card-saved'];
 
 function allowed(pathname: string): boolean {
   return ALLOWED.some((p) => pathname === p || pathname.startsWith(`${p}/`));
