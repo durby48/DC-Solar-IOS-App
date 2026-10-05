@@ -151,7 +151,7 @@ export default function SignUpScreen() {
               onSubmitEditing={submit}
             />
             <AppText variant="caption" color={colors.textMuted} style={styles.rules}>
-              At least 10 characters, with an uppercase letter, a lowercase letter and a number.
+              At least 8 characters, with an uppercase letter, a lowercase letter and a number.
               Passwords found in known data breaches are rejected.
             </AppText>
 

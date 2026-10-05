@@ -21,7 +21,11 @@ import { supabase } from '@/lib/supabase';
  * this page signs them in and sends them to their part of the app (a sales
  * rep straight into their CRM).
  */
-const MIN_PASSWORD = 10;
+// Matches the project's Auth policy (min length 8 since 2026-10-05, plus an
+// upper-case letter, a lower-case letter and a number; breached passwords are
+// refused by Supabase's leaked-password check).
+const MIN_PASSWORD = 8;
+const RULE = `At least ${MIN_PASSWORD} characters, with an uppercase letter, a lowercase letter and a number.`;
 
 type Phase =
   | { kind: 'checking' }
@@ -55,8 +59,8 @@ export default function JoinScreen() {
 
   const submit = async () => {
     if (phase.kind !== 'ready' || !code) return;
-    if (password.length < MIN_PASSWORD) {
-      setError(`Use at least ${MIN_PASSWORD} characters.`);
+    if (password.length < MIN_PASSWORD || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
+      setError(RULE);
       return;
     }
     if (password !== confirm) {
@@ -133,7 +137,7 @@ export default function JoinScreen() {
                   setPassword(v);
                   setError(null);
                 }}
-                placeholder={`Password (at least ${MIN_PASSWORD} characters)`}
+                placeholder="Password"
                 placeholderTextColor={colors.inkSoft}
                 secureTextEntry
                 autoCapitalize="none"
@@ -154,6 +158,7 @@ export default function JoinScreen() {
                 onSubmitEditing={() => void submit()}
                 style={styles.input}
               />
+              <Text style={styles.rule}>{RULE}</Text>
               {error ? <Text style={styles.error}>{error}</Text> : null}
               <Pressable onPress={() => void submit()} disabled={busy} style={({ pressed }) => [styles.button, (pressed || busy) && styles.dim]}>
                 {busy ? (
@@ -186,6 +191,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   error: { color: colors.danger, fontSize: 13, fontWeight: '700', textAlign: 'center' },
+  rule: { color: colors.textSecondary, fontSize: 12, textAlign: 'center' },
   button: { backgroundColor: colors.sun, borderRadius: radii.pill, paddingVertical: spacing.sm + 4, alignItems: 'center' },
   buttonText: { color: colors.textOnAction, fontSize: 15, fontWeight: '800' },
   dim: { opacity: 0.6 },

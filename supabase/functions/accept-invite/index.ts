@@ -28,7 +28,9 @@ const CORS_HEADERS = {
 };
 
 const COMPANY = 'dc-solar';
-const MIN_PASSWORD = 10;
+// The project's Auth policy: 8+ characters with upper, lower and a digit
+// (Supabase also refuses breached passwords and says so in its own error).
+const MIN_PASSWORD = 8;
 
 function ok(payload: Record<string, unknown>): Response {
   return new Response(JSON.stringify({ ok: true, ...payload }), {
@@ -106,7 +108,9 @@ Deno.serve(async (req) => {
 
     if (body.action !== 'accept') return fail(400, 'bad_request', 'Unknown action.');
     const password = String(body.password ?? '');
-    if (password.length < MIN_PASSWORD) return fail(400, 'weak_password', `Use at least ${MIN_PASSWORD} characters.`);
+    if (password.length < MIN_PASSWORD || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
+      return fail(400, 'weak_password', `Use at least ${MIN_PASSWORD} characters, with an uppercase letter, a lowercase letter and a number.`);
+    }
     if (password.length > 72) return fail(400, 'weak_password', 'That password is too long (72 characters at most).');
 
     // Claim the link — only one use, even with two tabs open.
