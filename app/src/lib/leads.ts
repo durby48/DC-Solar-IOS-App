@@ -40,9 +40,14 @@ export type LeadMutationResult =
   | { ok: false; message: string };
 
 /** Create a lead from scratch. Admin (or any role RLS allows) only. */
+/**
+ * `assignedTo` (2026-10-05): a sales rep's own prospects must be inserted
+ * already assigned to them — RLS (`leads_sales_insert`) refuses anything else.
+ */
 export async function createLead(
   input: LeadInput,
   createdBy: string | null,
+  assignedTo?: string | null,
 ): Promise<LeadMutationResult> {
   try {
     const { data, error } = await supabase
@@ -58,6 +63,7 @@ export async function createLead(
         notes: input.notes?.trim() || null,
         status: 'new',
         created_by: createdBy,
+        ...(assignedTo ? { assigned_to: assignedTo } : {}),
       })
       .select('id')
       .single();

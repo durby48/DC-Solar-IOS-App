@@ -9,8 +9,9 @@
  * this client dials out. Twilio then POSTs to that app's Voice URL, which is
  * `twilio-voice-outbound` here, and that function returns the <Dial>.
  *
- * Auth: verify_jwt ON plus a server-side admin re-check — calling out on the
- * company number is an owner/operator thing, same as the bridge.
+ * Auth: verify_jwt ON plus a server-side role re-check — calling out on the
+ * company number is an owner/operator thing, same as the bridge, and (since
+ * 2026-10-05) a sales-rep thing: they call their prospects from the CRM.
  *
  * IDENTITY comes from staff_profiles.voice_identity (set by trigger from the
  * email). The row is upserted here for a staff member who has never opened
@@ -120,7 +121,10 @@ Deno.serve(async (req) => {
     }
     const admin = createClient(supabaseUrl, serviceKey);
 
-    // --- caller must be a company admin ------------------------------------
+    // --- caller must be a company admin, or a sales rep (2026-10-05) -------
+    // Sales reps call their prospects from the CRM. They dial out on the
+    // company number until each rep has their own (voice_routes); nothing
+    // else this function does is wider than placing a call.
     const jwt = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
     if (!jwt) return fail(401, 'unauthorized', 'Missing Authorization header.');
     const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
@@ -132,7 +136,9 @@ Deno.serve(async (req) => {
       .eq('email', callerEmail)
       .maybeSingle();
     const role = (employee as { role?: string } | null)?.role;
-    if (role !== 'owner' && role !== 'operator') return fail(403, 'forbidden', 'Admins only.');
+    if (role !== 'owner' && role !== 'operator' && role !== 'sales') {
+      return fail(403, 'forbidden', 'Admins and sales only.');
+    }
 
     // --- is calling on at all? ----------------------------------------------
     const { data: settingsRow } = await admin

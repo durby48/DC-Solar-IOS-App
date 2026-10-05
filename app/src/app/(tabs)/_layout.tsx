@@ -11,6 +11,7 @@ import {
   markBouncedToLogin,
 } from '@/lib/authGate';
 import { fetchUnreadCount } from '@/lib/comms';
+import { useRoleGate } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -149,9 +150,15 @@ function useStaffGate() {
  *                unchanged so every `/calendar` link in the app still lands.
  *   Customers  = no longer in the bar (`href: null`) but still routable, so
  *                the CRM hub, `/crm`'s redirect and deep links keep working.
+ *
+ * SALES (2026-10-05): a `sales` login has only the CRM, so every other tab is
+ * `href: null` and the bar itself is hidden. `lib/salesConfinement.ts` moves
+ * them off any other path (Home included) onto `/workspace`.
  */
 export default function TabsLayout() {
   const gate = useStaffGate();
+  const role = useRoleGate();
+  const salesOnly = role.role?.isSales === true;
   const [unread, setUnread] = useState(0);
 
   /**
@@ -188,11 +195,13 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.olive,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: {
-          backgroundColor: colors.surfaceAlt,
-          borderTopColor: colors.border,
-          height: 62,
-        },
+        tabBarStyle: salesOnly
+          ? { display: 'none' }
+          : {
+              backgroundColor: colors.surfaceAlt,
+              borderTopColor: colors.border,
+              height: 62,
+            },
         tabBarLabelStyle: { fontFamily: fonts.bold, fontSize: 11 },
       }}>
       <Tabs.Screen
@@ -200,6 +209,7 @@ export default function TabsLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ focused }) => <TabIcon name="home" focused={focused} />,
+          ...(salesOnly ? { href: null } : {}),
         }}
       />
       <Tabs.Screen
@@ -222,6 +232,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ focused }) => (
             <TabIcon name="layers" focused={focused} color={hubColors.pipeline.fg} />
           ),
+          ...(salesOnly ? { href: null } : {}),
         }}
       />
       <Tabs.Screen
@@ -232,6 +243,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ focused }) => (
             <TabIcon name="calendar" focused={focused} color={hubColors.operations.fg} />
           ),
+          ...(salesOnly ? { href: null } : {}),
         }}
       />
       {/* Routable, not offered: the Customers list is reached from the CRM
@@ -244,6 +256,7 @@ export default function TabsLayout() {
           // directory have to coexist; only the label changed.
           title: 'Menu',
           tabBarIcon: ({ focused }) => <TabIcon name="grid" focused={focused} />,
+          ...(salesOnly ? { href: null } : {}),
         }}
       />
     </Tabs>

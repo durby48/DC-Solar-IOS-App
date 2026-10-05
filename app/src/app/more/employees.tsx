@@ -31,6 +31,7 @@ const ROLE_META: Record<EmployeeRole, { label: string; bg: string; text: string 
   owner: { bg: colors.sunLight, text: colors.ink, label: 'Owner' },
   operator: { bg: colors.skySoft, text: colors.ocean, label: 'Operator' },
   viewer: { bg: colors.tan, text: colors.inkSoft, label: 'Viewer' },
+  sales: { bg: colors.violetSoft, text: colors.violet, label: 'Sales' },
 };
 
 /** What the expanded row shows for one employee's documents. */

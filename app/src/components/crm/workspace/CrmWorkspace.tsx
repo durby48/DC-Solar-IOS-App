@@ -1,9 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { DetailPanel } from '@/components/crm/workspace/DetailPanel';
+import { ProspectForm } from '@/components/crm/workspace/ProspectForm';
 import { RecordList, type ListMode } from '@/components/crm/workspace/RecordList';
 import { TasksPane } from '@/components/crm/workspace/TasksPane';
 import { WorkspaceCenter } from '@/components/crm/workspace/WorkspaceCenter';
@@ -33,6 +34,7 @@ import {
   fetchLeadStatusHistory,
   fetchWorkspaceRecords,
   filterRecords,
+  isProspect,
   type ActivityEvent,
   type StageChange,
   type WorkspaceRecord,
@@ -43,6 +45,7 @@ import { fetchLeadAppointments, type LeadAppointment } from '@/lib/leadAppointme
 import { fetchEmployeeOptions } from '@/lib/myhours';
 import { fetchJobsBoardData, type JobsBoardData } from '@/lib/pipeline';
 import { useRole } from '@/lib/role';
+import { signOutAndLeave, type Resettable } from '@/lib/signOut';
 import { isCompanyJob, stageOrDefault } from '@/lib/stages';
 import { countDueNow, fetchTasks, type Task } from '@/lib/tasks';
 import { type Job } from '@/lib/types';
@@ -74,6 +77,13 @@ import { type Job } from '@/lib/types';
  * selects that customer in the list and returns to the record lens, so the
  * board is a way INTO a record, not a second Pipeline. The lens is remembered
  * with the selection. The Pipeline tab stays the crew's field view.
+ *
+ * SALES (2026-10-05). A `sales` login gets this workspace too — it is their
+ * whole app. RLS already narrows every read to their own prospects, leads and
+ * customers (2026-10-05_sales_role.sql); here the lenses become Prospects /
+ * Leads / Customers / Tasks, "add" opens `ProspectForm` in place of the
+ * centre column, the Jobs lens and email are not loaded, and an account
+ * button (sign out, security) stands in for the Menu tab they do not have.
  */
 
 const WIDE = 1100;
@@ -95,7 +105,10 @@ function remembered(): { selectedKey: string | null; kind: ListMode } {
     const kind = parsed.kind;
     return {
       selectedKey: typeof parsed.selectedKey === 'string' ? parsed.selectedKey : null,
-      kind: kind === 'customer' || kind === 'lead' || kind === 'tasks' || kind === 'jobs' ? kind : 'all',
+      kind:
+        kind === 'customer' || kind === 'lead' || kind === 'prospect' || kind === 'working' || kind === 'tasks' || kind === 'jobs'
+          ? kind
+          : 'all',
     };
   } catch {
     return { selectedKey: null, kind: 'all' };
@@ -112,7 +125,9 @@ function remember(state: { selectedKey: string | null; kind: ListMode }): void {
 
 export function CrmWorkspace() {
   const role = useRole();
+  const isSales = role?.isSales === true;
   const router = useRouter();
+  const navigation = useNavigation();
   const { width } = useWindowDimensions();
   const layout: 'wide' | 'medium' | 'narrow' = width >= WIDE ? 'wide' : width >= MEDIUM ? 'medium' : 'narrow';
 
@@ -124,6 +139,8 @@ export function CrmWorkspace() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const restored = useRef(false);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [addingProspect, setAddingProspect] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
 
   const [settings, setSettings] = useState<CommsSettings | null>(null);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
@@ -192,6 +209,12 @@ export function CrmWorkspace() {
       if (kind === 'jobs') void loadBoard();
     }, [loadList, loadBoard, kind]),
   );
+
+  // A lens a sales rep does not have (remembered from an admin session on the
+  // same browser) falls back to All.
+  useEffect(() => {
+    if (isSales && (kind === 'jobs' || kind === 'lead')) setKind('all');
+  }, [isSales, kind]);
 
   // First open of the Jobs lens (including a remembered one).
   useEffect(() => {
@@ -284,9 +307,11 @@ export function CrmWorkspace() {
     if (emailFor.current === record.key) setEmail(result);
   }, []);
 
+  // Not for sales: the CRM's Gmail view is the company mailbox, theirs is not
+  // connected, and the email pane is hidden from them.
   useEffect(() => {
-    if (selected) void loadEmail(selected);
-  }, [selected?.key, loadEmail]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (selected && !isSales) void loadEmail(selected);
+  }, [selected?.key, loadEmail, isSales]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadAppointments = useCallback(async (record: WorkspaceRecord) => {
     if (record.kind !== 'lead') return;
@@ -384,11 +409,13 @@ export function CrmWorkspace() {
     () => ({
       customers: records.filter((r) => r.kind === 'customer').length,
       leads: records.filter((r) => r.kind === 'lead').length,
+      prospects: records.filter(isProspect).length,
+      working: records.filter((r) => r.kind === 'lead' && !isProspect(r)).length,
     }),
     [records],
   );
 
-  if (role && !role.isAdmin) {
+  if (role && !role.isAdmin && !role.isSales) {
     return (
       <View style={styles.center}>
         <Ionicons name="lock-closed" size={26} color={hubColors.crm.fg} />
@@ -422,6 +449,26 @@ export function CrmWorkspace() {
     );
   }
 
+  const accountPanel = accountOpen ? (
+    <View style={styles.account}>
+      <Text style={styles.accountName} numberOfLines={1}>
+        {role?.displayName ?? role?.email ?? 'Signed in'}
+      </Text>
+      <View style={styles.accountActions}>
+        <Pressable
+          onPress={() => router.push('/security' as never)}
+          style={({ pressed }) => [styles.accountButton, pressed && styles.pressed]}>
+          <Text style={styles.accountButtonText}>Security</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => void signOutAndLeave(navigation as unknown as Resettable)}
+          style={({ pressed }) => [styles.accountButton, pressed && styles.pressed]}>
+          <Text style={styles.accountButtonText}>Sign out</Text>
+        </Pressable>
+      </View>
+    </View>
+  ) : null;
+
   const list = (
     <RecordList
       records={visible}
@@ -430,15 +477,25 @@ export function CrmWorkspace() {
       onSelect={(r) => {
         setSelectedKey(r.key);
         setDetailOpen(false);
+        setAddingProspect(false);
       }}
       search={search}
       onSearch={setSearch}
       kind={kind}
       onKind={setKind}
-      onNewLead={() => router.push('/leads' as never)}
+      onNewLead={
+        isSales
+          ? () => {
+              setAddingProspect(true);
+              setSelectedKey(null);
+            }
+          : () => router.push('/leads' as never)
+      }
       taskBadge={taskBadge}
-      jobsLens
+      jobsLens={!isSales}
       jobCount={openJobCount}
+      salesView={isSales}
+      onAccount={isSales ? () => setAccountOpen((v) => !v) : undefined}
       tasksPane={
         <TasksPane
           tasks={tasks}
@@ -466,7 +523,22 @@ export function CrmWorkspace() {
     </View>
   );
 
-  const center = selected ? (
+  const prospectForm =
+    addingProspect && role?.email ? (
+      <ProspectForm
+        myEmail={role.email}
+        onCancel={() => setAddingProspect(false)}
+        onCreated={(leadId) => {
+          setAddingProspect(false);
+          void loadList().then(() => {
+            setKind('all');
+            setSelectedKey(`lead:${leadId}`);
+          });
+        }}
+      />
+    ) : null;
+
+  const center = prospectForm ?? (selected ? (
     <WorkspaceCenter
       record={selected}
       settings={settings}
@@ -479,11 +551,12 @@ export function CrmWorkspace() {
       email={email}
       onNotesChanged={() => void loadSelected(selected)}
       onEmailChanged={() => void loadEmail(selected)}
+      onRecordChanged={() => void refreshAll()}
       onOpenDetail={layout === 'wide' ? undefined : () => setDetailOpen(true)}
     />
   ) : (
     placeholder
-  );
+  ));
 
   const detail = selected ? (
     <DetailPanel
@@ -583,16 +656,25 @@ export function CrmWorkspace() {
     </View>
   );
 
+  const listColumn = (
+    <>
+      {accountPanel}
+      {list}
+    </>
+  );
+
   if (layout === 'wide') {
     return (
       <View style={styles.row}>
-        <View style={[styles.col, styles.listCol]}>{list}</View>
+        <View style={[styles.col, styles.listCol]}>{listColumn}</View>
         {kind === 'jobs' ? (
           <View style={[styles.col, styles.centerCol]}>{boardPane}</View>
         ) : (
           <>
             <View style={[styles.col, styles.centerCol]}>{center}</View>
-            <View style={[styles.col, styles.detailCol]}>{detail ?? <View style={styles.detailEmpty} />}</View>
+            <View style={[styles.col, styles.detailCol]}>
+              {!prospectForm && detail ? detail : <View style={styles.detailEmpty} />}
+            </View>
           </>
         )}
       </View>
@@ -602,9 +684,9 @@ export function CrmWorkspace() {
   if (layout === 'medium') {
     return (
       <View style={styles.row}>
-        <View style={[styles.col, styles.listColMedium]}>{list}</View>
+        <View style={[styles.col, styles.listColMedium]}>{listColumn}</View>
         <View style={[styles.col, styles.centerCol]}>
-          {kind === 'jobs' ? boardPane : detailOpen && detail ? detail : center}
+          {kind === 'jobs' ? boardPane : detailOpen && detail && !prospectForm ? detail : center}
         </View>
       </View>
     );
@@ -622,7 +704,18 @@ export function CrmWorkspace() {
       </View>
     );
   }
-  if (!selected) return <View style={styles.single}>{list}</View>;
+  if (prospectForm) {
+    return (
+      <View style={styles.single}>
+        <Pressable onPress={() => setAddingProspect(false)} style={({ pressed }) => [styles.back, pressed && styles.pressed]}>
+          <Ionicons name="chevron-back" size={16} color={hubColors.crm.fg} />
+          <Text style={styles.backText}>All records</Text>
+        </Pressable>
+        <View style={styles.single}>{prospectForm}</View>
+      </View>
+    );
+  }
+  if (!selected) return <View style={styles.single}>{listColumn}</View>;
   return (
     <View style={styles.single}>
       <Pressable onPress={() => setSelectedKey(null)} style={({ pressed }) => [styles.back, pressed && styles.pressed]}>
@@ -637,6 +730,27 @@ export function CrmWorkspace() {
 const styles = StyleSheet.create({
   row: { flex: 1, flexDirection: 'row', backgroundColor: colors.surfaceAlt },
   single: { flex: 1, backgroundColor: colors.surfaceAlt },
+  // The sales view's account panel, above the list.
+  account: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  accountName: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: '700' },
+  accountActions: { flexDirection: 'row', gap: spacing.xs },
+  accountButton: {
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 5,
+    borderRadius: radii.pill,
+    backgroundColor: hubColors.crm.bg,
+  },
+  accountButtonText: { color: hubColors.crm.deep, fontSize: 12, fontWeight: '800' },
   col: { height: '100%' },
   listCol: { width: 320, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.line },
   listColMedium: { width: 280, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.line },

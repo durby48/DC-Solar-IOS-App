@@ -8,7 +8,13 @@ import { useEffect, useState } from 'react';
 
 import { supabase } from '@/lib/supabase';
 
-export type EmployeeRole = 'owner' | 'operator' | 'viewer';
+/**
+ * `sales` (2026-10-05): sales reps who see ONLY the CRM, and in it only the
+ * prospects/leads/customers that are theirs. Never an admin. The database
+ * enforces the narrowing (supabase/migrations/2026-10-05_sales_role.sql);
+ * `isSales` only shapes the screens.
+ */
+export type EmployeeRole = 'owner' | 'operator' | 'viewer' | 'sales';
 
 export interface RoleInfo {
   email: string;
@@ -16,6 +22,8 @@ export interface RoleInfo {
   role: EmployeeRole;
   /** owner/operator = admin */
   isAdmin: boolean;
+  /** role === 'sales' — CRM-only layout. */
+  isSales: boolean;
   payRate: number | null;
 }
 
@@ -57,6 +65,7 @@ export async function getRole(): Promise<RoleInfo | null> {
       displayName: (row.display_name as string | null) ?? null,
       role,
       isAdmin: role === 'owner' || role === 'operator',
+      isSales: role === 'sales',
       payRate: row.pay_rate != null ? Number(row.pay_rate) : null,
     };
     cache = { email, info };

@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ActivityTimeline } from '@/components/crm/workspace/ActivityTimeline';
 import { EmailPane } from '@/components/crm/workspace/EmailPane';
@@ -17,6 +17,8 @@ import { addCustomerNote, type CustomerNote } from '@/lib/crm';
 import { type RecordEmailResult } from '@/lib/crmEmail';
 import { Chip } from '@/components/ui';
 import { type ActivityEvent, type ActivityKind, type WorkspaceRecord } from '@/lib/crmWorkspace';
+import { updateLead } from '@/lib/leads';
+import { useRole } from '@/lib/role';
 import { inAppCallingSupported } from '@/lib/voice';
 
 /**
@@ -80,6 +82,7 @@ export function WorkspaceCenter({
   email,
   onNotesChanged,
   onEmailChanged,
+  onRecordChanged,
   onOpenDetail,
 }: {
   record: WorkspaceRecord;
@@ -94,11 +97,19 @@ export function WorkspaceCenter({
   email: RecordEmailResult | null;
   onNotesChanged: () => void;
   onEmailChanged: () => void;
+  /** The record itself changed (a lead's notes) — reload the list too. */
+  onRecordChanged?: () => void;
   /** Narrow layouts: the detail column lives behind this. */
   onOpenDetail?: () => void;
 }) {
   const router = useRouter();
-  const [pane, setPane] = useState<Pane>('conversation');
+  // SALES (2026-10-05): no Conversation pane — texts are admin-only until each
+  // rep has their own number, and the company mailbox is not theirs — so
+  // Activity is where they land. No "open full record" either: the record
+  // screens are outside the CRM a sales login is kept in. Calling stays.
+  const isSales = useRole()?.isSales === true;
+  const [rawPane, setPane] = useState<Pane>('conversation');
+  const pane: Pane = isSales && rawPane === 'conversation' ? 'activity' : rawPane;
   const [channel, setChannel] = useState<Channel>('sms');
   const [emailThreadId, setEmailThreadId] = useState<string | null>(null);
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all');
@@ -141,7 +152,39 @@ export function WorkspaceCenter({
     if (!phone) return;
     const params: Record<string, string> = { to: phone, name: record.name };
     if (record.kind === 'customer') params.customerId = record.id;
+    if (!inAppCallingSupported() && isSales) {
+      // The texting thread a non-calling device falls back to is admin-only.
+      Linking.openURL(`tel:${phone}`).catch(() => {});
+      return;
+    }
     router.push({ pathname: inAppCallingSupported() ? '/call' : '/messages/thread', params } as never);
+  };
+
+  // A sales rep keeps a lead's running notes on the lead itself.
+  const [leadNotes, setLeadNotes] = useState(record.lead?.notes ?? '');
+  const [savingLeadNotes, setSavingLeadNotes] = useState(false);
+  const [leadNotesError, setLeadNotesError] = useState<string | null>(null);
+  const [leadNotesSaved, setLeadNotesSaved] = useState(false);
+  useEffect(() => {
+    setLeadNotes(record.lead?.notes ?? '');
+    setLeadNotesError(null);
+  }, [record.key, record.lead?.notes]);
+  useEffect(() => {
+    setLeadNotesSaved(false);
+  }, [record.key]);
+  const saveLeadNotes = async () => {
+    if (record.kind !== 'lead') return;
+    setSavingLeadNotes(true);
+    setLeadNotesError(null);
+    setLeadNotesSaved(false);
+    const result = await updateLead(record.id, { notes: leadNotes.trim() || null });
+    setSavingLeadNotes(false);
+    if (result.ok) {
+      setLeadNotesSaved(true);
+      onRecordChanged?.();
+    } else {
+      setLeadNotesError(result.message);
+    }
   };
 
   const submitNote = async () => {
@@ -179,12 +222,14 @@ export function WorkspaceCenter({
         style={({ pressed }) => [styles.headerButton, !phone && styles.headerButtonMuted, pressed && styles.pressed]}>
         <Ionicons name="call" size={15} color={phone ? colors.textOnAction : colors.inkSoft} />
       </Pressable>
-      <Pressable
-        onPress={openRecord}
-        accessibilityLabel="Open full record"
-        style={({ pressed }) => [styles.headerButton, styles.headerButtonSecondary, pressed && styles.pressed]}>
-        <Ionicons name="open-outline" size={15} color={colors.ocean} />
-      </Pressable>
+      {isSales ? null : (
+        <Pressable
+          onPress={openRecord}
+          accessibilityLabel="Open full record"
+          style={({ pressed }) => [styles.headerButton, styles.headerButtonSecondary, pressed && styles.pressed]}>
+          <Ionicons name="open-outline" size={15} color={colors.ocean} />
+        </Pressable>
+      )}
       {onOpenDetail ? (
         <Pressable
           onPress={onOpenDetail}
@@ -204,7 +249,9 @@ export function WorkspaceCenter({
           ['activity', `Activity${events.length ? ` ${events.length}` : ''}`],
           ['notes', `Notes${notes.length ? ` ${notes.length}` : ''}`],
         ] as [Pane, string][]
-      ).map(([key, label]) => (
+      )
+        .filter(([key]) => !(isSales && key === 'conversation'))
+        .map(([key, label]) => (
         <Pressable
           key={key}
           onPress={() => setPane(key)}
@@ -337,6 +384,38 @@ export function WorkspaceCenter({
               </Pressable>
             </View>
           </View>
+        ) : isSales ? (
+          <View style={styles.noteBox}>
+            <TextInput
+              value={leadNotes}
+              onChangeText={(v) => {
+                setLeadNotes(v);
+                setLeadNotesSaved(false);
+              }}
+              placeholder="What they said, who to ask for, best time to call…"
+              placeholderTextColor={colors.inkSoft}
+              multiline
+              style={styles.noteInput}
+            />
+            <View style={styles.noteActions}>
+              {leadNotesError ? (
+                <Text style={styles.noteError}>{leadNotesError}</Text>
+              ) : leadNotesSaved ? (
+                <Text style={styles.noteSaved}>Saved ✓</Text>
+              ) : (
+                <View />
+              )}
+              <Pressable
+                onPress={() => void saveLeadNotes()}
+                disabled={savingLeadNotes || leadNotes === (record.lead?.notes ?? '')}
+                style={({ pressed }) => [
+                  styles.noteSave,
+                  (pressed || savingLeadNotes || leadNotes === (record.lead?.notes ?? '')) && styles.pressed,
+                ]}>
+                {savingLeadNotes ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.noteSaveText}>Save notes</Text>}
+              </Pressable>
+            </View>
+          </View>
         ) : (
           <View style={styles.noteCard}>
             <Text style={styles.noteBody}>{record.lead?.notes?.trim() || 'No notes on this lead.'}</Text>
@@ -457,6 +536,7 @@ const styles = StyleSheet.create({
   },
   noteActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   noteError: { color: colors.danger, fontSize: 12, fontWeight: '700' },
+  noteSaved: { color: colors.olive, fontSize: 12, fontWeight: '700' },
   noteSave: { backgroundColor: colors.sun, borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: 6, minWidth: 90, alignItems: 'center' },
   noteSaveText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
   noteCard: { backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.md, gap: spacing.xs },

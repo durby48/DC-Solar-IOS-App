@@ -23,6 +23,7 @@ import { colors } from '@/constants/theme';
 import { reportDiagnostic } from '@/lib/diagnostics';
 import { useNotificationRouting } from '@/lib/notificationRouter';
 import { configureNotificationHandler } from '@/lib/notifications';
+import { useSalesConfinement } from '@/lib/salesConfinement';
 import { prepareVoiceAtLaunch } from '@/lib/voice';
 
 /**
@@ -134,6 +135,9 @@ export default function RootLayout() {
   // whether the app was open, in the background, or not running at all.
   // One router for every case: lib/notificationRouter.ts.
   useNotificationRouting();
+
+  // A sales login lives in the CRM tab; any other path sends it back there.
+  useSalesConfinement();
 
   // Incoming calls: create the PushKit registry and listen for invites from
   // the very first render, not from Home — a VoIP push that wakes a

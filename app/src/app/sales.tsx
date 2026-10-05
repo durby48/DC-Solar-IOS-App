@@ -332,6 +332,7 @@ function statusTone(status: string) {
   if (status === 'won') return { backgroundColor: colors.mintSoft };
   if (status === 'lost') return { backgroundColor: colors.coralSoft };
   if (status === 'estimating') return { backgroundColor: colors.amberSoft };
+  if (status === 'interested') return { backgroundColor: colors.violetSoft };
   return { backgroundColor: colors.skySoft };
 }
 

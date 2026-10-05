@@ -47,7 +47,9 @@ export default function CrmTab() {
       </View>
     );
   }
-  if (gate.role?.isAdmin) {
+  // Sales (2026-10-05) get the workspace too — narrowed to their own records
+  // by RLS and to their lenses by `CrmWorkspace`. It is their whole app.
+  if (gate.role?.isAdmin || gate.role?.isSales) {
     return (
       <SafeAreaView edges={['top']} style={styles.screen}>
         <View style={styles.screen}>

@@ -21,7 +21,8 @@ import { type Job } from '@/lib/types';
 
 const COMPANY = 'dc-solar';
 
-export type LeadStatus = 'new' | 'contacted' | 'estimating' | 'won' | 'lost';
+/** `interested` (2026-10-05): the sales rep's step between contacted and booking. */
+export type LeadStatus = 'new' | 'contacted' | 'interested' | 'estimating' | 'won' | 'lost';
 
 export interface Lead {
   id: string;
@@ -292,12 +293,19 @@ export async function assignLead(
   return { ok: true };
 }
 
-/** Move a lead along the funnel. A rep may do this on their own leads. */
+/**
+ * Move a lead along the funnel. A rep may do this on their own leads.
+ * `lostReason` is written only with `status: 'lost'` (the sales view's
+ * "Closed out" asks why); omit it to leave the column alone.
+ */
 export async function setLeadStatus(
   leadId: string,
   status: LeadStatus,
+  lostReason?: string | null,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const { error } = await supabase.from('leads').update({ status }).eq('id', leadId);
+  const patch: { status: LeadStatus; lost_reason?: string | null } = { status };
+  if (status === 'lost' && lostReason !== undefined) patch.lost_reason = lostReason?.trim() || null;
+  const { error } = await supabase.from('leads').update(patch).eq('id', leadId);
   if (error) return { ok: false, message: error.message };
   return { ok: true };
 }

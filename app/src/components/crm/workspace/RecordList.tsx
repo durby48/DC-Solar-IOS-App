@@ -5,7 +5,7 @@ import { FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View } from
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatPhone } from '@/lib/comms';
-import { type RecordKind, type WorkspaceRecord } from '@/lib/crmWorkspace';
+import { type RecordFilter, type WorkspaceRecord } from '@/lib/crmWorkspace';
 
 /**
  * The left column: everyone, most recent contact first, with search and a
@@ -33,9 +33,15 @@ import { type RecordKind, type WorkspaceRecord } from '@/lib/crmWorkspace';
  * stage-column board. The lens chips and the selected-row accent take the
  * CRM hub's purple; the Jobs chip alone takes the Pipeline's blue when
  * selected, because what it opens is the Pipeline.
+ *
+ * SALES VIEW (2026-10-05, `salesView`): a sales rep's lenses are All ·
+ * Prospects (leads nobody has contacted) · Leads (contacted onward) ·
+ * Customers · Tasks; no Jobs lens. The add button reads "New prospect" and an
+ * account button (sign out, security) sits beside it, because a sales login
+ * has no Menu tab to find those in.
  */
 
-export type ListMode = RecordKind | 'all' | 'tasks' | 'jobs';
+export type ListMode = RecordFilter | 'tasks' | 'jobs';
 
 /**
  * One lens chip. The kit's `Chip` has fixed tones and none of them is the
@@ -100,9 +106,12 @@ export function RecordList({
   tasksPane,
   jobsLens = false,
   jobCount,
+  salesView = false,
+  onAccount,
 }: {
   records: WorkspaceRecord[];
-  total: { customers: number; leads: number };
+  /** `prospects` / `working` split `leads` for the sales view. */
+  total: { customers: number; leads: number; prospects: number; working: number };
   selectedKey: string | null;
   onSelect: (record: WorkspaceRecord) => void;
   search: string;
@@ -118,6 +127,10 @@ export function RecordList({
   jobsLens?: boolean;
   /** Open (not Complete) projects, for the Jobs chip. Omitted until known. */
   jobCount?: number;
+  /** The sales rep's lenses and wording (see the header comment). */
+  salesView?: boolean;
+  /** Shows the account button (sales view: there is no Menu tab). */
+  onAccount?: () => void;
 }) {
   const searchRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList<WorkspaceRecord>>(null);
@@ -224,15 +237,38 @@ export function RecordList({
           <Text style={styles.kbd}>/</Text>
         ) : null}
         {onNewLead ? (
-          <Pressable onPress={onNewLead} hitSlop={6} accessibilityLabel="New lead" style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
+          <Pressable
+            onPress={onNewLead}
+            hitSlop={6}
+            accessibilityLabel={salesView ? 'New prospect' : 'New lead'}
+            style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
             <Ionicons name="person-add-outline" size={15} color={hubColors.crm.fg} />
+          </Pressable>
+        ) : null}
+        {onAccount ? (
+          <Pressable
+            onPress={onAccount}
+            hitSlop={6}
+            accessibilityLabel="Account"
+            style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
+            <Ionicons name="person-circle-outline" size={17} color={hubColors.crm.fg} />
           </Pressable>
         ) : null}
       </View>
       <View style={styles.filters}>
         <LensChip label={`All ${total.customers + total.leads}`} selected={kind === 'all'} onPress={() => onKind('all')} />
-        <LensChip label={`Customers ${total.customers}`} selected={kind === 'customer'} onPress={() => onKind('customer')} />
-        <LensChip label={`Leads ${total.leads}`} selected={kind === 'lead'} onPress={() => onKind('lead')} />
+        {salesView ? (
+          <>
+            <LensChip label={`Prospects ${total.prospects}`} selected={kind === 'prospect'} onPress={() => onKind('prospect')} />
+            <LensChip label={`Leads ${total.working}`} selected={kind === 'working'} onPress={() => onKind('working')} />
+            <LensChip label={`Customers ${total.customers}`} selected={kind === 'customer'} onPress={() => onKind('customer')} />
+          </>
+        ) : (
+          <>
+            <LensChip label={`Customers ${total.customers}`} selected={kind === 'customer'} onPress={() => onKind('customer')} />
+            <LensChip label={`Leads ${total.leads}`} selected={kind === 'lead'} onPress={() => onKind('lead')} />
+          </>
+        )}
         {tasksPane ? (
           <LensChip
             label={taskBadge ? `Tasks ${taskBadge}` : 'Tasks'}

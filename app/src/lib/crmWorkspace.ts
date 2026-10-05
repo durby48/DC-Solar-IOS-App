@@ -81,12 +81,13 @@ export interface WorkspaceRecord {
 export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
   new: 'New lead',
   contacted: 'Contacted',
+  interested: 'Interested',
   estimating: 'Estimating',
   won: 'Won',
   lost: 'Lost',
 };
 
-export const LEAD_STATUS_ORDER: LeadStatus[] = ['new', 'contacted', 'estimating', 'won', 'lost'];
+export const LEAD_STATUS_ORDER: LeadStatus[] = ['new', 'contacted', 'interested', 'estimating', 'won', 'lost'];
 
 function toE164(raw: string | null | undefined): string | null {
   if (!raw) return null;
@@ -219,15 +220,29 @@ export async function fetchWorkspaceRecords(): Promise<WorkspaceRecordsResult> {
 }
 
 /** Case-insensitive match on name, phone digits, email, address, job number. */
+/**
+ * The sales view splits leads in two (2026-10-05): PROSPECTS are leads nobody
+ * has contacted yet (`new`), WORKING leads are everything after that.
+ */
+export type RecordFilter = RecordKind | 'all' | 'prospect' | 'working';
+
+export function isProspect(r: WorkspaceRecord): boolean {
+  return r.kind === 'lead' && (r.lead?.status ?? 'new') === 'new';
+}
+
 export function filterRecords(
   records: WorkspaceRecord[],
   query: string,
-  kind: RecordKind | 'all',
+  kind: RecordFilter,
 ): WorkspaceRecord[] {
   const q = query.trim().toLowerCase();
   const digits = q.replace(/[^0-9]/g, '');
   return records.filter((r) => {
-    if (kind !== 'all' && r.kind !== kind) return false;
+    if (kind === 'prospect') {
+      if (!isProspect(r)) return false;
+    } else if (kind === 'working') {
+      if (r.kind !== 'lead' || isProspect(r)) return false;
+    } else if (kind !== 'all' && r.kind !== kind) return false;
     if (!q) return true;
     if (r.name.toLowerCase().includes(q)) return true;
     if (r.email?.toLowerCase().includes(q)) return true;

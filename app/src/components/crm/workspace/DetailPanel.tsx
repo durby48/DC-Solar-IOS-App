@@ -22,6 +22,21 @@ import { assignLead, setLeadStatus, type LeadStatus } from '@/lib/sales';
 import { type Task } from '@/lib/tasks';
 
 /**
+ * SALES VIEW (2026-10-05). A sales rep works a lead New → Contacted →
+ * Interested, or closes it out with a reason; Estimating and Won are the
+ * admins' side (projections, conversion into a customer and a job). The
+ * four contact fields are what a visit cannot be booked without.
+ */
+const SALES_STATUSES: LeadStatus[] = ['new', 'contacted', 'interested', 'lost'];
+const SALES_STATUS_LABEL: Partial<Record<LeadStatus, string>> = { new: 'Prospect', lost: 'Closed out' };
+const REQUIRED_FIELDS = [
+  ['name', 'Name'],
+  ['phone', 'Phone'],
+  ['email', 'Email'],
+  ['address', 'Address'],
+] as const;
+
+/**
  * The right column: the record's facts, editable in place.
  *
  * Contact, then the CURRENT JOB as a card of its own with its stage as a
@@ -114,7 +129,10 @@ export function DetailPanel({
 }) {
   const router = useRouter();
   const role = useRole();
+  const isSales = role?.isSales === true;
   const [editing, setEditing] = useState(false);
+  const [closingOut, setClosingOut] = useState(false);
+  const [closeReason, setCloseReason] = useState('');
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +147,8 @@ export function DetailPanel({
   useEffect(() => {
     setEditing(false);
     setError(null);
+    setClosingOut(false);
+    setCloseReason('');
     setAddingTask(false);
     setShowDoneTasks(false);
     setAddingAppt(false);
@@ -176,6 +196,20 @@ export function DetailPanel({
     setStatusBusy(null);
     if (result.ok) onChanged();
     else setError(result.message);
+  };
+
+  const closeOut = async () => {
+    if (!record.lead) return;
+    setStatusBusy('lost');
+    const result = await setLeadStatus(record.id, 'lost', closeReason);
+    setStatusBusy(null);
+    if (result.ok) {
+      setClosingOut(false);
+      setCloseReason('');
+      onChanged();
+    } else {
+      setError(result.message);
+    }
   };
 
   const assign = async (email: string | null) => {
@@ -226,7 +260,7 @@ export function DetailPanel({
       <Section
         title="Contact"
         right={
-          editing ? null : (
+          editing || (isSales && record.kind === 'customer') ? null : (
             <Pressable onPress={() => setEditing(true)} hitSlop={6} accessibilityLabel="Edit contact">
               <Ionicons name="create-outline" size={16} color={hubColors.crm.fg} />
             </Pressable>
@@ -267,7 +301,7 @@ export function DetailPanel({
         )}
       </Section>
 
-      {record.kind === 'customer' ? (
+      {record.kind === 'customer' && !isSales ? (
         // The OTHER people on the record — a contractor's PM, office, site
         // lead (2026-09-12). The customer's own phone/email stay above; these
         // are additional. Loads its own rows; admin actions checked inside.
@@ -279,25 +313,74 @@ export function DetailPanel({
       {record.kind === 'lead' && record.lead ? (
         <Section title="Lead">
           <View style={styles.statusRow}>
-            {LEAD_STATUS_ORDER.map((s) => {
+            {(isSales ? SALES_STATUSES : LEAD_STATUS_ORDER).map((s) => {
               const active = record.lead?.status === s;
               return (
                 <Pressable
                   key={s}
-                  onPress={() => void moveLead(s)}
+                  onPress={() => {
+                    if (isSales && s === 'lost' && !active) setClosingOut(true);
+                    else void moveLead(s);
+                  }}
                   disabled={statusBusy !== null}
                   style={({ pressed }) => [styles.statusChip, active && styles.statusChipActive, pressed && styles.pressed]}>
                   {statusBusy === s ? (
                     <ActivityIndicator size="small" color={colors.ink} />
                   ) : (
-                    <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>{LEAD_STATUS_LABEL[s]}</Text>
+                    <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>
+                      {(isSales ? SALES_STATUS_LABEL[s] : undefined) ?? LEAD_STATUS_LABEL[s]}
+                    </Text>
                   )}
                 </Pressable>
               );
             })}
           </View>
+          {closingOut ? (
+            <View style={styles.form}>
+              <TextInput
+                value={closeReason}
+                onChangeText={setCloseReason}
+                placeholder="Why? (not interested, has a service company, wrong number…)"
+                placeholderTextColor={colors.inkSoft}
+                style={styles.input}
+                autoFocus
+              />
+              <View style={styles.formButtons}>
+                <Pressable onPress={() => setClosingOut(false)} style={({ pressed }) => [styles.cancel, pressed && styles.pressed]}>
+                  <Text style={styles.cancelText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => void closeOut()}
+                  disabled={statusBusy !== null}
+                  style={({ pressed }) => [styles.save, (pressed || statusBusy !== null) && styles.pressed]}>
+                  {statusBusy === 'lost' ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.saveText}>Close out</Text>}
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+          {isSales ? (
+            <View style={styles.required}>
+              {REQUIRED_FIELDS.map(([key, label]) => {
+                const has = Boolean(record[key]?.trim());
+                return (
+                  <View key={key} style={styles.requiredItem}>
+                    <Ionicons name={has ? 'checkmark-circle' : 'ellipse-outline'} size={14} color={has ? colors.olive : colors.inkSoft} />
+                    <Text style={[styles.requiredText, !has && styles.factMuted]}>{label}</Text>
+                  </View>
+                );
+              })}
+              <Text style={[styles.requiredVerdict, REQUIRED_FIELDS.every(([key]) => Boolean(record[key]?.trim())) && styles.requiredReady]}>
+                {REQUIRED_FIELDS.every(([key]) => Boolean(record[key]?.trim())) ? 'Ready to book' : 'Needs all four to book a visit'}
+              </Text>
+            </View>
+          ) : null}
           <Fact label="Source" value={record.lead.source} />
-          <Fact label="Estimated value" value={record.lead.estimated_value != null ? money(record.lead.estimated_value) : null} />
+          {isSales ? null : (
+            <Fact label="Estimated value" value={record.lead.estimated_value != null ? money(record.lead.estimated_value) : null} />
+          )}
+          {isSales ? (
+            <Fact label="Assigned to" value={repName ?? 'You'} />
+          ) : (
           <View style={styles.fact}>
             <Text style={styles.factLabel}>Assigned to</Text>
             <Pressable onPress={() => setRepOpen((v) => !v)} style={styles.repButton}>
@@ -320,7 +403,10 @@ export function DetailPanel({
               </View>
             ) : null}
           </View>
-          {record.lead.lost_reason ? <Fact label="Lost because" value={record.lead.lost_reason} /> : null}
+          )}
+          {record.lead.lost_reason ? (
+            <Fact label={isSales ? 'Closed out because' : 'Lost because'} value={record.lead.lost_reason} />
+          ) : null}
           {record.lead.sms_opt_in_at ? (
             <Fact label="SMS consent" value={`Opted in ${shortDate(record.lead.sms_opt_in_at)} · ${record.lead.sms_opt_in_source?.split('@')[0] ?? 'form'}`} />
           ) : null}
@@ -328,7 +414,7 @@ export function DetailPanel({
         </Section>
       ) : null}
 
-      {record.kind === 'customer' && currentJob ? (
+      {isSales ? null : record.kind === 'customer' && currentJob ? (
         <CurrentJobCard
           job={currentJob}
           crew={crew.map((a) => a.name.split(' ')[0] ?? a.name)}
@@ -351,7 +437,7 @@ export function DetailPanel({
         </Section>
       ) : null}
 
-      {record.kind === 'customer' && hasMoney && summary ? (
+      {!isSales && record.kind === 'customer' && hasMoney && summary ? (
         <Section title="Money">
           <View style={styles.moneyRow}>
             <View style={styles.moneyCell}>
@@ -441,7 +527,7 @@ export function DetailPanel({
         {showDoneTasks ? doneTasks.slice(0, 10).map((t) => <TaskItem key={t.id} task={t} reps={reps} onChanged={onTasksChanged} />) : null}
       </Section>
 
-      {record.kind === 'customer' && currentJob ? (
+      {!isSales && record.kind === 'customer' && currentJob ? (
         <Section
           title={otherJobs.length ? `Other jobs · ${otherJobs.length}` : 'Jobs'}
           right={
@@ -485,7 +571,7 @@ export function DetailPanel({
         </Section>
       ) : null}
 
-      {record.kind === 'customer' ? (
+      {record.kind === 'customer' && !isSales ? (
         <Section
           title={`Files${docs.length + documents.length ? ` · ${docs.length + documents.length}` : ''}`}
           right={
@@ -556,6 +642,11 @@ const styles = StyleSheet.create({
   save: { backgroundColor: colors.sun, paddingHorizontal: spacing.lg, paddingVertical: 6, borderRadius: radii.pill, minWidth: 70, alignItems: 'center' },
   saveText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
   statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  required: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+  requiredItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  requiredText: { color: colors.ink, fontSize: 12, fontWeight: '700' },
+  requiredVerdict: { color: colors.inkSoft, fontSize: 12, fontWeight: '700', width: '100%' },
+  requiredReady: { color: colors.olive },
   statusChip: { paddingHorizontal: spacing.sm + 2, paddingVertical: 5, borderRadius: radii.pill, backgroundColor: colors.canvas, borderWidth: 1, borderColor: colors.line },
   statusChipActive: { backgroundColor: colors.olive, borderColor: colors.olive },
   statusChipText: { color: colors.inkSoft, fontSize: 12, fontWeight: '700' },

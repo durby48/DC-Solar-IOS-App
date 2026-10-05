@@ -33,17 +33,19 @@ import { useRole } from '@/lib/role';
 export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   new: 'New',
   contacted: 'Contacted',
+  interested: 'Interested',
   estimating: 'Projection',
   won: 'Won',
   lost: 'Lost',
 };
 
-export const LEAD_STATUS_ORDER: LeadStatus[] = ['new', 'contacted', 'estimating', 'won', 'lost'];
+export const LEAD_STATUS_ORDER: LeadStatus[] = ['new', 'contacted', 'interested', 'estimating', 'won', 'lost'];
 
 export function leadStatusTone(status: LeadStatus): { bg: string; fg: string } {
   if (status === 'won') return { bg: colors.mintSoft, fg: colors.mintDeep };
   if (status === 'lost') return { bg: colors.coralSoft, fg: colors.coralDeep };
   if (status === 'estimating') return { bg: colors.amberSoft, fg: colors.amber };
+  if (status === 'interested') return { bg: colors.violetSoft, fg: colors.violet };
   if (status === 'contacted') return { bg: colors.tealSoft, fg: colors.teal };
   return { bg: colors.skySoft, fg: colors.ocean };
 }

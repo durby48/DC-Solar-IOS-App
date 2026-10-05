@@ -1,7 +1,9 @@
 # Test accounts (for checking the app as a non-admin)
 
 **CREATED**: viewer `test-crew@dcsolarkc.com` 2026-08-18, operator
-`test-operator@dcsolarkc.com` 2026-08-25. Credentials live in
+`test-operator@dcsolarkc.com` 2026-08-25, sales `test-sales@dcsolarkc.com`
+2026-10-05 (auth user made in the dashboard, auto-confirmed; employees row
+`ZZ Test Sales`, role `sales`, `is_test` true). Credentials live in
 `secrets/test-accounts.txt` on Carson's PC (never in this repo). The operator
 account is an ADMIN (`is_company_admin()` covers owner + operator) and therefore
 sees all money — that is what it is for. Verified by a
@@ -68,8 +70,8 @@ commit;
 ## Removing it
 
 ```sql
-delete from auth.users where email in ('test-crew@dcsolarkc.com', 'test-operator@dcsolarkc.com');
-delete from public.employees where email in ('test-crew@dcsolarkc.com', 'test-operator@dcsolarkc.com');
+delete from auth.users where email in ('test-crew@dcsolarkc.com', 'test-operator@dcsolarkc.com', 'test-sales@dcsolarkc.com');
+delete from public.employees where email in ('test-crew@dcsolarkc.com', 'test-operator@dcsolarkc.com', 'test-sales@dcsolarkc.com');
 ```
 
 Both roster rows are named so they sort last in the app's people pickers
