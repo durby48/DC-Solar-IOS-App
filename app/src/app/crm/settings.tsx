@@ -33,6 +33,7 @@ import {
   type StaffProfile,
 } from '@/lib/comms';
 import { BillingSettingsCard } from '@/components/crm/BillingSettingsCard';
+import { PhoneNumbersCard } from '@/components/crm/PhoneNumbersCard';
 import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
@@ -761,6 +762,9 @@ export default function MessagingSettingsScreen() {
             {status.message}
           </Text>
         ) : null}
+
+        {/* ---- Phone numbers (B3, 2026-10-05) ----------------------------- */}
+        <PhoneNumbersCard />
 
         {/* ---- Billing (B2, 2026-10-05) ---------------------------------- */}
         <BillingSettingsCard />

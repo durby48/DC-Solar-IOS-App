@@ -19,6 +19,7 @@ import { Chip } from '@/components/ui';
 import { type ActivityEvent, type ActivityKind, type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { updateLead } from '@/lib/leads';
 import { useRole } from '@/lib/role';
+import { supabase } from '@/lib/supabase';
 import { inAppCallingSupported } from '@/lib/voice';
 
 /**
@@ -103,14 +104,37 @@ export function WorkspaceCenter({
   onOpenDetail?: () => void;
 }) {
   const router = useRouter();
-  // SALES (2026-10-05): no Conversation pane — texts are admin-only until each
-  // rep has their own number, and the company mailbox is not theirs — so
-  // Activity is where they land. No "open full record" either: the record
-  // screens are outside the CRM a sales login is kept in. Calling stays.
+  // SALES (2026-10-05). Texts and calls, from the rep's own number (B3): the
+  // Conversation pane is theirs, SMS only — the company mailbox is not. No
+  // "open full record": the record screens are outside the CRM a sales login
+  // is kept in.
   const isSales = useRole()?.isSales === true;
-  const [rawPane, setPane] = useState<Pane>('conversation');
-  const pane: Pane = isSales && rawPane === 'conversation' ? 'activity' : rawPane;
-  const [channel, setChannel] = useState<Channel>('sms');
+  const [pane, setPane] = useState<Pane>('conversation');
+  const [rawChannel, setChannel] = useState<Channel>('sms');
+  const channel: Channel = isSales ? 'sms' : rawChannel;
+
+  // A BOOKED lead's texts file under the customer record the booking made
+  // (inbound and outbound both prefer a customer with that number), so its
+  // conversation is that customer's thread — the rep can read it
+  // (msg_sales_select); the record itself stays hidden from them until paid.
+  const bookedJobId = record.kind === 'lead' ? (record.lead?.converted_job_id ?? null) : null;
+  const [bookedCustomerId, setBookedCustomerId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setBookedCustomerId(null);
+    if (!bookedJobId) return;
+    void supabase
+      .from('jobs')
+      .select('customer_id')
+      .eq('id', bookedJobId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setBookedCustomerId((data as { customer_id?: string | null } | null)?.customer_id ?? null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bookedJobId]);
   const [emailThreadId, setEmailThreadId] = useState<string | null>(null);
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all');
 
@@ -249,9 +273,7 @@ export function WorkspaceCenter({
           ['activity', `Activity${events.length ? ` ${events.length}` : ''}`],
           ['notes', `Notes${notes.length ? ` ${notes.length}` : ''}`],
         ] as [Pane, string][]
-      )
-        .filter(([key]) => !(isSales && key === 'conversation'))
-        .map(([key, label]) => (
+      ).map(([key, label]) => (
         <Pressable
           key={key}
           onPress={() => setPane(key)}
@@ -259,7 +281,7 @@ export function WorkspaceCenter({
           <Text style={[styles.tabText, pane === key && styles.tabTextActive]}>{label}</Text>
         </Pressable>
       ))}
-      {pane === 'conversation' ? (
+      {pane === 'conversation' && !isSales ? (
         <View style={styles.channelSwitch}>
           <Pressable
             onPress={() => setChannel('sms')}
@@ -308,7 +330,9 @@ export function WorkspaceCenter({
           target={
             record.kind === 'customer'
               ? { customerId: record.id, phone }
-              : { leadId: record.id, phone }
+              : bookedCustomerId
+                ? { customerId: bookedCustomerId, leadId: record.id, phone }
+                : { leadId: record.id, phone }
           }
           name={record.name}
           smsReady={smsReady && Boolean(phone)}

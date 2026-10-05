@@ -163,7 +163,11 @@ Deno.serve(async (req) => {
     }
     const admin = createClient(supabaseUrl, serviceKey);
 
-    // --- caller must be a company admin ------------------------------------
+    // --- caller must be a company admin, or a sales rep on their own record --
+    // Sales (2026-10-05, B3): a rep texts the leads and customers that are
+    // theirs — checked below once the destination is known — from their own
+    // number (voice_routes). Never a bare number, a contact, or someone else's
+    // record.
     const jwt = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
     if (!jwt) return fail(401, 'unauthorized', 'Missing Authorization header.');
     const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
@@ -175,7 +179,8 @@ Deno.serve(async (req) => {
       .eq('email', callerEmail)
       .maybeSingle();
     const role = (employee as { role?: string } | null)?.role;
-    if (role !== 'owner' && role !== 'operator') return fail(403, 'forbidden', 'Admins only.');
+    const isSales = role === 'sales';
+    if (role !== 'owner' && role !== 'operator' && !isSales) return fail(403, 'forbidden', 'Admins and sales only.');
 
     // --- input --------------------------------------------------------------
     let payload: Payload;
@@ -186,6 +191,43 @@ Deno.serve(async (req) => {
     }
 
     let body = typeof payload.body === 'string' ? payload.body.trim() : '';
+
+    if (isSales) {
+      if (payload.contactId || (!payload.customerId && !payload.leadId)) {
+        return fail(403, 'forbidden', 'Sales can text their own leads and customers only.');
+      }
+      if (payload.to) return fail(403, 'forbidden', 'Sales texts go to the number on the record.');
+      if (payload.leadId) {
+        const { data: own } = await admin.from('leads').select('assigned_to').eq('id', payload.leadId).maybeSingle();
+        if ((own as { assigned_to?: string | null } | null)?.assigned_to?.toLowerCase() !== callerEmail) {
+          return fail(403, 'forbidden', 'That lead is not assigned to you.');
+        }
+      } else if (payload.customerId) {
+        // Theirs = they sold one of its jobs, or it came from their lead —
+        // the same rule as is_sales_rep_for_customer() in the database.
+        const { data: sold } = await admin
+          .from('jobs')
+          .select('id')
+          .eq('customer_id', payload.customerId)
+          .ilike('sales_rep_email', callerEmail)
+          .limit(1);
+        let mine = (sold ?? []).length > 0;
+        if (!mine) {
+          const { data: jobRows } = await admin.from('jobs').select('id').eq('customer_id', payload.customerId);
+          const jobIds = ((jobRows ?? []) as { id: string }[]).map((j) => j.id);
+          if (jobIds.length > 0) {
+            const { data: fromLead } = await admin
+              .from('leads')
+              .select('id')
+              .in('converted_job_id', jobIds)
+              .ilike('assigned_to', callerEmail)
+              .limit(1);
+            mine = (fromLead ?? []).length > 0;
+          }
+        }
+        if (!mine) return fail(403, 'forbidden', 'That customer is not yours.');
+      }
+    }
 
     // A template key with no body: use the stored text, but only when it has no
     // unresolved merge fields. Filling {{address}} needs the client's context;
@@ -250,7 +292,18 @@ Deno.serve(async (req) => {
     const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
     const authToken = Deno.env.get('TWILIO_AUTH_TOKEN');
     const messagingServiceSid = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
-    const fromNumber = Deno.env.get('TWILIO_FROM_NUMBER') ?? settings.from_number ?? null;
+    // The caller's own number when they have one (a rep's line in
+    // voice_routes, B3); otherwise the company number. A rep's number must be
+    // in the Messaging Service's sender pool, so the A2P campaign covers it.
+    const { data: myRoute } = await admin
+      .from('voice_routes')
+      .select('number_e164')
+      .eq('company', COMPANY)
+      .ilike('assigned_to', callerEmail)
+      .order('created_at')
+      .limit(1);
+    const myNumber = ((myRoute ?? []) as { number_e164: string }[])[0]?.number_e164 ?? null;
+    const fromNumber = myNumber ?? Deno.env.get('TWILIO_FROM_NUMBER') ?? settings.from_number ?? null;
     const webhookSecret = Deno.env.get('TWILIO_WEBHOOK_SECRET');
     const publicBase = Deno.env.get('TWILIO_PUBLIC_BASE');
 
@@ -441,7 +494,9 @@ Deno.serve(async (req) => {
     // --- Twilio -------------------------------------------------------------
     const form = new URLSearchParams();
     if (messagingServiceSid) form.set('MessagingServiceSid', messagingServiceSid);
-    else form.set('From', fromNumber!);
+    // With a Messaging Service, From pins the sender to that pool number (the
+    // rep's own line); without one it is the only sender there is.
+    if (myNumber || !messagingServiceSid) form.set('From', fromNumber!);
     form.set('To', to);
     // Twilio wants Body OR MediaUrl; an empty Body alongside pictures is fine
     // to omit and wrong to send as "".

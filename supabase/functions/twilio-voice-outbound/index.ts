@@ -166,12 +166,27 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const sentBy = (profile as { email?: string } | null)?.email ?? `client:${identity}`;
 
+    // Caller ID (B3, 2026-10-05): the caller's own line from voice_routes —
+    // a sales rep's number — else the company number.
+    let callerId = fromNumber;
+    if (profile) {
+      const { data: route } = await admin
+        .from('voice_routes')
+        .select('number_e164')
+        .eq('company', COMPANY)
+        .ilike('assigned_to', sentBy)
+        .order('created_at')
+        .limit(1);
+      callerId = ((route ?? []) as { number_e164: string }[])[0]?.number_e164 ?? fromNumber;
+    }
+
     // Who they are calling — trust the ids the app passed only if the number
     // matches, else file by number like twilio-call does.
     const claimedCustomer = form.get('customerId');
     const claimedContact = form.get('contactId');
     let customerId: string | null = null;
     let contactId: string | null = null;
+    let leadId: string | null = null;
     let who = to;
 
     if (claimedCustomer && UUID_RE.test(claimedCustomer)) {
@@ -226,6 +241,24 @@ Deno.serve(async (req) => {
         }
       }
     }
+    // A prospect or lead (B3): file the call on the lead, so the rep who
+    // works it sees it in their history. Their own lead first when the same
+    // number is on more than one.
+    if (!customerId && !contactId) {
+      const { data: lrows } = await admin
+        .from('leads')
+        .select('id, name, assigned_to')
+        .eq('company', COMPANY)
+        .eq('phone_e164', to)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      const leads = (lrows ?? []) as { id: string; name: string | null; assigned_to: string | null }[];
+      const lmatch = leads.find((l) => (l.assigned_to ?? '').toLowerCase() === sentBy.toLowerCase()) ?? leads[0];
+      if (lmatch) {
+        leadId = lmatch.id;
+        who = lmatch.name ?? who;
+      }
+    }
 
     // --- log it, keyed on the parent (client) CallSid --------------------------
     if (callSid) {
@@ -233,9 +266,10 @@ Deno.serve(async (req) => {
         company: COMPANY,
         customer_id: customerId,
         contact_id: contactId,
+        lead_id: leadId,
         channel: 'call',
         direction: 'out',
-        from_number: fromNumber,
+        from_number: callerId,
         to_number: to,
         body: `In-app call to ${who}`,
         // 'ringing' until the far leg's answered callback says in-progress.
@@ -265,7 +299,7 @@ Deno.serve(async (req) => {
     const statusUrl = `${base}/twilio-status?k=${encodeURIComponent(webhookSecret)}`;
     const twiml =
       `<Response>` +
-      `<Dial callerId="${esc(fromNumber)}" answerOnBridge="${native ? 'false' : 'true'}" ringTone="us" timeout="30">` +
+      `<Dial callerId="${esc(callerId)}" answerOnBridge="${native ? 'false' : 'true'}" ringTone="us" timeout="30">` +
       `<Number statusCallback="${esc(statusUrl)}" statusCallbackEvent="answered completed" statusCallbackMethod="POST">${esc(to)}</Number>` +
       `</Dial>` +
       `</Response>`;

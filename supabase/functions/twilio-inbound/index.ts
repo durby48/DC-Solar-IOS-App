@@ -334,10 +334,29 @@ Deno.serve(async (req) => {
       media_urls: mediaUrls.length > 0 ? mediaUrls : null,
     });
 
-    // --- tell the admins -----------------------------------------------------
+    // --- tell the admins — or the rep whose number it is ----------------------
     // Reuses the existing notify function rather than re-implementing Expo
     // push fan-out; it already knows who the admins are and which devices
     // they carry.
+    //
+    // B3 (2026-10-05): a text to a SALES REP's own number (voice_routes) goes
+    // to that rep only — it is their conversation. Admins still see every
+    // thread in the CRM. The main number and any unrouted number tell the
+    // admins, as before.
+    let repEmail: string | null = null;
+    {
+      const { data: route } = await admin
+        .from('voice_routes')
+        .select('assigned_to')
+        .eq('company', COMPANY)
+        .eq('number_e164', to)
+        .maybeSingle();
+      const assigned = (route as { assigned_to?: string | null } | null)?.assigned_to ?? null;
+      if (assigned) {
+        const { data: emp } = await admin.from('employees').select('role').ilike('email', assigned).maybeSingle();
+        if ((emp as { role?: string } | null)?.role === 'sales') repEmail = assigned.toLowerCase();
+      }
+    }
     const notifySecret = Deno.env.get('NOTIFY_SECRET');
     if (notifySecret) {
       const preview = bodyText.length > 140 ? `${bodyText.slice(0, 139)}…` : bodyText;
@@ -348,7 +367,7 @@ Deno.serve(async (req) => {
           body: JSON.stringify({
             title: `💬 ${who}`,
             body: preview || (mediaUrls.length > 0 ? 'Sent a photo' : 'New text message'),
-            audience: 'admins',
+            ...(repEmail ? { emails: [repEmail] } : { audience: 'admins' }),
             // The notification target (see notify/index.ts): the EXACT thread
             // this message was filed under, by id — a tap opens it, not the
             // inbox. Strangers carry only the number.

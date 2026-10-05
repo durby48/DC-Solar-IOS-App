@@ -848,6 +848,11 @@ export async function signMediaPaths(messages: CommsMessage[]): Promise<CommsMes
  * Pass a customer id, or `null` plus the stranger's number for an unclaimed
  * thread. Silent about failures on purpose: this fires when a screen opens,
  * and a failed read-stamp must never interrupt reading the conversation.
+ *
+ * Through `mark_messages_read()` (2026-10-05, B3) rather than a direct UPDATE:
+ * a sales rep may mark their own threads read but may not update `messages`
+ * at all, so the function re-checks the same visibility rule for them; for
+ * admins it does exactly what the UPDATE here used to.
  */
 export async function markThreadRead(
   customerId: string | null,
@@ -856,20 +861,11 @@ export async function markThreadRead(
   try {
     const email = await currentEmail();
     if (!email) return { ok: false, message: 'Sign in first.' };
-    let query = supabase
-      .from('messages')
-      .update({ read_at: new Date().toISOString(), read_by: email })
-      .eq('company', COMPANY)
-      .eq('direction', 'in')
-      .is('read_at', null);
-    if (customerId) {
-      query = query.eq('customer_id', customerId);
-    } else if (phone) {
-      query = query.is('customer_id', null).eq('from_number', phone);
-    } else {
-      return { ok: false, message: 'Nothing to mark read.' };
-    }
-    const { error } = await query;
+    if (!customerId && !phone) return { ok: false, message: 'Nothing to mark read.' };
+    const { error } = await supabase.rpc('mark_messages_read', {
+      p_customer_id: customerId,
+      p_phone: customerId ? null : phone,
+    });
     if (error) return { ok: false, message: error.message || 'Could not mark the thread read.' };
     return { ok: true };
   } catch {
