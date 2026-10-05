@@ -66,15 +66,19 @@ export default function JobDetailScreen() {
   // Bumped when the user logs/edits own hours so the hours card refreshes.
   const [hoursRefresh, setHoursRefresh] = useState(0);
   const role = useRole();
-  // Service visits (2026-10-05): the crew's "Visit done" button.
+  // Service visits (2026-10-05): the crew's "Visit done" button. Since B2 it
+  // also charges the customer's annual plan; `doneNotice` says how that went.
   const [doneBusy, setDoneBusy] = useState(false);
   const [doneError, setDoneError] = useState<string | null>(null);
+  const [doneNotice, setDoneNotice] = useState<string | null>(null);
   const markDone = async () => {
     if (!job) return;
     setDoneBusy(true);
     setDoneError(null);
+    setDoneNotice(null);
     const result = await markServiceVisitDone(job.id);
     if (result.ok) {
+      setDoneNotice(result.message);
       setJob(await fetchJob(job.id));
     } else {
       setDoneError(result.message);
@@ -216,6 +220,11 @@ export default function JobDetailScreen() {
                     loading={doneBusy}
                     disabled={doneBusy}
                   />
+                ) : null}
+                {doneNotice ? (
+                  <AppText variant="caption" color={colors.textSecondary}>
+                    {doneNotice}
+                  </AppText>
                 ) : null}
                 {doneError ? (
                   <AppText variant="caption" color={colors.danger}>

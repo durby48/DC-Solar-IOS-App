@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Clipboard from 'expo-clipboard';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Chip } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
@@ -10,6 +11,7 @@ import {
   cancelServiceVisit,
   fetchServiceVisit,
   formatVisitTime,
+  requestCardLink,
   rescheduleServiceVisit,
   SERVICE_KINDS,
   type ServiceKind,
@@ -22,8 +24,9 @@ import {
  * (`lib/serviceVisits.ts`); these are the forms around it.
  *
  *   BookVisitForm — type (Cleaning / Inspection), date, optional time, note.
- *   VisitCard     — what was booked, Paid / Not paid, and Reschedule /
- *                   Cancel while it is still open.
+ *   VisitCard     — what was booked, Paid / Not paid, card on file, the
+ *                   Stripe card link (Copy / Text / Email from the rep's own
+ *                   phone or mail app), and Reschedule / Cancel while open.
  *
  * Dates use the same quick chips + YYYY-MM-DD box as the appointment
  * composer next door, so the panel has one way of entering a date.
@@ -140,7 +143,16 @@ export function BookVisitForm({
 
 type Mode = 'view' | 'reschedule' | 'cancel';
 
-export function VisitCard({ jobId, onChanged }: { jobId: string; onChanged: () => void }) {
+export function VisitCard({
+  jobId,
+  onChanged,
+  person,
+}: {
+  jobId: string;
+  onChanged: () => void;
+  /** Who the card link is for — prefills the text / email. */
+  person?: { name: string; phone: string | null; email: string | null };
+}) {
   const [visit, setVisit] = useState<ServiceVisit | null | 'loading'>('loading');
   const [mode, setMode] = useState<Mode>('view');
   const [date, setDate] = useState('');
@@ -148,6 +160,9 @@ export function VisitCard({ jobId, onChanged }: { jobId: string; onChanged: () =
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [link, setLink] = useState<string | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     setVisit(await fetchServiceVisit(jobId));
@@ -157,6 +172,8 @@ export function VisitCard({ jobId, onChanged }: { jobId: string; onChanged: () =
     setVisit('loading');
     setMode('view');
     setError(null);
+    setLink(null);
+    setCopied(false);
     void load();
   }, [load]);
 
@@ -169,6 +186,20 @@ export function VisitCard({ jobId, onChanged }: { jobId: string; onChanged: () =
 
   const open = visit.stage === 'Service Call';
   const when = [visit.date ? formatShortDate(visit.date) : 'No date', formatVisitTime(visit.startTime)].filter(Boolean).join(' · ');
+
+  const firstName = (person?.name ?? '').split(' ')[0] || 'there';
+  const linkMessage = (url: string) =>
+    `Hi ${firstName}, this is DC Solar. Here is a secure Stripe link to save the card for your annual solar service plan — it is only charged after your visit: ${url}`;
+
+  const makeLink = async () => {
+    setLinkBusy(true);
+    setError(null);
+    setCopied(false);
+    const result = await requestCardLink(jobId);
+    setLinkBusy(false);
+    if (result.ok) setLink(result.url);
+    else setError(result.message);
+  };
 
   const run = async (fn: () => Promise<{ ok: true } | { ok: false; message: string }>) => {
     setBusy(true);
@@ -196,6 +227,70 @@ export function VisitCard({ jobId, onChanged }: { jobId: string; onChanged: () =
         </View>
       </View>
       <Text style={styles.meta}>{open ? when : `Done ${visit.completedOn ? formatShortDate(visit.completedOn) : ''}`}</Text>
+      {!visit.paidAt ? (
+        <View style={styles.cardRow}>
+          <Ionicons
+            name={visit.cardOnFileAt ? 'card' : 'card-outline'}
+            size={14}
+            color={visit.cardOnFileAt ? colors.olive : colors.inkSoft}
+          />
+          <Text style={[styles.meta, visit.cardOnFileAt ? styles.cardOk : null]}>
+            {visit.cardOnFileAt ? `Card on file ✓ ${visit.cardLabel ?? ''}` : 'No card on file yet'}
+          </Text>
+        </View>
+      ) : null}
+      {visit.paymentIssue && !visit.paidAt ? <Text style={styles.error}>{visit.paymentIssue}</Text> : null}
+      {!visit.paidAt && (open || !visit.cardOnFileAt) ? (
+        link ? (
+          <View style={styles.linkBox}>
+            <Text style={styles.linkText} numberOfLines={2} selectable>
+              {link}
+            </Text>
+            <View style={styles.chips}>
+              <Chip
+                label={copied ? 'Copied' : 'Copy'}
+                tone="ocean"
+                icon="copy-outline"
+                onPress={() => {
+                  void Clipboard.setStringAsync(link).then(() => setCopied(true));
+                }}
+              />
+              {person?.phone ? (
+                <Chip
+                  label="Text"
+                  tone="ocean"
+                  icon="chatbubble-outline"
+                  onPress={() => {
+                    const sep = Platform.OS === 'ios' ? '&' : '?';
+                    Linking.openURL(`sms:${person.phone}${sep}body=${encodeURIComponent(linkMessage(link))}`).catch(() => {});
+                  }}
+                />
+              ) : null}
+              {person?.email ? (
+                <Chip
+                  label="Email"
+                  tone="ocean"
+                  icon="mail-outline"
+                  onPress={() => {
+                    const subject = encodeURIComponent('Your DC Solar service plan — save your card');
+                    Linking.openURL(`mailto:${person.email}?subject=${subject}&body=${encodeURIComponent(linkMessage(link))}`).catch(() => {});
+                  }}
+                />
+              ) : null}
+            </View>
+            <Text style={styles.meta}>Good for 24 hours. The card shows here once they save it.</Text>
+          </View>
+        ) : (
+          <View style={styles.chips}>
+            <Chip
+              label={linkBusy ? 'Making link…' : visit.cardOnFileAt ? 'New card link' : 'Card link'}
+              tone="olive"
+              icon="card-outline"
+              onPress={linkBusy ? undefined : () => void makeLink()}
+            />
+          </View>
+        )
+      ) : null}
 
       {open && mode === 'view' ? (
         <View style={styles.chips}>
@@ -280,6 +375,10 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   tag: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radii.pill },
+  cardRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  cardOk: { color: colors.olive },
+  linkBox: { gap: spacing.xs, padding: spacing.sm, borderRadius: radii.sm, backgroundColor: colors.surface },
+  linkText: { color: colors.ocean, fontSize: 12, fontWeight: '600' },
   tagPaid: { backgroundColor: colors.mintSoft },
   tagUnpaid: { backgroundColor: colors.coralSoft },
   tagText: { fontSize: 11, fontWeight: '800' },

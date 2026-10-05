@@ -32,6 +32,7 @@ import {
   type MessageTemplate,
   type StaffProfile,
 } from '@/lib/comms';
+import { BillingSettingsCard } from '@/components/crm/BillingSettingsCard';
 import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
@@ -760,6 +761,9 @@ export default function MessagingSettingsScreen() {
             {status.message}
           </Text>
         ) : null}
+
+        {/* ---- Billing (B2, 2026-10-05) ---------------------------------- */}
+        <BillingSettingsCard />
       </ScrollView>
     </>
   );

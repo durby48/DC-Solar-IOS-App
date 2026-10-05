@@ -393,7 +393,11 @@ export function DetailPanel({
             </View>
           ) : null}
           {record.lead.converted_job_id && VISIT_DRIVEN_STATUSES.includes(record.lead.status) ? (
-            <VisitCard jobId={record.lead.converted_job_id} onChanged={onChanged} />
+            <VisitCard
+              jobId={record.lead.converted_job_id}
+              onChanged={onChanged}
+              person={{ name: record.name, phone: record.phoneE164 ?? record.phone, email: record.email }}
+            />
           ) : BOOKABLE.includes(record.lead.status) ? (
             booking ? (
               <BookVisitForm

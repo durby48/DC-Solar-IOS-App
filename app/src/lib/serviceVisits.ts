@@ -10,8 +10,14 @@
  * file only calls them and reads the result. Nothing throws: every call
  * returns `{ ok }`, with the database's own refusal message on failure
  * ("name, phone, email and address are all needed…").
+ *
+ * PAYMENT (B2): the card link and "Visit done" go through edge functions
+ * (`stripe-card-link`, `service-visit-done`) because they talk to Stripe; the
+ * card itself only ever lives at Stripe. A visit's card status is read from
+ * its customer record (brand, last 4, payment problem).
  */
 
+import { readFunctionError } from '@/lib/artwork';
 import { supabase } from '@/lib/supabase';
 
 export type ServiceKind = 'Cleaning' | 'Inspection';
@@ -31,7 +37,17 @@ export interface ServiceVisit {
   startTime: string | null;
   completedOn: string | null;
   paidAt: string | null;
+  /** The customer record the booking made. */
+  customerId: string | null;
+  /** When they saved a card on the Stripe page; null = no card yet. */
+  cardOnFileAt: string | null;
+  /** e.g. "Visa •4242" */
+  cardLabel: string | null;
+  /** Why the last charge did not go through, for admins and the rep. */
+  paymentIssue: string | null;
 }
+
+export type DoneCharge = 'paid' | 'covered' | 'failed' | 'no_card' | 'not_configured';
 
 function failure(error: { message?: string } | null | undefined, fallback: string): VisitResult {
   return { ok: false, message: error?.message || fallback };
@@ -91,12 +107,33 @@ export async function cancelServiceVisit(jobId: string, reason?: string | null):
   }
 }
 
-export async function markServiceVisitDone(jobId: string): Promise<VisitResult> {
+/**
+ * The crew's "Visit done" (B2): marks it done, then charges the annual plan
+ * on the saved card. `message` says what happened to the money — the visit is
+ * done either way once `ok` is true.
+ */
+export async function markServiceVisitDone(
+  jobId: string,
+): Promise<{ ok: true; charge: DoneCharge; message: string } | { ok: false; message: string }> {
   try {
-    const { error } = await supabase.rpc('mark_service_visit_done', { p_job_id: jobId });
-    return error ? failure(error, 'Could not mark the visit done.') : { ok: true };
+    const { data, error } = await supabase.functions.invoke('service-visit-done', { body: { job_id: jobId } });
+    if (error) return { ok: false, message: (await readFunctionError(error)) ?? 'Could not mark the visit done.' };
+    const row = data as { charge?: DoneCharge; message?: string };
+    return { ok: true, charge: row.charge ?? 'no_card', message: row.message ?? 'Visit done.' };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not mark the visit done.' };
+  }
+}
+
+/** A Stripe page where the customer saves their card (24 hours). */
+export async function requestCardLink(jobId: string): Promise<{ ok: true; url: string } | { ok: false; message: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('stripe-card-link', { body: { job_id: jobId } });
+    if (error) return { ok: false, message: (await readFunctionError(error)) ?? 'Could not make the card link.' };
+    const url = (data as { url?: string })?.url;
+    return url ? { ok: true, url } : { ok: false, message: 'Stripe did not return a link.' };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not make the card link.' };
   }
 }
 
@@ -110,7 +147,7 @@ export async function fetchServiceVisit(jobId: string): Promise<ServiceVisit | n
     const [{ data: job, error }, { data: dates }] = await Promise.all([
       supabase
         .from('jobs')
-        .select('id, job_number, job_type, stage, scheduled_for, completed_on, service_paid_at')
+        .select('id, job_number, job_type, stage, scheduled_for, completed_on, service_paid_at, customer_id')
         .eq('id', jobId)
         .maybeSingle(),
       supabase
@@ -129,7 +166,22 @@ export async function fetchServiceVisit(jobId: string): Promise<ServiceVisit | n
       scheduled_for: string | null;
       completed_on: string | null;
       service_paid_at: string | null;
+      customer_id: string | null;
     };
+    const { data: cust } = j.customer_id
+      ? await supabase
+          .from('customers')
+          .select('card_on_file_at, card_brand, card_last4, payment_issue')
+          .eq('id', j.customer_id)
+          .maybeSingle()
+      : { data: null };
+    const c = cust as {
+      card_on_file_at: string | null;
+      card_brand: string | null;
+      card_last4: string | null;
+      payment_issue: string | null;
+    } | null;
+    const brand = c?.card_brand ? c.card_brand.charAt(0).toUpperCase() + c.card_brand.slice(1) : 'Card';
     const first = (dates as { work_date: string; start_time: string | null }[] | null)?.[0] ?? null;
     return {
       jobId: j.id,
@@ -140,6 +192,10 @@ export async function fetchServiceVisit(jobId: string): Promise<ServiceVisit | n
       startTime: first?.start_time ?? null,
       completedOn: j.completed_on,
       paidAt: j.service_paid_at,
+      customerId: j.customer_id,
+      cardOnFileAt: c?.card_on_file_at ?? null,
+      cardLabel: c?.card_last4 ? `${brand} •${c.card_last4}` : null,
+      paymentIssue: c?.payment_issue ?? null,
     };
   } catch {
     return null;
