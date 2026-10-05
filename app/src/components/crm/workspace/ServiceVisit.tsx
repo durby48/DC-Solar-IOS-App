@@ -1,10 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Chip } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
+import { sendSms } from '@/lib/comms';
 import { formatShortDate } from '@/lib/dates';
 import {
   bookServiceVisit,
@@ -163,6 +164,8 @@ export function VisitCard({
   const [link, setLink] = useState<string | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [texting, setTexting] = useState(false);
+  const [texted, setTexted] = useState(false);
 
   const load = useCallback(async () => {
     setVisit(await fetchServiceVisit(jobId));
@@ -174,6 +177,7 @@ export function VisitCard({
     setError(null);
     setLink(null);
     setCopied(false);
+    setTexted(false);
     void load();
   }, [load]);
 
@@ -255,15 +259,26 @@ export function VisitCard({
                   void Clipboard.setStringAsync(link).then(() => setCopied(true));
                 }}
               />
-              {person?.phone ? (
+              {visit.customerId ? (
+                // Texted by DC Solar (Twilio) from the rep's own DC Solar
+                // number — never the rep's personal phone (2026-10-05).
                 <Chip
-                  label="Text"
+                  label={texting ? 'Texting…' : texted ? 'Texted ✓' : 'Text it'}
                   tone="ocean"
                   icon="chatbubble-outline"
-                  onPress={() => {
-                    const sep = Platform.OS === 'ios' ? '&' : '?';
-                    Linking.openURL(`sms:${person.phone}${sep}body=${encodeURIComponent(linkMessage(link))}`).catch(() => {});
-                  }}
+                  onPress={
+                    texting || texted
+                      ? undefined
+                      : () => {
+                          setTexting(true);
+                          setError(null);
+                          void sendSms({ customerId: visit.customerId!, body: linkMessage(link) }).then((result) => {
+                            setTexting(false);
+                            if (result.ok) setTexted(true);
+                            else setError(result.message);
+                          });
+                        }
+                  }
                 />
               ) : null}
               {person?.email ? (

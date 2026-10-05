@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ActivityTimeline } from '@/components/crm/workspace/ActivityTimeline';
 import { EmailPane } from '@/components/crm/workspace/EmailPane';
@@ -177,12 +177,20 @@ export function WorkspaceCenter({
     const params: Record<string, string> = { to: phone, name: record.name };
     if (record.kind === 'customer') params.customerId = record.id;
     if (!inAppCallingSupported() && isSales) {
-      // The texting thread a non-calling device falls back to is admin-only.
-      Linking.openURL(`tel:${phone}`).catch(() => {});
+      // Never the phone's own dialer for a rep: that would show the customer
+      // their PERSONAL number. In-app calling (their DC Solar number) needs
+      // the DC Solar app or a secure page; a dev address over plain http on a
+      // phone is neither.
+      setCallNotice('Calls from your DC Solar number work in the DC Solar app or at app.dcsolarkc.com.');
       return;
     }
     router.push({ pathname: inAppCallingSupported() ? '/call' : '/messages/thread', params } as never);
   };
+
+  const [callNotice, setCallNotice] = useState<string | null>(null);
+  useEffect(() => {
+    setCallNotice(null);
+  }, [record.key]);
 
   // A sales rep keeps a lead's running notes on the lead itself.
   const [leadNotes, setLeadNotes] = useState(record.lead?.notes ?? '');
@@ -264,6 +272,8 @@ export function WorkspaceCenter({
       ) : null}
     </View>
   );
+
+  const callBanner = callNotice ? <Text style={styles.callNotice}>{callNotice}</Text> : null;
 
   const tabs = (
     <View style={styles.tabs}>
@@ -474,6 +484,7 @@ export function WorkspaceCenter({
   return (
     <View style={styles.column}>
       {header}
+      {callBanner}
       {tabs}
       <View style={styles.paneBody}>{body}</View>
     </View>
@@ -560,6 +571,7 @@ const styles = StyleSheet.create({
   },
   noteActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   noteError: { color: colors.danger, fontSize: 12, fontWeight: '700' },
+  callNotice: { color: colors.coralDeep, fontSize: 12, fontWeight: '700', paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
   noteSaved: { color: colors.olive, fontSize: 12, fontWeight: '700' },
   noteSave: { backgroundColor: colors.sun, borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: 6, minWidth: 90, alignItems: 'center' },
   noteSaveText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
