@@ -10,6 +10,7 @@ import { AppText } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatPhone } from '@/lib/comms';
 import { fetchWorkspaceRecords, type WorkspaceRecord } from '@/lib/crmWorkspace';
+import { takePresetDial } from '@/lib/dialHandoff';
 import { useRoleGate } from '@/lib/role';
 import { fetchMyLine } from '@/lib/salesHome';
 import { inAppCallingSupported } from '@/lib/voice';
@@ -54,6 +55,18 @@ function SalesKeypad() {
   const [line, setLine] = useState<string | null>(null);
   const [records, setRecords] = useState<WorkspaceRecord[]>([]);
   const [note, setNote] = useState<string | null>(null);
+
+  // Recent calls opens an unknown caller here with the number filled in, to
+  // call back or save as a prospect (2026-10-07, lib/dialHandoff.ts).
+  useFocusEffect(
+    useCallback(() => {
+      const preset = takePresetDial();
+      if (!preset) return;
+      const digits = preset.replace(/[^0-9]/g, '');
+      setValue(digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits);
+      setNote(null);
+    }, []),
+  );
 
   useFocusEffect(
     useCallback(() => {

@@ -52,6 +52,10 @@ export interface Customer {
   plan_tier?: string | null;
   plan_price_cents?: number | null;
   contract_ends_on?: string | null;
+  /** Map position from the address (geocode-addresses, 2026-10-07). */
+  lat?: number | null;
+  lng?: number | null;
+  geocode_status?: string | null;
 }
 
 /** A scheduled work day for a job (mirrors the job_schedule_dates table). */

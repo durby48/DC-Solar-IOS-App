@@ -31,6 +31,8 @@ const ALLOWED = [
   '/do-not-disturb',
   '/notifications',
   '/calling-check',
+  '/lead-map',
+  '/recents',
   '/call',
   '/security',
   '/set-password',

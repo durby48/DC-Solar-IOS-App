@@ -18,13 +18,14 @@ import { signOutAndLeave } from '@/lib/signOut';
  *
  *   Me        · name, email, their DC Solar number (read-only — an admin
  *               assigns numbers)
- *   Selling   · My commission, Plans & prices, Saved texts
- *   Phone     · Do not disturb, Notifications, Calling check
+ *   Selling   · My commission, Lead map, Plans & prices, Saved texts
+ *   Phone     · Recent calls, Do not disturb, Notifications, Calling check
  *   Account   · Security (password, two-step sign-in), Sign out
  *   App       · version / check for an update, Delete my account
  *
- * Each row opens its own screen (`/commission`, `/plans`, `/saved-texts`,
- * `/do-not-disturb`, `/notifications`, `/calling-check` — 2026-10-06). Admins
+ * Each row opens its own screen (`/commission`, `/lead-map`, `/plans`,
+ * `/saved-texts`, `/recents`, `/do-not-disturb`, `/notifications`,
+ * `/calling-check` — 2026-10-06/07). Admins
  * and crew have the Menu tab; this one is hidden from them and sends them
  * there.
  */
@@ -82,6 +83,7 @@ function SalesSettings() {
         <SectionHeader title="Selling" accent={hubColors.crm.fg} />
         <Card padded={false}>
           <ListRow icon="cash" title="My commission" subtitle="This pay period and past ones" onPress={() => go('/commission')} divider />
+          <ListRow icon="map" title="Lead map" subtitle="Your prospects and customers, pinned" onPress={() => go('/lead-map')} divider />
           <ListRow icon="pricetags" title="Plans & prices" subtitle="Bronze, Silver, Gold — what to quote" onPress={() => go('/plans')} divider />
           <ListRow icon="chatbubble-ellipses" title="Saved texts" subtitle="Ready-made texts, and your own" onPress={() => go('/saved-texts')} />
         </Card>
@@ -90,6 +92,7 @@ function SalesSettings() {
       <View>
         <SectionHeader title="Phone" accent={hubColors.crm.fg} />
         <Card padded={false}>
+          <ListRow icon="time" title="Recent calls" subtitle="Calls to and from your number" onPress={() => go('/recents')} divider />
           <ListRow
             icon="moon"
             title="Do not disturb"

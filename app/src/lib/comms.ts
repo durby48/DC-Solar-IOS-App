@@ -1199,6 +1199,8 @@ export interface RecentCall {
   id: string;
   customerId: string | null;
   contactId: string | null;
+  /** The lead a call is filed on (2026-10-07: a rep's Recent calls opens it). */
+  leadId: string | null;
   /** The far end, E.164 where we know it. */
   phone: string | null;
   /** Name when the row is filed under someone, else the formatted number. */
@@ -1258,13 +1260,23 @@ export async function fetchRecents(limit = 300): Promise<RecentCall[]> {
 
     const customerIds = new Set<string>();
     const contactIds = new Set<string>();
+    const leadIds = new Set<string>();
     for (const call of calls) {
       if (call.customer_id) customerIds.add(call.customer_id);
       else if (call.contact_id) contactIds.add(call.contact_id);
+      else if (call.lead_id) leadIds.add(call.lead_id);
     }
     const customerNames = new Map<string, string>();
     const contactNames = new Map<string, string>();
+    const leadNames = new Map<string, string>();
     await Promise.all([
+      (async () => {
+        if (leadIds.size === 0) return;
+        const { data: rows } = await supabase.from('leads').select('id, name').in('id', [...leadIds]);
+        for (const row of (rows ?? []) as Record<string, unknown>[]) {
+          leadNames.set(String(row.id), (row.name as string) ?? 'Lead');
+        }
+      })(),
       (async () => {
         if (customerIds.size === 0) return;
         const { data: rows } = await supabase
@@ -1290,7 +1302,7 @@ export async function fetchRecents(limit = 300): Promise<RecentCall[]> {
     const rows: RecentCall[] = [];
     for (const call of calls) {
       const phone = counterpartNumber(call);
-      const partyKey = call.customer_id ?? call.contact_id ?? phone ?? call.id;
+      const partyKey = call.customer_id ?? call.contact_id ?? call.lead_id ?? phone ?? call.id;
       const previous = rows[rows.length - 1];
       const missed = CALL_MISSED.has(call.status);
       // Fold onto the row above only when it is the same party AND the same
@@ -1298,7 +1310,7 @@ export async function fetchRecents(limit = 300): Promise<RecentCall[]> {
       // followed by one that connected are two different facts.
       if (
         previous &&
-        (previous.customerId ?? previous.contactId ?? previous.phone ?? previous.id) === partyKey &&
+        (previous.customerId ?? previous.contactId ?? previous.leadId ?? previous.phone ?? previous.id) === partyKey &&
         previous.missed === missed
       ) {
         previous.count += 1;
@@ -1308,10 +1320,12 @@ export async function fetchRecents(limit = 300): Promise<RecentCall[]> {
         id: call.id,
         customerId: call.customer_id,
         contactId: call.customer_id ? null : call.contact_id,
+        leadId: call.customer_id || call.contact_id ? null : call.lead_id,
         phone,
         displayName:
           (call.customer_id ? customerNames.get(call.customer_id) : undefined) ??
           (call.contact_id ? contactNames.get(call.contact_id) : undefined) ??
+          (call.lead_id ? leadNames.get(call.lead_id) : undefined) ??
           (phone ? formatPhone(phone) : 'Unknown number'),
         direction: call.direction,
         status: call.status,
