@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
@@ -45,7 +45,6 @@ import { fetchLeadAppointments, type LeadAppointment } from '@/lib/leadAppointme
 import { fetchEmployeeOptions } from '@/lib/myhours';
 import { fetchJobsBoardData, type JobsBoardData } from '@/lib/pipeline';
 import { useRole } from '@/lib/role';
-import { signOutAndLeave, type Resettable } from '@/lib/signOut';
 import { isCompanyJob, stageOrDefault } from '@/lib/stages';
 import { countDueNow, fetchTasks, type Task } from '@/lib/tasks';
 import { type Job } from '@/lib/types';
@@ -82,11 +81,17 @@ import { type Job } from '@/lib/types';
  * whole app. RLS already narrows every read to their own prospects, leads and
  * customers (2026-10-05_sales_role.sql); here the lenses become Prospects /
  * Leads / Customers / Tasks, "add" opens `ProspectForm` in place of the
- * centre column, the Jobs lens and email are not loaded, and an account
- * button (sign out, security) stands in for the Menu tab they do not have.
+ * centre column, and the Jobs lens and email are not loaded.
+ *
+ * DEEP LINKS (2026-10-06, Sales Home). `/workspace?open=lead:<id>` selects a
+ * record, `?lens=prospect|working|customer|tasks` picks a list lens, and
+ * `?new=prospect` opens the prospect form — how the Sales Home's cards land
+ * in the right place. Each is applied once, then cleared from the URL so a
+ * later visit to the tab starts where the rep left it.
  */
 
 const WIDE = 1100;
+const LENSES: ListMode[] = ['all', 'customer', 'lead', 'prospect', 'working', 'tasks', 'jobs'];
 const MEDIUM = 760;
 
 /**
@@ -127,7 +132,6 @@ export function CrmWorkspace() {
   const role = useRole();
   const isSales = role?.isSales === true;
   const router = useRouter();
-  const navigation = useNavigation();
   const { width } = useWindowDimensions();
   const layout: 'wide' | 'medium' | 'narrow' = width >= WIDE ? 'wide' : width >= MEDIUM ? 'medium' : 'narrow';
 
@@ -140,7 +144,6 @@ export function CrmWorkspace() {
   const restored = useRef(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [addingProspect, setAddingProspect] = useState(false);
-  const [accountOpen, setAccountOpen] = useState(false);
 
   const [settings, setSettings] = useState<CommsSettings | null>(null);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
@@ -256,6 +259,28 @@ export function CrmWorkspace() {
   useEffect(() => {
     if (restored.current) remember({ selectedKey, kind });
   }, [selectedKey, kind]);
+
+  // Deep links from the Sales Home. Declared after the restore above so a
+  // link wins over the remembered record when both land on the first load.
+  const params = useLocalSearchParams<{ open?: string; lens?: string; new?: string }>();
+  useEffect(() => {
+    if (!params.open && !params.lens && !params.new) return;
+    if (params.open && records.length === 0) return; // wait for the list
+    if (params.new === 'prospect' && isSales) {
+      setAddingProspect(true);
+      setSelectedKey(null);
+    } else if (params.open) {
+      setKind('all');
+      setSelectedKey(params.open);
+      setDetailOpen(false);
+      setAddingProspect(false);
+    } else if (params.lens && LENSES.includes(params.lens as ListMode)) {
+      setKind(params.lens as ListMode);
+      setSelectedKey(null);
+      setAddingProspect(false);
+    }
+    router.setParams({ open: undefined, lens: undefined, new: undefined });
+  }, [params.open, params.lens, params.new, records.length, isSales, router]);
 
   const loadSelected = useCallback(async (record: WorkspaceRecord) => {
     // Same guard as loadEmail: clicking A then B quickly must not land A's
@@ -463,26 +488,6 @@ export function CrmWorkspace() {
     );
   }
 
-  const accountPanel = accountOpen ? (
-    <View style={styles.account}>
-      <Text style={styles.accountName} numberOfLines={1}>
-        {role?.displayName ?? role?.email ?? 'Signed in'}
-      </Text>
-      <View style={styles.accountActions}>
-        <Pressable
-          onPress={() => router.push('/security' as never)}
-          style={({ pressed }) => [styles.accountButton, pressed && styles.pressed]}>
-          <Text style={styles.accountButtonText}>Security</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => void signOutAndLeave(navigation as unknown as Resettable)}
-          style={({ pressed }) => [styles.accountButton, pressed && styles.pressed]}>
-          <Text style={styles.accountButtonText}>Sign out</Text>
-        </Pressable>
-      </View>
-    </View>
-  ) : null;
-
   const list = (
     <RecordList
       records={visible}
@@ -509,7 +514,6 @@ export function CrmWorkspace() {
       jobsLens={!isSales}
       jobCount={openJobCount}
       salesView={isSales}
-      onAccount={isSales ? () => setAccountOpen((v) => !v) : undefined}
       tasksPane={
         <TasksPane
           tasks={tasks}
@@ -670,12 +674,7 @@ export function CrmWorkspace() {
     </View>
   );
 
-  const listColumn = (
-    <>
-      {accountPanel}
-      {list}
-    </>
-  );
+  const listColumn = list;
 
   if (layout === 'wide') {
     return (
@@ -744,27 +743,6 @@ export function CrmWorkspace() {
 const styles = StyleSheet.create({
   row: { flex: 1, flexDirection: 'row', backgroundColor: colors.surfaceAlt },
   single: { flex: 1, backgroundColor: colors.surfaceAlt },
-  // The sales view's account panel, above the list.
-  account: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.line,
-  },
-  accountName: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: '700' },
-  accountActions: { flexDirection: 'row', gap: spacing.xs },
-  accountButton: {
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 5,
-    borderRadius: radii.pill,
-    backgroundColor: hubColors.crm.bg,
-  },
-  accountButtonText: { color: hubColors.crm.deep, fontSize: 12, fontWeight: '800' },
   col: { height: '100%' },
   listCol: { width: 320, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.line },
   listColMedium: { width: 280, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.line },

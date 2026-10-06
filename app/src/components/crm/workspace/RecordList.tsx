@@ -36,9 +36,8 @@ import { type RecordFilter, type WorkspaceRecord } from '@/lib/crmWorkspace';
  *
  * SALES VIEW (2026-10-05, `salesView`): a sales rep's lenses are All ·
  * Prospects (leads nobody has contacted) · Leads (contacted onward) ·
- * Customers · Tasks; no Jobs lens. The add button reads "New prospect" and an
- * account button (sign out, security) sits beside it, because a sales login
- * has no Menu tab to find those in.
+ * Customers · Tasks; no Jobs lens. The add button reads "New prospect". Sign
+ * out and Security live on the Sales Home (2026-10-06), not here.
  */
 
 export type ListMode = RecordFilter | 'tasks' | 'jobs';
@@ -107,7 +106,6 @@ export function RecordList({
   jobsLens = false,
   jobCount,
   salesView = false,
-  onAccount,
 }: {
   records: WorkspaceRecord[];
   /** `prospects` / `working` split `leads` for the sales view. */
@@ -129,8 +127,6 @@ export function RecordList({
   jobCount?: number;
   /** The sales rep's lenses and wording (see the header comment). */
   salesView?: boolean;
-  /** Shows the account button (sales view: there is no Menu tab). */
-  onAccount?: () => void;
 }) {
   const searchRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList<WorkspaceRecord>>(null);
@@ -243,15 +239,6 @@ export function RecordList({
             accessibilityLabel={salesView ? 'New prospect' : 'New lead'}
             style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
             <Ionicons name="person-add-outline" size={15} color={hubColors.crm.fg} />
-          </Pressable>
-        ) : null}
-        {onAccount ? (
-          <Pressable
-            onPress={onAccount}
-            hitSlop={6}
-            accessibilityLabel="Account"
-            style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
-            <Ionicons name="person-circle-outline" size={17} color={hubColors.crm.fg} />
           </Pressable>
         ) : null}
       </View>

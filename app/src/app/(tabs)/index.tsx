@@ -12,6 +12,7 @@ import {
 import BuildInfo from '@/components/BuildInfo';
 import { ClockCard } from '@/components/ClockCard';
 import { HomeHeader } from '@/components/HomeHeader';
+import { SalesHome } from '@/components/sales/SalesHome';
 import {
   AnimatedPressable,
   AppText,
@@ -55,6 +56,16 @@ import { resetToLogin, signOutAndLeave } from '@/lib/signOut';
  * not an admin, and the only thing that costs is a lock badge on one tile.
  *
  * The hub list itself lives in `lib/hub.ts`, shared with the Menu tab.
+ *
+ * SALES (2026-10-06, S1). A `sales` login gets `components/sales/SalesHome`
+ * in place of the clock card, today's jobs and the hubs — their number, what
+ * needs attention, today, who to call next, their pipeline — and keeps the
+ * greeting, Account section, delete-account link and build info. Because a
+ * rep's role decides the whole body, the body waits for the role here (the
+ * cached role makes that a beat), so a rep never sees the crew's hubs flash.
+ * Home is also where push and incoming-call registration run, which is why
+ * reps must be able to reach it: before this they were confined to the CRM
+ * and their iPhone never registered for either.
  */
 
 /** Two columns on a phone, five (one per hub) on a desktop browser. */
@@ -66,6 +77,7 @@ export default function HomeScreen() {
   const { width } = useWindowDimensions();
   const gate = useRoleGate();
   const isAdmin = gate.phase === 'ready' && gate.role?.isAdmin === true;
+  const isSales = gate.phase === 'ready' && gate.role?.isSales === true;
 
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -91,6 +103,8 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      // The Sales Home loads its own data; the crew's job reads are not theirs.
+      if (gate.phase !== 'ready' || isSales) return;
       let cancelled = false;
       fetchJobs().then(({ jobs: fetched }) => {
         if (!cancelled) setJobs(fetched);
@@ -115,7 +129,7 @@ export default function HomeScreen() {
       return () => {
         cancelled = true;
       };
-    }, []),
+    }, [gate.phase, isSales]),
   );
 
   /**
@@ -138,13 +152,14 @@ export default function HomeScreen() {
   // Re-run whenever the app comes back to the foreground: the PushKit
   // token and the Twilio binding can both change while it was away.
   useEffect(() => {
-    if (!sessionEmail || !isAdmin) return;
+    // Sales reps too: calls to their own DC Solar number ring them.
+    if (!sessionEmail || !(isAdmin || isSales)) return;
     void registerForIncomingCalls();
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') void registerForIncomingCalls();
     });
     return () => sub.remove();
-  }, [sessionEmail, isAdmin]);
+  }, [sessionEmail, isAdmin, isSales]);
 
   // Shared helper: ends the session (with a timeout) and resets the ROOT
   // stack to the login route. `router.replace('/')` from inside the tabs
@@ -173,62 +188,73 @@ export default function HomeScreen() {
     <Screen padded={false} edges={[]} contentContainerStyle={styles.scroll}>
       <HomeHeader />
 
-      <View style={[styles.body, compact && styles.bodyCompact]}>
-        <ClockCard style={styles.clock} />
+      <View style={[styles.body, compact && styles.bodyCompact, isSales && styles.bodySales]}>
+        {gate.phase === 'loading' ? (
+          <ActivityIndicator color={colors.accentPrimary} style={styles.roleWait} />
+        ) : isSales ? (
+          <SalesHome />
+        ) : (
+          <>
+            <ClockCard style={styles.clock} />
 
-        <FadeInUp index={0}>
-          <Card padded={false} style={styles.todayCard}>
-            <ListRow
-              icon="today"
-              iconColor={hubColors.operations.fg}
-              iconBackground={hubColors.operations.bg}
-              title={
-                todayCount === null
-                  ? 'Today'
-                  : `Today · ${todayCount} ${todayCount === 1 ? 'job' : 'jobs'}`
-              }
-              subtitle="Open the schedule"
-              onPress={() => router.push('/calendar')}
-            />
-          </Card>
-        </FadeInUp>
+            <FadeInUp index={0}>
+              <Card padded={false} style={styles.todayCard}>
+                <ListRow
+                  icon="today"
+                  iconColor={hubColors.operations.fg}
+                  iconBackground={hubColors.operations.bg}
+                  title={
+                    todayCount === null
+                      ? 'Today'
+                      : `Today · ${todayCount} ${todayCount === 1 ? 'job' : 'jobs'}`
+                  }
+                  subtitle="Open the schedule"
+                  onPress={() => router.push('/calendar')}
+                />
+              </Card>
+            </FadeInUp>
 
-        <View style={styles.section}>
-          <SectionHeader title="Hubs" subtitle="Everything in the app, five doors" />
-          <View style={styles.grid}>
-            {HUBS.map((hub, i) => {
-              // Only a CONFIRMED non-admin gets the lock; while the role is
-              // loading the tile is drawn open and the press still explains
-              // (the gate below re-checks at tap time with the same rule).
-              const locked = gate.phase === 'ready' && isLockedFor(hub.gate, isAdmin);
-              return (
-                <FadeInUp
-                  key={hub.key}
-                  index={1 + i}
-                  style={[styles.cell, { width: `${100 / columns}%` }]}>
-                  <Tile
-                    title={hub.title}
-                    subtitle={hub.subtitle}
-                    icon={hub.icon}
-                    tone={hub.key}
-                    compact={compact}
-                    locked={locked}
-                    badge={hub.key === 'crm' ? unread : undefined}
-                    onPress={() => {
-                      if (isLockedFor(hub.gate, isAdmin)) explainAdminOnly();
-                      else router.push(hub.href);
-                    }}
-                    style={styles.tile}
-                  />
-                </FadeInUp>
-              );
-            })}
-          </View>
-        </View>
+            <View style={styles.section}>
+              <SectionHeader title="Hubs" subtitle="Everything in the app, five doors" />
+              <View style={styles.grid}>
+                {HUBS.map((hub, i) => {
+                  // Only a CONFIRMED non-admin gets the lock; while the role is
+                  // loading the tile is drawn open and the press still explains
+                  // (the gate below re-checks at tap time with the same rule).
+                  const locked = gate.phase === 'ready' && isLockedFor(hub.gate, isAdmin);
+                  return (
+                    <FadeInUp
+                      key={hub.key}
+                      index={1 + i}
+                      style={[styles.cell, { width: `${100 / columns}%` }]}>
+                      <Tile
+                        title={hub.title}
+                        subtitle={hub.subtitle}
+                        icon={hub.icon}
+                        tone={hub.key}
+                        compact={compact}
+                        locked={locked}
+                        badge={hub.key === 'crm' ? unread : undefined}
+                        onPress={() => {
+                          if (isLockedFor(hub.gate, isAdmin)) explainAdminOnly();
+                          else router.push(hub.href);
+                        }}
+                        style={styles.tile}
+                      />
+                    </FadeInUp>
+                  );
+                })}
+              </View>
+            </View>
+          </>
+        )}
 
         <View style={styles.section}>
           <SectionHeader title="Account" />
           <Card padded={false}>
+            {isSales ? (
+              <ListRow icon="shield-checkmark" title="Security" subtitle="Password and two-step sign-in" divider onPress={() => router.push('/security' as never)} />
+            ) : null}
             <ListRow
               icon="log-out"
               title="Sign out"
@@ -306,6 +332,15 @@ const styles = StyleSheet.create({
   bodyCompact: {
     gap: spacing.sm + 2,
     paddingHorizontal: spacing.xl,
+  },
+  /** A rep's Home is a column of lists: keep it readable on a wide screen. */
+  bodySales: {
+    width: '100%',
+    maxWidth: 760,
+    alignSelf: 'center',
+  },
+  roleWait: {
+    marginVertical: spacing.xl,
   },
   /** Sits under the header like any other card — no overlap trick any more. */
   clock: {

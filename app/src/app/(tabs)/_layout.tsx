@@ -151,9 +151,10 @@ function useStaffGate() {
  *   Customers  = no longer in the bar (`href: null`) but still routable, so
  *                the CRM hub, `/crm`'s redirect and deep links keep working.
  *
- * SALES (2026-10-05): a `sales` login has only the CRM, so every other tab is
- * `href: null` and the bar itself is hidden. `lib/salesConfinement.ts` moves
- * them off any other path (Home included) onto `/workspace`.
+ * SALES (2026-10-06, S1): a `sales` login gets its own bar — Home (the Sales
+ * Home, `components/sales/SalesHome`) and CRM; Calendar and Phone join it in
+ * S2/S3. Every crew/admin tab is `href: null` for them, and
+ * `lib/salesConfinement.ts` moves them off any path they have no screen on.
  */
 export default function TabsLayout() {
   const gate = useStaffGate();
@@ -195,13 +196,11 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.olive,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: salesOnly
-          ? { display: 'none' }
-          : {
-              backgroundColor: colors.surfaceAlt,
-              borderTopColor: colors.border,
-              height: 62,
-            },
+        tabBarStyle: {
+          backgroundColor: colors.surfaceAlt,
+          borderTopColor: colors.border,
+          height: 62,
+        },
         tabBarLabelStyle: { fontFamily: fonts.bold, fontSize: 11 },
       }}>
       <Tabs.Screen
@@ -209,7 +208,6 @@ export default function TabsLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ focused }) => <TabIcon name="home" focused={focused} />,
-          ...(salesOnly ? { href: null } : {}),
         }}
       />
       <Tabs.Screen

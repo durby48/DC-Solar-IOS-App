@@ -4,13 +4,14 @@ import { useEffect } from 'react';
 import { useRoleGate } from '@/lib/role';
 
 /**
- * Keeps a `sales` login inside the CRM (2026-10-05).
+ * Keeps a `sales` login inside the sales app (2026-10-05; Home added
+ * 2026-10-06, S1).
  *
- * A sales rep's whole app is the CRM tab (`/workspace`). The tab bar hides the
- * other tabs for them, but a URL typed on the web, an old bookmark, a
- * notification tap or a stray link inside a shared screen can still land
- * anywhere — so any path outside the short list below is replaced with
- * `/workspace`.
+ * A sales rep's app is the Sales Home (`/`) and the CRM tab (`/workspace`).
+ * The tab bar hides the other tabs for them, but a URL typed on the web, an
+ * old bookmark, a notification tap or a stray link inside a shared screen can
+ * still land anywhere — so any path outside the short list below is replaced
+ * with `/workspace`.
  *
  * This is about not showing people screens that are not theirs, NOT about
  * security: the database already returns nothing outside their own records
@@ -21,6 +22,8 @@ import { useRoleGate } from '@/lib/role';
 const ALLOWED = ['/workspace', '/call', '/security', '/set-password', '/join', '/card-saved'];
 
 function allowed(pathname: string): boolean {
+  // Home is `/` exactly — a prefix match on "/" would allow everything.
+  if (pathname === '/') return true;
   return ALLOWED.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
