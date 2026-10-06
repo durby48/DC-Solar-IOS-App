@@ -348,6 +348,7 @@ export function WorkspaceCenter({
           smsReady={smsReady && Boolean(phone)}
           optedOut={record.optedOut}
           optedOutAt={record.customer?.sms_opt_out_at ?? null}
+          callFirst={record.kind === 'lead' && record.lead?.call_first === true && !bookedCustomerId}
           jobId={record.currentJob?.id ?? null}
           templates={templates}
           templateVars={templateVars}

@@ -97,6 +97,7 @@ export function Conversation({
   smsReady,
   optedOut = false,
   optedOutAt = null,
+  callFirst = false,
   jobId,
   templates = [],
   templateVars,
@@ -112,6 +113,11 @@ export function Conversation({
   /** They replied STOP. Calling still works; texting is not offered. */
   optedOut?: boolean;
   optedOutAt?: string | null;
+  /**
+   * Imported without text consent (2026-10-07): no composer until a connected
+   * call or they text in. twilio-send-sms refuses it too.
+   */
+  callFirst?: boolean;
   jobId?: string | null;
   /** Saved texts. Omit and the Templates chip does not appear. */
   templates?: MessageTemplate[];
@@ -351,6 +357,13 @@ export function Conversation({
       <Text style={styles.optOutText}>
         They replied STOP{optedOutAt ? ` on ${formatShortDate(optedOutAt.slice(0, 10))}` : ''}. You
         can still call.
+      </Text>
+    </View>
+  ) : callFirst ? (
+    <View style={styles.optOutBanner}>
+      <Ionicons name="call" size={16} color={colors.coralDeep} />
+      <Text style={styles.optOutText}>
+        No text consent — call first. Texting unlocks after a connected call, or once they text you.
       </Text>
     </View>
   ) : !smsReady ? (

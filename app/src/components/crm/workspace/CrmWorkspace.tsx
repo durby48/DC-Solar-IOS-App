@@ -35,6 +35,7 @@ import {
   fetchWorkspaceRecords,
   filterRecords,
   isProspect,
+  isUnassigned,
   type ActivityEvent,
   type StageChange,
   type WorkspaceRecord,
@@ -43,6 +44,7 @@ import { fetchRecordEmailThreads, type RecordEmailResult } from '@/lib/crmEmail'
 import { fetchCustomerDocuments, type CustomerDocument } from '@/lib/customers';
 import { fetchLeadAppointments, type LeadAppointment } from '@/lib/leadAppointments';
 import { fetchEmployeeOptions } from '@/lib/myhours';
+import { assignLeads } from '@/lib/leadImport';
 import { fetchJobsBoardData, type JobsBoardData } from '@/lib/pipeline';
 import { useRole } from '@/lib/role';
 import { isCompanyJob, stageOrDefault } from '@/lib/stages';
@@ -91,7 +93,7 @@ import { type Job } from '@/lib/types';
  */
 
 const WIDE = 1100;
-const LENSES: ListMode[] = ['all', 'customer', 'lead', 'prospect', 'working', 'tasks', 'jobs'];
+const LENSES: ListMode[] = ['all', 'customer', 'lead', 'prospect', 'working', 'unassigned', 'tasks', 'jobs'];
 const MEDIUM = 760;
 
 /**
@@ -111,7 +113,7 @@ function remembered(): { selectedKey: string | null; kind: ListMode } {
     return {
       selectedKey: typeof parsed.selectedKey === 'string' ? parsed.selectedKey : null,
       kind:
-        kind === 'customer' || kind === 'lead' || kind === 'prospect' || kind === 'working' || kind === 'tasks' || kind === 'jobs'
+        kind === 'customer' || kind === 'lead' || kind === 'prospect' || kind === 'working' || kind === 'unassigned' || kind === 'tasks' || kind === 'jobs'
           ? kind
           : 'all',
     };
@@ -216,7 +218,7 @@ export function CrmWorkspace() {
   // A lens a sales rep does not have (remembered from an admin session on the
   // same browser) falls back to All.
   useEffect(() => {
-    if (isSales && (kind === 'jobs' || kind === 'lead')) setKind('all');
+    if (isSales && (kind === 'jobs' || kind === 'lead' || kind === 'unassigned')) setKind('all');
   }, [isSales, kind]);
 
   // First open of the Jobs lens (including a remembered one).
@@ -453,6 +455,30 @@ export function CrmWorkspace() {
     }),
     [roleRecords],
   );
+  const unassignedCount = useMemo(() => roleRecords.filter(isUnassigned).length, [roleRecords]);
+
+  // Bulk assign (2026-10-07): the first N of the Unassigned list, as shown
+  // (search applies), to one person — one push for the batch.
+  const [assignCount, setAssignCount] = useState<number | 'all'>(25);
+  const [assignTo, setAssignTo] = useState<string | null>(null);
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [assignNote, setAssignNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const runAssign = useCallback(async () => {
+    if (!assignTo) {
+      setAssignNote({ ok: false, text: 'Pick who gets them.' });
+      return;
+    }
+    const pool = visible.filter(isUnassigned);
+    const ids = (assignCount === 'all' ? pool : pool.slice(0, assignCount)).map((r) => r.id);
+    if (ids.length === 0) return;
+    setAssignBusy(true);
+    setAssignNote(null);
+    const result = await assignLeads(ids, assignTo);
+    setAssignBusy(false);
+    const who = reps.find((r) => r.email === assignTo)?.name ?? assignTo;
+    setAssignNote(result.ok ? { ok: true, text: `Gave ${result.count} to ${who}.` } : { ok: false, text: result.message });
+    if (result.ok) void loadList();
+  }, [assignTo, assignCount, visible, reps, loadList]);
 
   if (role && !role.isAdmin && !role.isSales) {
     return (
@@ -514,6 +540,51 @@ export function CrmWorkspace() {
       jobsLens={!isSales}
       jobCount={openJobCount}
       salesView={isSales}
+      onImport={role?.isAdmin ? () => router.push('/crm/import' as never) : undefined}
+      unassignedCount={role?.isAdmin ? unassignedCount : undefined}
+      listHeader={
+        kind === 'unassigned' && role?.isAdmin && unassignedCount > 0 ? (
+          <View style={styles.assignBar}>
+            <Text style={styles.assignLabel}>Give the first</Text>
+            <View style={styles.assignChips}>
+              {([10, 25, 50, 'all'] as const).map((n) => (
+                <Pressable
+                  key={String(n)}
+                  onPress={() => setAssignCount(n)}
+                  style={[styles.assignChip, assignCount === n && styles.assignChipOn]}>
+                  <Text style={[styles.assignChipText, assignCount === n && styles.assignChipTextOn]}>
+                    {n === 'all' ? 'All' : n}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.assignLabel}>to</Text>
+            <View style={styles.assignChips}>
+              {reps.map((r) => (
+                <Pressable
+                  key={r.email}
+                  onPress={() => setAssignTo(r.email)}
+                  style={[styles.assignChip, assignTo === r.email && styles.assignChipOn]}>
+                  <Text style={[styles.assignChipText, assignTo === r.email && styles.assignChipTextOn]}>{r.name}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable
+              onPress={() => void runAssign()}
+              disabled={assignBusy}
+              style={({ pressed }) => [styles.assignGo, (pressed || assignBusy) && styles.pressed]}>
+              {assignBusy ? (
+                <ActivityIndicator size="small" color={colors.textOnAction} />
+              ) : (
+                <Text style={styles.assignGoText}>Assign</Text>
+              )}
+            </Pressable>
+            {assignNote ? (
+              <Text style={[styles.assignNote, !assignNote.ok && styles.assignNoteBad]}>{assignNote.text}</Text>
+            ) : null}
+          </View>
+        ) : null
+      }
       tasksPane={
         <TasksPane
           tasks={tasks}
@@ -743,6 +814,33 @@ export function CrmWorkspace() {
 const styles = StyleSheet.create({
   row: { flex: 1, flexDirection: 'row', backgroundColor: colors.surfaceAlt },
   single: { flex: 1, backgroundColor: colors.surfaceAlt },
+  // The Unassigned lens's bulk-assign bar (2026-10-07).
+  assignBar: {
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  assignLabel: { color: colors.inkSoft, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
+  assignChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  assignChip: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radii.pill, backgroundColor: hubColors.crm.bg },
+  assignChipOn: { backgroundColor: hubColors.crm.fg },
+  assignChipText: { color: hubColors.crm.deep, fontSize: 12, fontWeight: '700' },
+  assignChipTextOn: { color: colors.white },
+  assignGo: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.sun,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 6,
+    minWidth: 90,
+    alignItems: 'center',
+  },
+  assignGoText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
+  assignNote: { color: colors.olive, fontSize: 12, fontWeight: '700' },
+  assignNoteBad: { color: colors.danger },
   col: { height: '100%' },
   listCol: { width: 320, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.line },
   listColMedium: { width: 280, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.line },

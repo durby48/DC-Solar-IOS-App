@@ -493,6 +493,19 @@ Deno.serve(async (req) => {
     };
   }
 
+  // A batch of pool leads handed to a rep at once (2026-10-07, assign_leads):
+  // one push for the whole batch, not one per lead.
+  if (!message && table === 'lead_assignment_batches' && op === 'INSERT' && typeof record?.rep_email === 'string') {
+    const n = Number(record.lead_count ?? 0);
+    message = {
+      title: `🧲 ${n} new prospect${n === 1 ? '' : 's'} for you`,
+      body: 'They are in your CRM under Prospects. Imported leads are call-first.',
+      emails: [String(record.rep_email).toLowerCase()],
+      audience: 'admins',
+      pref: 'new_prospects',
+    };
+  }
+
   // A lead assigned to someone (2026-10-06): a new lead created for them, or a
   // reassignment. The trigger (leads_assigned_notify_*) already skips
   // self-assignment, e.g. a rep adding their own prospect.

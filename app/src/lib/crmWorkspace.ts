@@ -263,7 +263,12 @@ export async function fetchWorkspaceRecords(): Promise<WorkspaceRecordsResult> {
  * The sales view splits leads in two (2026-10-05): PROSPECTS are leads nobody
  * has contacted yet (`new`), WORKING leads are everything after that.
  */
-export type RecordFilter = RecordKind | 'all' | 'prospect' | 'working';
+export type RecordFilter = RecordKind | 'all' | 'prospect' | 'working' | 'unassigned';
+
+/** The admins' pool (2026-10-07): open leads nobody has been given yet. */
+export function isUnassigned(r: WorkspaceRecord): boolean {
+  return r.kind === 'lead' && !r.lead?.assigned_to && r.lead?.status !== 'lost' && r.lead?.status !== 'won';
+}
 
 export function isProspect(r: WorkspaceRecord): boolean {
   return r.kind === 'lead' && (r.lead?.status ?? 'new') === 'new';
@@ -281,6 +286,8 @@ export function filterRecords(
       if (!isProspect(r)) return false;
     } else if (kind === 'working') {
       if (r.kind !== 'lead' || isProspect(r)) return false;
+    } else if (kind === 'unassigned') {
+      if (!isUnassigned(r)) return false;
     } else if (kind !== 'all' && r.kind !== kind) return false;
     if (!q) return true;
     if (r.name.toLowerCase().includes(q)) return true;

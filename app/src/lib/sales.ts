@@ -58,6 +58,10 @@ export interface Lead {
   /** Affirmative SMS opt-in evidence carried from the source (Phase 9). Null = none recorded. */
   sms_opt_in_at?: string | null;
   sms_opt_in_source?: string | null;
+  /** Imported without text consent: texting refused until a connected call or an inbound text (2026-10-07). */
+  call_first?: boolean;
+  /** The import batch (its source tag) this lead came from. */
+  import_batch?: string | null;
 }
 
 export interface SalesRep {
@@ -136,7 +140,7 @@ export async function fetchSalesData(): Promise<SalesData | null> {
       supabase
         .from('leads')
         .select(
-          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source',
+          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch',
         )
         .eq('company', COMPANY)
         .order('created_at', { ascending: false }),
@@ -285,7 +289,7 @@ export async function fetchOpenLeads(): Promise<Lead[]> {
     const { data, error } = await supabase
       .from('leads')
       .select(
-        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source',
+        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch',
       )
       .eq('company', COMPANY)
       .or('converted_job_id.is.null,status.in.(scheduled,visit_done)')

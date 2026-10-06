@@ -106,6 +106,9 @@ export function RecordList({
   jobsLens = false,
   jobCount,
   salesView = false,
+  onImport,
+  unassignedCount,
+  listHeader,
 }: {
   records: WorkspaceRecord[];
   /** `prospects` / `working` split `leads` for the sales view. */
@@ -127,6 +130,12 @@ export function RecordList({
   jobCount?: number;
   /** The sales rep's lenses and wording (see the header comment). */
   salesView?: boolean;
+  /** Admins: the Import leads button beside New lead (2026-10-07). */
+  onImport?: () => void;
+  /** Admins: leads nobody has been given — shows the Unassigned lens. */
+  unassignedCount?: number;
+  /** Shown above the list (the Unassigned lens's bulk-assign bar). */
+  listHeader?: ReactNode;
 }) {
   const searchRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList<WorkspaceRecord>>(null);
@@ -241,6 +250,15 @@ export function RecordList({
             <Ionicons name="person-add-outline" size={15} color={hubColors.crm.fg} />
           </Pressable>
         ) : null}
+        {onImport ? (
+          <Pressable
+            onPress={onImport}
+            hitSlop={6}
+            accessibilityLabel="Import leads"
+            style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
+            <Ionicons name="cloud-upload-outline" size={15} color={hubColors.crm.fg} />
+          </Pressable>
+        ) : null}
       </View>
       <View style={styles.filters}>
         <LensChip label={`All ${total.customers + total.leads}`} selected={kind === 'all'} onPress={() => onKind('all')} />
@@ -254,6 +272,14 @@ export function RecordList({
           <>
             <LensChip label={`Customers ${total.customers}`} selected={kind === 'customer'} onPress={() => onKind('customer')} />
             <LensChip label={`Leads ${total.leads}`} selected={kind === 'lead'} onPress={() => onKind('lead')} />
+            {unassignedCount !== undefined && (unassignedCount > 0 || kind === 'unassigned') ? (
+              <LensChip
+                label={`Unassigned ${unassignedCount}`}
+                selected={kind === 'unassigned'}
+                attention={unassignedCount > 0 && kind !== 'unassigned'}
+                onPress={() => onKind('unassigned')}
+              />
+            ) : null}
           </>
         )}
         {tasksPane ? (
@@ -273,6 +299,7 @@ export function RecordList({
           />
         ) : null}
       </View>
+      {kind !== 'tasks' && listHeader ? listHeader : null}
       {kind === 'tasks' && tasksPane ? (
         tasksPane
       ) : (

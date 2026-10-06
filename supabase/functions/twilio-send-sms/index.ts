@@ -364,7 +364,7 @@ Deno.serve(async (req) => {
     } else if (payload.leadId) {
       const { data: leadRow } = await admin
         .from('leads')
-        .select('id, name, phone, phone_e164, sms_opt_out_at')
+        .select('id, name, phone, phone_e164, sms_opt_out_at, call_first')
         .eq('id', payload.leadId)
         .maybeSingle();
       const lead = leadRow as {
@@ -373,6 +373,7 @@ Deno.serve(async (req) => {
         phone: string | null;
         phone_e164: string | null;
         sms_opt_out_at: string | null;
+        call_first?: boolean;
       } | null;
       if (!lead) return fail(404, 'not_found', 'Lead not found.');
       who = lead.name ?? 'that lead';
@@ -382,6 +383,16 @@ Deno.serve(async (req) => {
       // and could be texted again the next day.
       if (lead.sms_opt_out_at) {
         return fail(400, 'opted_out', optedOutMessage(who));
+      }
+      // Imported without text consent (2026-10-07): call first. Clears by
+      // itself after a connected call or when they text in
+      // (messages_unlock_call_first).
+      if (lead.call_first) {
+        return fail(
+          409,
+          'call_first',
+          `${who} has not agreed to texts yet — call them first. Texting unlocks after a connected call, or once they text you.`,
+        );
       }
       to = payload.to ? toE164(payload.to) : lead.phone_e164;
       if (!to) {
