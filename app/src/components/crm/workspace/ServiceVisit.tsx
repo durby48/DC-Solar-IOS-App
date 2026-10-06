@@ -6,6 +6,7 @@ import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, TextInput, Vie
 import { Chip } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
 import { sendSms } from '@/lib/comms';
+import { fetchAvailability, nextWorkDays, spotsLabel, type DayAvailability } from '@/lib/availability';
 import { formatShortDate } from '@/lib/dates';
 import {
   fetchServicePlans,
@@ -40,8 +41,9 @@ import {
  *                   Stripe card link (Copy / Text / Email from the rep's own
  *                   phone or mail app), and Reschedule / Cancel while open.
  *
- * Dates use the same quick chips + YYYY-MM-DD box as the appointment
- * composer next door, so the panel has one way of entering a date.
+ * Dates use the same YYYY-MM-DD box as the appointment composer next door;
+ * the quick chips are the next six work days with their visit spots left
+ * (crew availability, 2026-10-06).
  */
 
 function isoPlusDays(days: number): string {
@@ -50,23 +52,58 @@ function isoPlusDays(days: number): string {
   return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
 }
 
+/**
+ * Date + optional time, with crew availability (2026-10-06, S2): the next six
+ * work days as chips showing visit spots left, and a status line for whatever
+ * date is entered. A sales rep cannot book a Full day (the database refuses
+ * it); an admin sees the same counts and may overbook on purpose.
+ * `excludeJobId` leaves the visit being rescheduled out of its own count.
+ */
 function DateFields({
   date,
   time,
   onDate,
   onTime,
+  excludeJobId,
 }: {
   date: string;
   time: string;
   onDate: (v: string) => void;
   onTime: (v: string) => void;
+  excludeJobId?: string;
 }) {
+  const [avail, setAvail] = useState<Map<string, DayAvailability> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    // One read covers the chips and any date typed in the next two months.
+    void fetchAvailability(isoPlusDays(0), isoPlusDays(60), excludeJobId).then((m) => {
+      if (!cancelled) setAvail(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [excludeJobId]);
+
+  const chosen = avail?.get(date.trim());
+  const dayChip = (iso: string) => {
+    const d = new Date(`${iso}T12:00:00`);
+    const a = avail?.get(iso);
+    const name = `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${d.getDate()}`;
+    return a ? `${name} · ${a.spotsLeft > 0 ? `${a.spotsLeft} left` : 'Full'}` : name;
+  };
+
   return (
     <>
       <View style={styles.chips}>
-        <Chip label="Tomorrow" tone="ocean" selected={date === isoPlusDays(1)} onPress={() => onDate(isoPlusDays(1))} />
-        <Chip label="In 2 days" tone="ocean" selected={date === isoPlusDays(2)} onPress={() => onDate(isoPlusDays(2))} />
-        <Chip label="Next week" tone="ocean" selected={date === isoPlusDays(7)} onPress={() => onDate(isoPlusDays(7))} />
+        {nextWorkDays(6).map((iso) => (
+          <Chip
+            key={iso}
+            label={dayChip(iso)}
+            tone={avail?.get(iso)?.spotsLeft === 0 ? 'danger' : 'ocean'}
+            selected={date === iso}
+            onPress={() => onDate(iso)}
+          />
+        ))}
       </View>
       <View style={styles.inline}>
         <TextInput
@@ -88,6 +125,12 @@ function DateFields({
           style={[styles.input, styles.flex]}
         />
       </View>
+      {chosen ? (
+        <Text style={[styles.meta, chosen.spotsLeft <= 0 ? styles.full : styles.open]}>
+          {chosen.spotsLeft <= 0 ? 'Full that day — pick another day' : spotsLabel(chosen)}
+          {chosen.unstaffedJobs > 0 ? ' · ⚠ a job that day is not staffed yet' : ''}
+        </Text>
+      ) : null}
     </>
   );
 }
@@ -464,7 +507,7 @@ export function VisitCard({
 
       {mode === 'reschedule' ? (
         <>
-          <DateFields date={date} time={time} onDate={setDate} onTime={setTime} />
+          <DateFields date={date} time={time} onDate={setDate} onTime={setTime} excludeJobId={jobId} />
           <View style={styles.buttons}>
             <Pressable onPress={() => setMode('view')} style={({ pressed }) => [styles.cancel, pressed && styles.pressed]}>
               <Text style={styles.cancelText}>Back</Text>
@@ -532,6 +575,8 @@ const styles = StyleSheet.create({
   cardRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   cardOk: { color: colors.olive },
   plan: { color: colors.ink },
+  full: { color: colors.danger },
+  open: { color: colors.olive },
   linkBox: { gap: spacing.xs, padding: spacing.sm, borderRadius: radii.sm, backgroundColor: colors.surface },
   linkText: { color: colors.ocean, fontSize: 12, fontWeight: '600' },
   tagPaid: { backgroundColor: colors.mintSoft },

@@ -152,8 +152,8 @@ function useStaffGate() {
  *                the CRM hub, `/crm`'s redirect and deep links keep working.
  *
  * SALES (2026-10-06): a `sales` login gets its own bar — Home (the Sales
- * Home, `components/sales/SalesHome`), CRM, Keypad, Settings; Calendar joins
- * it in S2. Every crew/admin tab is `href: null` for them, and
+ * Home, `components/sales/SalesHome`), CRM, Calendar (`schedule`), Keypad,
+ * Settings. Every crew/admin tab is `href: null` for them, and
  * `lib/salesConfinement.ts` moves them off any path they have no screen on.
  */
 export default function TabsLayout() {
@@ -220,6 +220,19 @@ export default function TabsLayout() {
           ),
           tabBarBadge: unread > 0 ? unread : undefined,
           tabBarBadgeStyle: { backgroundColor: colors.danger, color: colors.white },
+        }}
+      />
+      {/* Sales only (2026-10-06, S2): their week with crew availability.
+          Everyone else has Operations (`calendar`). */}
+      <Tabs.Screen
+        name="schedule"
+        options={{
+          title: 'Calendar',
+          tabBarActiveTintColor: hubColors.operations.fg,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon name="calendar" focused={focused} color={hubColors.operations.fg} />
+          ),
+          ...(salesOnly ? {} : { href: null }),
         }}
       />
       <Tabs.Screen

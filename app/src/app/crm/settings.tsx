@@ -33,6 +33,7 @@ import {
   type StaffProfile,
 } from '@/lib/comms';
 import { BillingSettingsCard } from '@/components/crm/BillingSettingsCard';
+import { ServiceCapacityCard } from '@/components/crm/ServiceCapacityCard';
 import { PhoneNumbersCard } from '@/components/crm/PhoneNumbersCard';
 import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { useRole } from '@/lib/role';
@@ -768,6 +769,7 @@ export default function MessagingSettingsScreen() {
 
         {/* ---- Billing (B2, 2026-10-05) ---------------------------------- */}
         <BillingSettingsCard />
+        <ServiceCapacityCard />
       </ScrollView>
     </>
   );

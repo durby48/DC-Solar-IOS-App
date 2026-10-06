@@ -32,6 +32,8 @@ interface EmployeeRow {
   display_name: string | null;
   role: EmployeeRole;
   pay_rate: number | null;
+  /** Counts toward daily crew availability for service visits (2026-10-06). */
+  field_crew: boolean;
 }
 
 const ROLE_META: Record<EmployeeRole, { label: string; bg: string; text: string }> = {
@@ -144,7 +146,7 @@ export default function EmployeesScreen() {
       try {
         const { data, error } = await supabase
           .from('employees')
-          .select('id, email, display_name, role, pay_rate')
+          .select('id, email, display_name, role, pay_rate, field_crew')
           .eq('is_test', false)
           .order('display_name', { ascending: true });
         if (cancelled) return;
@@ -159,6 +161,7 @@ export default function EmployeesScreen() {
             display_name: (row.display_name as string | null) ?? null,
             role: row.role as EmployeeRole,
             pay_rate: row.pay_rate != null ? Number(row.pay_rate) : null,
+            field_crew: row.field_crew === true,
           })),
         );
         setListState('ok');
@@ -202,6 +205,20 @@ export default function EmployeesScreen() {
     } else {
       setRowError(result.message);
     }
+  };
+
+  // employees has no write policies; the switch goes through set_field_crew()
+  // (admin-only), then flips the row in place.
+  const toggleFieldCrew = async (employee: EmployeeRow) => {
+    setRowBusy(`crew:${employee.email}`);
+    setRowError(null);
+    const { error } = await supabase.rpc('set_field_crew', { p_email: employee.email, p_on: !employee.field_crew });
+    setRowBusy(null);
+    if (error) {
+      setRowError(error.message);
+      return;
+    }
+    setEmployees((list) => list.map((e) => (e.id === employee.id ? { ...e, field_crew: !employee.field_crew } : e)));
   };
 
   const statusLine = (employee: EmployeeRow): { text: string; invited: boolean } | null => {
@@ -293,6 +310,7 @@ export default function EmployeesScreen() {
               <Text style={[styles.roleChipText, { color: meta.text }]}>{meta.label}</Text>
             </View>
             {pay ? <Text style={styles.payText}>{pay}</Text> : null}
+            {employee.field_crew ? <Text style={styles.payText}>Field crew</Text> : null}
           </View>
           <Ionicons
             name={expanded ? 'chevron-up' : 'chevron-down'}
@@ -311,6 +329,25 @@ export default function EmployeesScreen() {
               <Ionicons name="call-outline" size={16} color={colors.ocean} />
               <Text style={styles.contactButtonText}>Edit contact info</Text>
             </Pressable>
+            {/* Field crew (2026-10-06): counts toward how many service
+                visits sales can book on a day. Not for sales reps. */}
+            {employee.role !== 'sales' ? (
+              <Pressable
+                onPress={() => void toggleFieldCrew(employee)}
+                disabled={rowBusy !== null}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: employee.field_crew }}
+                style={({ pressed }) => [styles.contactButton, pressed && styles.rowPressed]}>
+                <Ionicons
+                  name={employee.field_crew ? 'checkbox' : 'square-outline'}
+                  size={16}
+                  color={employee.field_crew ? colors.olive : colors.inkSoft}
+                />
+                <Text style={styles.contactButtonText}>
+                  {rowBusy === `crew:${employee.email}` ? 'Saving…' : 'Field crew (counts for visit booking)'}
+                </Text>
+              </Pressable>
+            ) : null}
             <View style={styles.accessRow}>
               <Pressable
                 onPress={() => void makeLink(employee)}
