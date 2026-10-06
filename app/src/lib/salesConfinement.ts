@@ -7,7 +7,8 @@ import { useRoleGate } from '@/lib/role';
  * Keeps a `sales` login inside the sales app (2026-10-05; Home added
  * 2026-10-06, S1).
  *
- * A sales rep's app is the Sales Home (`/`) and the CRM tab (`/workspace`).
+ * A sales rep's app is the Sales Home (`/`), the CRM tab (`/workspace`), the
+ * Keypad and Settings tabs.
  * The tab bar hides the other tabs for them, but a URL typed on the web, an
  * old bookmark, a notification tap or a stray link inside a shared screen can
  * still land anywhere — so any path outside the short list below is replaced
@@ -19,7 +20,7 @@ import { useRoleGate } from '@/lib/role';
  */
 // /join and /card-saved are public pages (an invite or reset link; Stripe's
 // thank-you) that must work even with a rep already signed in on the device.
-const ALLOWED = ['/workspace', '/call', '/security', '/set-password', '/join', '/card-saved'];
+const ALLOWED = ['/workspace', '/keypad', '/settings', '/call', '/security', '/set-password', '/join', '/card-saved'];
 
 function allowed(pathname: string): boolean {
   // Home is `/` exactly — a prefix match on "/" would allow everything.

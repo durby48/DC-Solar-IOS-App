@@ -41,7 +41,7 @@ import { useRole } from '@/lib/role';
  * same panel — it is self-service, and RLS restricts each write to that
  * person's own row (see `lib/profile.ts`).
  */
-export function HomeHeader() {
+export function HomeHeader({ line }: { line?: string | null } = {}) {
   const insets = useSafeAreaInsets();
   const role = useRole();
 
@@ -152,6 +152,12 @@ export function HomeHeader() {
           <AppText variant="body" color={colors.textSecondary}>
             {formatFullDate(new Date())}
           </AppText>
+          {/* A sales rep's own DC Solar number (2026-10-06, Sales Home). */}
+          {line ? (
+            <AppText variant="bodyStrong" color={colors.ink}>
+              {line}
+            </AppText>
+          ) : null}
         </View>
 
         <Avatar

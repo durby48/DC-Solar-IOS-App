@@ -55,8 +55,6 @@ export interface SalesHomeData {
   /** Their DC Solar number, E.164, or null when none is assigned yet. */
   line: string | null;
   counts: SalesCounts;
-  /** Newest prospects nobody has contacted yet, at most five. */
-  callNext: WorkspaceRecord[];
   /** Records with unread texts, most recent first. */
   unread: WorkspaceRecord[];
   missed: MissedCall[];
@@ -66,7 +64,8 @@ export interface SalesHomeData {
 /** How far back an unanswered call still counts as "needs attention". */
 const MISSED_WINDOW_DAYS = 3;
 
-async function fetchMyLine(): Promise<string | null> {
+/** The caller's own DC Solar number (`my_phone_line()`), or null. */
+export async function fetchMyLine(): Promise<string | null> {
   try {
     const { data, error } = await supabase.rpc('my_phone_line');
     if (error || typeof data !== 'string') return null;
@@ -98,11 +97,6 @@ export async function fetchSalesHome(myEmail: string | null): Promise<SalesHomeD
     booked: leads.filter((r) => status(r) === 'scheduled' || status(r) === 'visit_done').length,
     customers: records.filter((r) => r.kind === 'customer').length,
   };
-
-  const callNext = leads
-    .filter(isProspect)
-    .sort((a, b) => (b.lead?.created_at ?? '').localeCompare(a.lead?.created_at ?? ''))
-    .slice(0, 5);
 
   const unread = records.filter((r) => r.unread > 0);
 
@@ -187,7 +181,6 @@ export async function fetchSalesHome(myEmail: string | null): Promise<SalesHomeD
   return {
     line,
     counts,
-    callNext,
     unread,
     missed,
     today: todayItems,

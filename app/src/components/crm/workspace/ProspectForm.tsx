@@ -15,6 +15,21 @@ import { createLead } from '@/lib/leads';
  * assigned to the rep — `leads_sales_insert` refuses anything else — and an
  * admin can reassign it later.
  */
+
+/**
+ * The Keypad's "Save as prospect" (2026-10-06) hands the dialled number over
+ * here rather than in the URL: set it, open `/workspace?new=prospect`, and
+ * the next form to mount starts with that phone filled in (taken once).
+ */
+let presetPhone: string | null = null;
+export function presetProspectPhone(phone: string): void {
+  presetPhone = phone;
+}
+function takePresetPhone(): string {
+  const phone = presetPhone ?? '';
+  presetPhone = null;
+  return phone;
+}
 export function ProspectForm({
   myEmail,
   onCreated,
@@ -24,7 +39,7 @@ export function ProspectForm({
   onCreated: (leadId: string) => void;
   onCancel: () => void;
 }) {
-  const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', source: '', notes: '' });
+  const [form, setForm] = useState(() => ({ name: '', phone: takePresetPhone(), email: '', address: '', source: '', notes: '' }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

@@ -1,52 +1,41 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import {
-  AnimatedPressable,
-  AppText,
-  Button,
-  Card,
-  FadeInUp,
-  ListRow,
-  SectionHeader,
-  StatTile,
-} from '@/components/ui';
+import { HomeHeader } from '@/components/HomeHeader';
+import { AnimatedPressable, AppText, Button, Card, FadeInUp, ListRow, Screen } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatPhone, useCommsRealtime } from '@/lib/comms';
-import { type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { useRole } from '@/lib/role';
 import { fetchSalesHome, type SalesHomeData, type TodayItem } from '@/lib/salesHome';
 import { inAppCallingSupported } from '@/lib/voice';
 
 /**
- * The Sales Home (2026-10-06, S1): a rep's day at a glance, between the
- * greeting header and the shared Account section of `(tabs)/index.tsx`.
+ * The Sales Home (2026-10-06): one screen, nothing to scroll past.
  *
- *   Your number      · their DC Solar line
- *   Needs attention  · missed calls (last 3 days, not yet called back) and
- *                      unread texts; hidden when there are none
- *   Today            · their booked visits, appointments, and tasks due today
- *                      or overdue
- *   Call next        · newest prospects nobody has contacted, with Call
- *   My pipeline      · counts per step, each opening that CRM lens
- *   + New prospect
+ *   greeting + their DC Solar number (in the header)
+ *   [ 3  Today              › ]   visits, appointments, tasks due — opens in place
+ *   [ 8  Prospects to call  › ]   → the CRM's Prospects list
+ *   [ 2  New messages       › ]   missed calls + unread texts — only when > 0
+ *   [ + New prospect ]
  *
- * No money anywhere except (from S4) their own commission. Every tap lands in
- * the CRM tab via its deep links (`/workspace?open=…`, `?lens=…`,
- * `?new=prospect`) or on the call screen.
+ * Carson cut the first version (pipeline tiles, number card, inline lists,
+ * Account section) as too cluttered: one number per box, and the lists are a
+ * tap away. Account (Security, Sign out, Delete) lives on the Settings tab.
+ * Commission joins as a fourth box in S4.
+ *
+ * Every read is RLS-scoped to the rep's own records (`lib/salesHome.ts`).
  */
 export function SalesHome() {
   const router = useRouter();
   const role = useRole();
-  const { width } = useWindowDimensions();
   const [data, setData] = useState<SalesHomeData | null>(null);
+  const [openBox, setOpenBox] = useState<'today' | 'messages' | null>(null);
   const [callNotice, setCallNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const next = await fetchSalesHome(role?.email ?? null);
-    setData(next);
+    setData(await fetchSalesHome(role?.email ?? null));
   }, [role?.email]);
 
   useFocusEffect(
@@ -55,8 +44,7 @@ export function SalesHome() {
     }, [load]),
   );
 
-  // A text or call arriving while Home is open: one trailing reload per burst
-  // (a single text fires several row updates as it is delivered).
+  // A text or call arriving while Home is open: one trailing reload per burst.
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useCommsRealtime(
     useCallback(() => {
@@ -71,170 +59,143 @@ export function SalesHome() {
   const open = (key: string | null) => {
     if (key) router.navigate({ pathname: '/workspace', params: { open: key } } as never);
   };
-  const lens = (name: string) => router.navigate({ pathname: '/workspace', params: { lens: name } } as never);
 
-  const call = (phone: string | null, name: string) => {
-    if (!phone) return;
+  const callBack = (phone: string, name: string) => {
     if (!inAppCallingSupported()) {
-      // Never the phone's own dialer: that would show the customer the rep's
-      // PERSONAL number (same rule as the CRM's Call button).
+      // Never the phone's own dialer: it would show their PERSONAL number.
       setCallNotice('Calls from your DC Solar number work in the DC Solar app or at app.dcsolarkc.com.');
       return;
     }
     router.push({ pathname: '/call', params: { to: phone, name } } as never);
   };
 
-  if (!data) {
-    return (
-      <View style={styles.loading}>
-        <ActivityIndicator color={hubColors.crm.fg} />
-      </View>
-    );
-  }
-
-  const attention = data.missed.length + data.unread.length;
-  const statColumns = width >= 700 ? 5 : 2;
+  const messages = data ? data.missed.length + data.unread.length : 0;
+  const toggle = (box: 'today' | 'messages') => setOpenBox((current) => (current === box ? null : box));
 
   return (
-    <View style={styles.wrap}>
-      <FadeInUp index={0}>
-        <LineCard line={data.line} />
-      </FadeInUp>
+    <Screen padded={false} edges={[]} contentContainerStyle={styles.scroll}>
+      <HomeHeader line={data?.line ? formatPhone(data.line) : null} />
 
-      {attention > 0 ? (
-        <FadeInUp index={1}>
-          <SectionHeader title="Needs attention" accent={colors.danger} />
-          <Card padded={false}>
-            {data.missed.map((m, i) => (
-              <ListRow
-                key={`missed:${m.id}`}
+      <View style={styles.body}>
+        {!data ? (
+          <ActivityIndicator color={hubColors.crm.fg} style={styles.loading} />
+        ) : (
+          <>
+            <FadeInUp index={0}>
+              <Box
+                count={data.today.length}
+                label="Today"
+                icon="today"
+                tint={hubColors.operations}
+                open={openBox === 'today'}
+                onPress={() => toggle('today')}
+              />
+              {openBox === 'today' ? (
+                <Card padded={false} style={styles.drawer}>
+                  {data.today.length === 0 ? (
+                    <AppText variant="body" color={colors.textSecondary} style={styles.empty}>
+                      Nothing booked and no tasks due today.
+                    </AppText>
+                  ) : (
+                    data.today.map((item, i) => (
+                      <ListRow
+                        key={item.key}
+                        icon={TODAY_ICON[item.kind]}
+                        iconColor={item.overdue ? colors.danger : hubColors.operations.fg}
+                        iconBackground={item.overdue ? colors.dangerSoft : hubColors.operations.bg}
+                        title={item.title}
+                        subtitle={[item.when, item.subtitle].filter(Boolean).join(' · ') || undefined}
+                        onPress={item.recordKey ? () => open(item.recordKey) : undefined}
+                        chevron={item.recordKey ? undefined : false}
+                        divider={i < data.today.length - 1}
+                      />
+                    ))
+                  )}
+                </Card>
+              ) : null}
+            </FadeInUp>
+
+            <FadeInUp index={1}>
+              <Box
+                count={data.counts.prospects}
+                label="Prospects to call"
                 icon="call"
-                iconColor={colors.danger}
-                iconBackground={colors.dangerSoft}
-                title={`Missed call · ${m.name}${m.count > 1 ? ` (${m.count})` : ''}`}
-                subtitle={whenLabel(m.at)}
-                right={
-                  m.phone ? (
-                    <Button label="Call back" size="sm" variant="secondary" onPress={() => call(m.phone, m.name)} />
-                  ) : undefined
-                }
-                chevron={false}
-                onPress={m.recordKey ? () => open(m.recordKey) : undefined}
-                divider={i < attention - 1}
+                tint={hubColors.crm}
+                onPress={() => router.navigate({ pathname: '/workspace', params: { lens: 'prospect' } } as never)}
               />
-            ))}
-            {data.unread.map((r, i) => (
-              <ListRow
-                key={`unread:${r.key}`}
-                icon="chatbubble"
-                iconColor={hubColors.crm.fg}
-                iconBackground={hubColors.crm.bg}
-                title={r.name}
-                subtitle={r.unread === 1 ? 'New text' : `${r.unread} new texts`}
-                badge={r.unread}
-                onPress={() => open(r.key)}
-                divider={data.missed.length + i < attention - 1}
+            </FadeInUp>
+
+            {messages > 0 ? (
+              <FadeInUp index={2}>
+                <Box
+                  count={messages}
+                  label={messages === 1 ? 'New message' : 'New messages'}
+                  icon="chatbubbles"
+                  tint={{ fg: colors.danger, bg: colors.dangerSoft }}
+                  open={openBox === 'messages'}
+                  onPress={() => toggle('messages')}
+                />
+                {openBox === 'messages' ? (
+                  <Card padded={false} style={styles.drawer}>
+                    {data.missed.map((m, i) => (
+                      <ListRow
+                        key={`missed:${m.id}`}
+                        icon="call"
+                        iconColor={colors.danger}
+                        iconBackground={colors.dangerSoft}
+                        title={`Missed call · ${m.name}${m.count > 1 ? ` (${m.count})` : ''}`}
+                        subtitle={whenLabel(m.at)}
+                        right={
+                          m.phone ? (
+                            <Button
+                              label="Call back"
+                              size="sm"
+                              variant="secondary"
+                              onPress={() => callBack(m.phone as string, m.name)}
+                            />
+                          ) : undefined
+                        }
+                        chevron={false}
+                        onPress={m.recordKey ? () => open(m.recordKey) : undefined}
+                        divider={i < messages - 1}
+                      />
+                    ))}
+                    {data.unread.map((r, i) => (
+                      <ListRow
+                        key={`unread:${r.key}`}
+                        icon="chatbubble"
+                        iconColor={hubColors.crm.fg}
+                        iconBackground={hubColors.crm.bg}
+                        title={r.name}
+                        subtitle={r.unread === 1 ? 'New text' : `${r.unread} new texts`}
+                        badge={r.unread}
+                        onPress={() => open(r.key)}
+                        divider={data.missed.length + i < messages - 1}
+                      />
+                    ))}
+                  </Card>
+                ) : null}
+                {callNotice ? (
+                  <AppText variant="caption" color={colors.danger} style={styles.notice}>
+                    {callNotice}
+                  </AppText>
+                ) : null}
+              </FadeInUp>
+            ) : null}
+
+            <FadeInUp index={3}>
+              <Button
+                label="New prospect"
+                icon="person-add"
+                fullWidth
+                style={styles.newProspect}
+                onPress={() => router.navigate({ pathname: '/workspace', params: { new: 'prospect' } } as never)}
               />
-            ))}
-          </Card>
-        </FadeInUp>
-      ) : null}
-
-      <FadeInUp index={2}>
-        <SectionHeader title="Today" accent={hubColors.operations.fg} />
-        <Card padded={false}>
-          {data.today.length === 0 ? (
-            <AppText variant="body" color={colors.textSecondary} style={styles.empty}>
-              Nothing booked and no tasks due today.
-            </AppText>
-          ) : (
-            data.today.map((item, i) => (
-              <ListRow
-                key={item.key}
-                icon={TODAY_ICON[item.kind]}
-                iconColor={item.overdue ? colors.danger : hubColors.operations.fg}
-                iconBackground={item.overdue ? colors.dangerSoft : hubColors.operations.bg}
-                title={item.title}
-                subtitle={[item.when, item.subtitle].filter(Boolean).join(' · ') || undefined}
-                onPress={item.recordKey ? () => open(item.recordKey) : undefined}
-                chevron={item.recordKey ? undefined : false}
-                divider={i < data.today.length - 1}
-              />
-            ))
-          )}
-        </Card>
-      </FadeInUp>
-
-      <FadeInUp index={3}>
-        <SectionHeader
-          title="Call next"
-          subtitle="Your newest prospects"
-          accent={hubColors.crm.fg}
-          action={data.counts.prospects > data.callNext.length ? { label: 'All prospects', onPress: () => lens('prospect') } : undefined}
-        />
-        <Card padded={false}>
-          {data.callNext.length === 0 ? (
-            <AppText variant="body" color={colors.textSecondary} style={styles.empty}>
-              No new prospects. You&apos;re caught up.
-            </AppText>
-          ) : (
-            data.callNext.map((r, i) => (
-              <ListRow
-                key={r.key}
-                icon="person"
-                iconColor={hubColors.crm.fg}
-                iconBackground={hubColors.crm.bg}
-                title={r.name}
-                subtitle={prospectSubtitle(r)}
-                right={
-                  r.phoneE164 ? (
-                    <Button label="Call" icon="call" size="sm" onPress={() => call(r.phoneE164, r.name)} />
-                  ) : undefined
-                }
-                chevron={false}
-                onPress={() => open(r.key)}
-                divider={i < data.callNext.length - 1}
-              />
-            ))
-          )}
-        </Card>
-        {callNotice ? (
-          <AppText variant="caption" color={colors.danger} style={styles.notice}>
-            {callNotice}
-          </AppText>
-        ) : null}
-      </FadeInUp>
-
-      <FadeInUp index={4}>
-        <SectionHeader title="My pipeline" accent={hubColors.crm.fg} />
-        <View style={styles.stats}>
-          {(
-            [
-              ['Prospects', data.counts.prospects, 'prospect', 0],
-              ['Contacted', data.counts.contacted, 'working', 1],
-              ['Interested', data.counts.interested, 'working', 2],
-              ['Visits booked', data.counts.booked, 'working', 5],
-              ['Customers', data.counts.customers, 'customer', 6],
-            ] as const
-          ).map(([label, value, target, tone]) => (
-            <View key={label} style={[styles.statCell, { width: `${100 / statColumns}%` }]}>
-              <AnimatedPressable onPress={() => lens(target)} accessibilityRole="button" accessibilityLabel={`${label}: ${value}`}>
-                <StatTile label={label} value={value} tone={tone} compact edge />
-              </AnimatedPressable>
-            </View>
-          ))}
-        </View>
-      </FadeInUp>
-
-      <FadeInUp index={5}>
-        <Button
-          label="New prospect"
-          icon="person-add"
-          fullWidth
-          onPress={() => router.navigate({ pathname: '/workspace', params: { new: 'prospect' } } as never)}
-        />
-      </FadeInUp>
-    </View>
+            </FadeInUp>
+          </>
+        )}
+      </View>
+    </Screen>
   );
 }
 
@@ -244,9 +205,43 @@ const TODAY_ICON: Record<TodayItem['kind'], 'construct' | 'calendar' | 'checkbox
   task: 'checkbox',
 };
 
-function prospectSubtitle(r: WorkspaceRecord): string {
-  const bits = [r.phone ? formatPhone(r.phoneE164 ?? r.phone) : 'No phone', r.lead?.source ?? null];
-  return bits.filter(Boolean).join(' · ');
+/** One big tappable box: the number, what it counts, a chevron. */
+function Box({
+  count,
+  label,
+  icon,
+  tint,
+  open,
+  onPress,
+}: {
+  count: number;
+  label: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  tint: { fg: string; bg: string };
+  /** Set for a box that opens in place; undefined for one that navigates. */
+  open?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <AnimatedPressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`${label}: ${count}`}>
+      <Card style={[styles.box, { borderColor: tint.fg }]}>
+        <View style={[styles.boxIcon, { backgroundColor: tint.bg }]}>
+          <Ionicons name={icon} size={20} color={tint.fg} />
+        </View>
+        <AppText variant="title" color={tint.fg} style={styles.boxCount}>
+          {count}
+        </AppText>
+        <AppText variant="heading" color={colors.textPrimary} style={styles.boxLabel} numberOfLines={1}>
+          {label}
+        </AppText>
+        <Ionicons
+          name={open === undefined ? 'chevron-forward' : open ? 'chevron-up' : 'chevron-down'}
+          size={18}
+          color={colors.textMuted}
+        />
+      </Card>
+    </AnimatedPressable>
+  );
 }
 
 /** "2:14 PM" today, "Yesterday 2:14 PM", or "Mon 2:14 PM". */
@@ -260,43 +255,30 @@ function whenLabel(iso: string): string {
   return `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
 }
 
-/** Their DC Solar number: the one their calls and texts come from. */
-function LineCard({ line }: { line: string | null }) {
-  return (
-    <Card style={styles.lineCard}>
-      <View style={styles.lineRow}>
-        <View style={styles.lineIcon}>
-          <Ionicons name="call" size={18} color={hubColors.crm.fg} />
-        </View>
-        <View style={styles.lineBody}>
-          <AppText variant="caption" color={colors.textSecondary}>
-            Your DC Solar number
-          </AppText>
-          <AppText variant="heading" color={line ? colors.textPrimary : colors.textSecondary}>
-            {line ? formatPhone(line) : 'Not assigned yet — ask an admin'}
-          </AppText>
-        </View>
-      </View>
-    </Card>
-  );
-}
-
 const styles = StyleSheet.create({
-  wrap: { gap: spacing.md },
-  loading: { paddingVertical: spacing.xl, alignItems: 'center' },
+  scroll: { paddingBottom: spacing.xl },
+  body: {
+    width: '100%',
+    maxWidth: 560,
+    alignSelf: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    gap: spacing.md,
+  },
+  loading: { marginVertical: spacing.xl },
+  box: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderWidth: 1.5,
+    borderRadius: radii.md,
+    paddingVertical: spacing.lg,
+  },
+  boxIcon: { width: 40, height: 40, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+  boxCount: { minWidth: 34 },
+  boxLabel: { flex: 1 },
+  drawer: { marginTop: spacing.xs },
   empty: { padding: spacing.md },
   notice: { marginTop: spacing.xs },
-  stats: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -spacing.xs },
-  statCell: { paddingHorizontal: spacing.xs, paddingBottom: spacing.sm },
-  lineCard: { gap: spacing.sm, marginTop: spacing.xs },
-  lineRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  lineIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: radii.sm,
-    backgroundColor: hubColors.crm.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  lineBody: { flex: 1, gap: 2 },
+  newProspect: { marginTop: spacing.sm },
 });
