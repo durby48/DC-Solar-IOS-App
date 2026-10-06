@@ -1,4 +1,5 @@
 import { fetchRecents } from '@/lib/comms';
+import { fetchCommissions, fetchCurrentPayPeriod, totalCents } from '@/lib/commission';
 import { fetchWorkspaceRecords, isProspect, type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { fetchScheduleRange } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
@@ -59,6 +60,8 @@ export interface SalesHomeData {
   unread: WorkspaceRecord[];
   missed: MissedCall[];
   today: TodayItem[];
+  /** Their commission in the current pay period, in cents (S4). */
+  commissionCents: number;
 }
 
 /** How far back an unanswered call still counts as "needs attention". */
@@ -77,13 +80,15 @@ export async function fetchMyLine(): Promise<string | null> {
 
 export async function fetchSalesHome(myEmail: string | null): Promise<SalesHomeData> {
   const today = todayISO();
-  const [recordsResult, line, recents, taskResult, appointments, visits] = await Promise.all([
+  const [recordsResult, line, recents, taskResult, appointments, visits, commissions, period] = await Promise.all([
     fetchWorkspaceRecords(),
     fetchMyLine(),
     fetchRecents(100),
     fetchTasks({ all: true }),
     fetchLeadAppointmentsRange(today, today),
     fetchScheduleRange(today, today),
+    fetchCommissions(),
+    fetchCurrentPayPeriod(),
   ]);
 
   const records = recordsResult.records.filter((r) => !(r.kind === 'customer' && r.serviceStatus === 'unpaid'));
@@ -184,6 +189,7 @@ export async function fetchSalesHome(myEmail: string | null): Promise<SalesHomeD
     unread,
     missed,
     today: todayItems,
+    commissionCents: period ? totalCents(commissions.filter((c) => c.periodStart === period.start)) : 0,
   };
 }
 

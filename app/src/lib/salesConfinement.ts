@@ -20,7 +20,23 @@ import { useRoleGate } from '@/lib/role';
  */
 // /join and /card-saved are public pages (an invite or reset link; Stripe's
 // thank-you) that must work even with a rep already signed in on the device.
-const ALLOWED = ['/workspace', '/schedule', '/keypad', '/settings', '/call', '/security', '/set-password', '/join', '/card-saved'];
+const ALLOWED = [
+  '/workspace',
+  '/schedule',
+  '/keypad',
+  '/settings',
+  '/commission',
+  '/plans',
+  '/saved-texts',
+  '/do-not-disturb',
+  '/notifications',
+  '/calling-check',
+  '/call',
+  '/security',
+  '/set-password',
+  '/join',
+  '/card-saved',
+];
 
 function allowed(pathname: string): boolean {
   // Home is `/` exactly — a prefix match on "/" would allow everything.

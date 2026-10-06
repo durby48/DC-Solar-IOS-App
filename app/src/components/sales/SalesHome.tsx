@@ -7,6 +7,7 @@ import { HomeHeader } from '@/components/HomeHeader';
 import { AnimatedPressable, AppText, Button, Card, FadeInUp, ListRow, Screen } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatPhone, useCommsRealtime } from '@/lib/comms';
+import { formatCents } from '@/lib/servicePlans';
 import { useRole } from '@/lib/role';
 import { fetchSalesHome, type SalesHomeData, type TodayItem } from '@/lib/salesHome';
 import { inAppCallingSupported } from '@/lib/voice';
@@ -23,7 +24,7 @@ import { inAppCallingSupported } from '@/lib/voice';
  * Carson cut the first version (pipeline tiles, number card, inline lists,
  * Account section) as too cluttered: one number per box, and the lists are a
  * tap away. Account (Security, Sign out, Delete) lives on the Settings tab.
- * Commission joins as a fourth box in S4.
+ * The fourth box: commission this pay period → /commission (S4).
  *
  * Every read is RLS-scoped to the rep's own records (`lib/salesHome.ts`).
  */
@@ -184,6 +185,16 @@ export function SalesHome() {
             ) : null}
 
             <FadeInUp index={3}>
+              <Box
+                count={formatCents(data.commissionCents) || '$0'}
+                label="Commission this pay period"
+                icon="cash"
+                tint={{ fg: colors.mintDeep, bg: colors.mintSoft }}
+                onPress={() => router.push('/commission' as never)}
+              />
+            </FadeInUp>
+
+            <FadeInUp index={4}>
               <Button
                 label="New prospect"
                 icon="person-add"
@@ -214,7 +225,7 @@ function Box({
   open,
   onPress,
 }: {
-  count: number;
+  count: number | string;
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
   tint: { fg: string; bg: string };

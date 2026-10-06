@@ -71,6 +71,11 @@ export async function registerForIncomingCalls(): Promise<IncomingRegistration> 
 
 export async function unregisterForIncomingCalls(): Promise<void> {}
 
+/** Last incoming-call registration on this device; native only (Calling check). */
+export function getIncomingRegistration(): { result: IncomingRegistration; at: number } | null {
+  return null;
+}
+
 export async function startInAppCall(_input: StartCallInput): Promise<StartCallResult> {
   return {
     ok: false,

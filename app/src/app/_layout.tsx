@@ -195,6 +195,13 @@ export default function RootLayout() {
           />
           <Stack.Screen name="sign-up" options={{ headerShown: false }} />
           <Stack.Screen name="security" options={{ title: 'Security' }} />
+          {/* Rep Settings screens (2026-10-06); /commission is also the admins' report. */}
+          <Stack.Screen name="commission" options={{ title: 'Commission' }} />
+          <Stack.Screen name="plans" options={{ title: 'Plans & prices' }} />
+          <Stack.Screen name="saved-texts" options={{ title: 'Saved texts' }} />
+          <Stack.Screen name="do-not-disturb" options={{ title: 'Do not disturb' }} />
+          <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
+          <Stack.Screen name="calling-check" options={{ title: 'Calling check' }} />
           {/* Public: where a customer lands from the Stripe card page (B2). */}
           <Stack.Screen name="card-saved" options={{ title: 'DC Solar', headerShown: false }} />
           {/* Public: an invited employee sets their password (employee invites). */}

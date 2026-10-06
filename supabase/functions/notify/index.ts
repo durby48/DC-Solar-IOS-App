@@ -307,6 +307,12 @@ interface OutboundMessage {
   audience: 'admins' | 'all';
   /** Where a tap goes. Optional: an informational push may have nowhere to go. */
   target?: Target;
+  /**
+   * The person's own switch for this kind of push (2026-10-06, rep Settings →
+   * Notifications): staff_profiles.notify_<pref>. Anyone in `emails` who turned
+   * it off is dropped. Admin-audience pushes ignore it.
+   */
+  pref?: 'texts' | 'missed_calls' | 'new_prospects';
 }
 
 /** Normalize any accepted body shape into {title, body, emails?, audience, target?}. */
@@ -349,12 +355,17 @@ function normalize(payload: Record<string, unknown>): OutboundMessage | null {
       Array.isArray(payload.emails) && payload.emails.every((e) => typeof e === 'string')
         ? (payload.emails as string[])
         : null;
+    const pref =
+      payload.pref === 'texts' || payload.pref === 'missed_calls' || payload.pref === 'new_prospects'
+        ? payload.pref
+        : undefined;
     return {
       title: truncate(payload.title, 100),
       body: truncate(payload.body, 200),
       emails,
       audience: payload.audience === 'all' ? 'all' : 'admins',
       target: sanitizeTarget(payload.target) ?? undefined,
+      pref,
     };
   }
 
@@ -482,6 +493,28 @@ Deno.serve(async (req) => {
     };
   }
 
+  // A lead assigned to someone (2026-10-06): a new lead created for them, or a
+  // reassignment. The trigger (leads_assigned_notify_*) already skips
+  // self-assignment, e.g. a rep adding their own prospect.
+  if (
+    !message &&
+    table === 'leads' &&
+    typeof record?.assigned_to === 'string' &&
+    record.assigned_to &&
+    (op === 'UPDATE' || (op === 'INSERT' && !record.source_ref))
+  ) {
+    const name = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : 'A new prospect';
+    const contact = (typeof record.phone === 'string' && record.phone.trim()) || '';
+    message = {
+      title: '🧲 New prospect for you',
+      body: truncate(contact ? `${name} · ${contact}` : name, 200),
+      emails: [String(record.assigned_to).toLowerCase()],
+      audience: 'admins',
+      target: typeof record.id === 'string' ? { type: 'lead', leadId: record.id } : undefined,
+      pref: 'new_prospects',
+    };
+  }
+
   // A task handed to someone (INSERT with an assignee, or an UPDATE that
   // changes the assignee). The person who assigned it to themselves is not
   // told twice; automation-created tasks reach the assignee like any other.
@@ -576,6 +609,16 @@ Deno.serve(async (req) => {
     const admins = await rest('employees?role=in.(owner,operator)&select=email');
     if (!admins) return json(500, { error: 'could not read employees' });
     emails = admins.map((r) => String(r.email)).filter(Boolean);
+  }
+
+  // The recipients' own switches (rep Settings → Notifications).
+  if (message.pref && message.emails && emails?.length) {
+    const column = `notify_${message.pref}`;
+    const quoted = emails.map((e) => `"${e.replaceAll('"', '')}"`).join(',');
+    const off = await rest(`staff_profiles?company=eq.${COMPANY}&${column}=eq.false&email=in.(${quoted})&select=email`);
+    const muted = new Set((off ?? []).map((r) => String(r.email).toLowerCase()));
+    emails = emails.filter((e) => !muted.has(e.toLowerCase()));
+    if (emails.length === 0) return json(200, { sent: 0, skipped: 'turned off by the recipient' });
   }
 
   // Tokens for those emails (or every registered device for audience=all).

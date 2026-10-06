@@ -26,21 +26,26 @@ export interface ServicePlan {
   label: string;
   amountCents: number;
   stripePriceId: string;
+  /** What the plan includes, one item per line (Plans & prices); null = not written yet. */
+  includes: string | null;
 }
 
 export async function fetchServicePlans(): Promise<ServicePlan[]> {
   try {
     const { data, error } = await supabase
       .from('service_plans')
-      .select('tier, label, amount_cents, stripe_price_id')
+      .select('tier, label, amount_cents, stripe_price_id, includes')
       .eq('company', COMPANY)
       .order('sort');
     if (error || !data) return [];
-    return (data as { tier: PlanTier; label: string; amount_cents: number; stripe_price_id: string }[]).map((r) => ({
+    return (
+      data as { tier: PlanTier; label: string; amount_cents: number; stripe_price_id: string; includes: string | null }[]
+    ).map((r) => ({
       tier: r.tier,
       label: r.label,
       amountCents: r.amount_cents,
       stripePriceId: r.stripe_price_id,
+      includes: r.includes,
     }));
   } catch {
     return [];
@@ -50,12 +55,17 @@ export async function fetchServicePlans(): Promise<ServicePlan[]> {
 /** Admin edit of one tier: its yearly amount and the Stripe price it charges. */
 export async function saveServicePlan(
   tier: PlanTier,
-  patch: { amountCents: number; stripePriceId: string },
+  patch: { amountCents: number; stripePriceId: string; includes: string | null },
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
     const { data, error } = await supabase
       .from('service_plans')
-      .update({ amount_cents: patch.amountCents, stripe_price_id: patch.stripePriceId, updated_at: new Date().toISOString() })
+      .update({
+        amount_cents: patch.amountCents,
+        stripe_price_id: patch.stripePriceId,
+        includes: patch.includes,
+        updated_at: new Date().toISOString(),
+      })
       .eq('company', COMPANY)
       .eq('tier', tier)
       .select('tier');

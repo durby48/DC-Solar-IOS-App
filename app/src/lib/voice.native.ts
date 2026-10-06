@@ -407,6 +407,16 @@ let registering: Promise<IncomingRegistration> | null = null;
  * phone that does not ring can be diagnosed from a desk. Concurrent calls
  * share one attempt.
  */
+/**
+ * The last incoming-call registration outcome on this device (2026-10-06):
+ * what rep Settings → Calling check shows. Null until Home has tried once
+ * this app session.
+ */
+let lastRegistration: { result: IncomingRegistration; at: number } | null = null;
+export function getIncomingRegistration(): { result: IncomingRegistration; at: number } | null {
+  return lastRegistration;
+}
+
 export async function registerForIncomingCalls(): Promise<IncomingRegistration> {
   if (registering) return registering;
   // Home re-runs this on every foreground, and CallKit flips the app
@@ -440,6 +450,7 @@ export async function registerForIncomingCalls(): Promise<IncomingRegistration> 
       });
     }
     const { retryable: _r, identity: _i, ...plain } = result;
+    lastRegistration = { result: plain as IncomingRegistration, at: Date.now() };
     return plain as IncomingRegistration;
   })().finally(() => {
     registering = null;

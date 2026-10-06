@@ -37,6 +37,11 @@ export async function registerForIncomingCalls(): Promise<IncomingRegistration> 
 
 export async function unregisterForIncomingCalls(): Promise<void> {}
 
+/** Incoming calls never ring a browser, so there is nothing to report. */
+export function getIncomingRegistration(): { result: IncomingRegistration; at: number } | null {
+  return null;
+}
+
 export function inAppCallingSupported(): boolean {
   return (
     typeof window !== 'undefined' &&

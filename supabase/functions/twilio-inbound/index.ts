@@ -367,7 +367,8 @@ Deno.serve(async (req) => {
           body: JSON.stringify({
             title: `💬 ${who}`,
             body: preview || (mediaUrls.length > 0 ? 'Sent a photo' : 'New text message'),
-            ...(repEmail ? { emails: [repEmail] } : { audience: 'admins' }),
+            // A rep can mute text pushes (Settings → Notifications, 2026-10-06).
+            ...(repEmail ? { emails: [repEmail], pref: 'texts' } : { audience: 'admins' }),
             // The notification target (see notify/index.ts): the EXACT thread
             // this message was filed under, by id — a tap opens it, not the
             // inbox. Strangers carry only the number.

@@ -58,10 +58,15 @@ export function BillingSettingsCard() {
 function PlanRow({ plan }: { plan: ServicePlan }) {
   const [amount, setAmount] = useState(String(plan.amountCents / 100));
   const [priceId, setPriceId] = useState(plan.stripePriceId);
-  const [saved, setSaved] = useState({ amount: String(plan.amountCents / 100), priceId: plan.stripePriceId });
+  const [includes, setIncludes] = useState(plan.includes ?? '');
+  const [saved, setSaved] = useState({
+    amount: String(plan.amountCents / 100),
+    priceId: plan.stripePriceId,
+    includes: plan.includes ?? '',
+  });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  const dirty = amount.trim() !== saved.amount || priceId.trim() !== saved.priceId;
+  const dirty = amount.trim() !== saved.amount || priceId.trim() !== saved.priceId || includes.trim() !== saved.includes.trim();
 
   const save = async () => {
     const cents = parseDollars(amount);
@@ -76,13 +81,17 @@ function PlanRow({ plan }: { plan: ServicePlan }) {
     }
     setSaving(true);
     setMessage(null);
-    const result = await saveServicePlan(plan.tier as PlanTier, { amountCents: cents, stripePriceId: id });
+    const result = await saveServicePlan(plan.tier as PlanTier, {
+      amountCents: cents,
+      stripePriceId: id,
+      includes: includes.trim() || null,
+    });
     setSaving(false);
     if (!result.ok) {
       setMessage({ kind: 'error', text: result.message });
       return;
     }
-    setSaved({ amount: amount.trim(), priceId: id });
+    setSaved({ amount: amount.trim(), priceId: id, includes: includes.trim() });
     setMessage({ kind: 'ok', text: `Saved. New ${plan.label} bookings are ${formatCents(cents)}/yr.` });
   };
 
@@ -114,6 +123,17 @@ function PlanRow({ plan }: { plan: ServicePlan }) {
           style={[styles.input, styles.flex]}
         />
       </View>
+      <TextInput
+        value={includes}
+        onChangeText={(v) => {
+          setIncludes(v);
+          setMessage(null);
+        }}
+        placeholder={"What's included, one per line (reps see this in Plans & prices)"}
+        placeholderTextColor={colors.inkSoft}
+        multiline
+        style={[styles.input, styles.multiline]}
+      />
       {dirty ? (
         <Pressable
           onPress={() => void save()}
@@ -136,6 +156,7 @@ const styles = StyleSheet.create({
   inline: { flexDirection: 'row', gap: spacing.xs },
   flex: { flex: 1 },
   amount: { width: 90 },
+  multiline: { minHeight: 70, textAlignVertical: 'top' },
   input: {
     backgroundColor: colors.surfaceSunk,
     borderRadius: radii.sm,

@@ -8,6 +8,7 @@ import { AppText, Card, ListRow, Screen, SectionHeader } from '@/components/ui';
 import { colors, hubColors, spacing } from '@/constants/theme';
 import { formatPhone } from '@/lib/comms';
 import { useRoleGate } from '@/lib/role';
+import { fetchMyPrefs, hmLabel, type MyPrefs } from '@/lib/repSettings';
 import { fetchMyLine } from '@/lib/salesHome';
 import { signOutAndLeave } from '@/lib/signOut';
 
@@ -17,12 +18,15 @@ import { signOutAndLeave } from '@/lib/signOut';
  *
  *   Me        · name, email, their DC Solar number (read-only — an admin
  *               assigns numbers)
+ *   Selling   · My commission, Plans & prices, Saved texts
+ *   Phone     · Do not disturb, Notifications, Calling check
  *   Account   · Security (password, two-step sign-in), Sign out
  *   App       · version / check for an update, Delete my account
  *
- * More sections are being discussed with Carson (notifications, commission
- * history in S4, help). Admins and crew have the Menu tab; this one is hidden
- * from them and sends them there.
+ * Each row opens its own screen (`/commission`, `/plans`, `/saved-texts`,
+ * `/do-not-disturb`, `/notifications`, `/calling-check` — 2026-10-06). Admins
+ * and crew have the Menu tab; this one is hidden from them and sends them
+ * there.
  */
 export default function SettingsTab() {
   const gate = useRoleGate();
@@ -35,12 +39,16 @@ function SalesSettings() {
   const navigation = useNavigation();
   const gate = useRoleGate();
   const [line, setLine] = useState<string | null>(null);
+  const [prefs, setPrefs] = useState<MyPrefs | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
       void fetchMyLine().then((l) => {
         if (!cancelled) setLine(l);
+      });
+      void fetchMyPrefs().then((p) => {
+        if (!cancelled) setPrefs(p);
       });
       return () => {
         cancelled = true;
@@ -49,6 +57,7 @@ function SalesSettings() {
   );
 
   const me = gate.role;
+  const go = (path: string) => router.push(path as never);
 
   return (
     <Screen contentContainerStyle={styles.content}>
@@ -66,6 +75,30 @@ function SalesSettings() {
             subtitle={line ? 'Your DC Solar number — calls and texts come from it' : 'Ask an admin to assign you one'}
             chevron={false}
           />
+        </Card>
+      </View>
+
+      <View>
+        <SectionHeader title="Selling" accent={hubColors.crm.fg} />
+        <Card padded={false}>
+          <ListRow icon="cash" title="My commission" subtitle="This pay period and past ones" onPress={() => go('/commission')} divider />
+          <ListRow icon="pricetags" title="Plans & prices" subtitle="Bronze, Silver, Gold — what to quote" onPress={() => go('/plans')} divider />
+          <ListRow icon="chatbubble-ellipses" title="Saved texts" subtitle="Ready-made texts, and your own" onPress={() => go('/saved-texts')} />
+        </Card>
+      </View>
+
+      <View>
+        <SectionHeader title="Phone" accent={hubColors.crm.fg} />
+        <Card padded={false}>
+          <ListRow
+            icon="moon"
+            title="Do not disturb"
+            subtitle={prefs?.dndEnabled ? `On · calls ring ${hmLabel(prefs.workStart)}–${hmLabel(prefs.workEnd)}` : 'Off'}
+            onPress={() => go('/do-not-disturb')}
+            divider
+          />
+          <ListRow icon="notifications" title="Notifications" subtitle="Texts, missed calls, new prospects" onPress={() => go('/notifications')} divider />
+          <ListRow icon="pulse" title="Calling check" subtitle="Make sure calls ring this phone" onPress={() => go('/calling-check')} />
         </Card>
       </View>
 

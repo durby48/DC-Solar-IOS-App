@@ -15,6 +15,14 @@
  *      voice_bridge_enabled), if the app did not answer or is not configured.
  *      Never the Twilio number itself — a loop is refused.
  *   3. a short spoken apology and a hang-up. No voicemail yet.
+ *
+ * DO NOT DISTURB (2026-10-06, rep Settings). When the number's person has
+ * staff_profiles.dnd_enabled and it is outside their work_start–work_end
+ * (America/Chicago), nothing rings: the call is logged as missed with NO push,
+ * the caller hears that they are away, and — unless the caller opted out of
+ * texts, or already got one in the last 12 hours — a text goes back from the
+ * same DC Solar number saying when they will call back. The missed-call push
+ * otherwise honours the person's own switch (notify_missed_calls).
  * A number with no route skips to 3 and the missed-call push goes to the
  * admins, so an unrouted number gets noticed rather than guessed about.
  *
@@ -178,6 +186,12 @@ Deno.serve(async (req) => {
       assignedTo: string;
       identity: string | null;
       cell: string | null;
+      /** Do not disturb is on and it is outside their hours right now. */
+      away: boolean;
+      /** HH:MM their day starts, for the "will call you back" text. */
+      workStart: string;
+      /** First name, for what the caller hears and reads while they are away. */
+      firstName: string;
     }
     const resolveRoute = async (): Promise<Route | null> => {
       const { data: routeRow } = await admin
@@ -190,15 +204,30 @@ Deno.serve(async (req) => {
       if (!assignedTo) return null;
       const { data: profile } = await admin
         .from('staff_profiles')
-        .select('voice_identity, cell_phone_e164, voice_bridge_enabled')
+        .select('voice_identity, cell_phone_e164, voice_bridge_enabled, dnd_enabled, work_start, work_end')
         .eq('company', COMPANY)
         .eq('email', assignedTo)
         .maybeSingle();
-      const p = profile as { voice_identity: string | null; cell_phone_e164: string | null; voice_bridge_enabled: boolean } | null;
+      const p = profile as {
+        voice_identity: string | null;
+        cell_phone_e164: string | null;
+        voice_bridge_enabled: boolean;
+        dnd_enabled?: boolean;
+        work_start?: string;
+        work_end?: string;
+      } | null;
+      const nowHm = new Date().toLocaleTimeString('en-GB', { timeZone: 'America/Chicago', hour: '2-digit', minute: '2-digit', hour12: false });
+      const start = (p?.work_start ?? '08:00').slice(0, 5);
+      const end = (p?.work_end ?? '19:00').slice(0, 5);
+      const away = Boolean(p?.dnd_enabled) && (nowHm < start || nowHm >= end);
       const cell = p?.cell_phone_e164 && p.voice_bridge_enabled !== false ? p.cell_phone_e164 : null;
       // A cell that IS a Twilio number would ring this function again. Refuse.
       const safeCell = cell && cell !== dialed && cell !== fromNumber ? cell : null;
-      return { assignedTo, identity: p?.voice_identity ?? null, cell: safeCell };
+      const { data: emp } = away
+        ? await admin.from('employees').select('display_name').ilike('email', assignedTo).maybeSingle()
+        : { data: null };
+      const firstName = ((emp as { display_name?: string | null } | null)?.display_name ?? '').trim().split(/\s+/)[0] || 'Your rep';
+      return { assignedTo, identity: p?.voice_identity ?? null, cell: safeCell, away, workStart: start, firstName };
     };
 
     // --- who is calling ---------------------------------------------------------
@@ -248,7 +277,8 @@ Deno.serve(async (req) => {
               title: '📞 Missed call',
               body: `${caller.who}${from && caller.who !== pretty(from) ? ` · ${pretty(from)}` : ''}`,
               audience: 'admins',
-              ...(route ? { emails: [route.assignedTo] } : {}),
+              // Their own switch (Settings → Notifications) decides, in notify.
+              ...(route ? { emails: [route.assignedTo], pref: 'missed_calls' } : {}),
               target: {
                 type: 'call',
                 ...(caller.customerId ? { customerId: caller.customerId } : {}),
@@ -266,6 +296,79 @@ Deno.serve(async (req) => {
       return sayAndHangUp(
         'Sorry, nobody at DC Solar could pick up right now. Please send us a text at this number and we will get right back to you.',
       );
+    };
+
+    /**
+     * Do not disturb's text back, from the dialed DC Solar number. Skipped
+     * when texting is off, the caller replied STOP, or they already got one in
+     * the last 12 hours (someone calling five times gets one text).
+     */
+    const textBackWhileAway = async (caller: Caller, route: Route): Promise<boolean> => {
+      if (!from) return false;
+      const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
+      const serviceSid = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
+      if (!accountSid || !authToken) return false;
+      const { data: settings } = await admin.from('comms_settings').select('sms_enabled').eq('company', COMPANY).maybeSingle();
+      if (!(settings as { sms_enabled?: boolean } | null)?.sms_enabled) return false;
+      const [{ data: optedC }, { data: optedL }, { data: recent }] = await Promise.all([
+        admin.from('customers').select('id').eq('company', COMPANY).eq('phone_e164', from).not('sms_opt_out_at', 'is', null).limit(1),
+        admin.from('leads').select('id').eq('company', COMPANY).eq('phone_e164', from).not('sms_opt_out_at', 'is', null).limit(1),
+        admin
+          .from('messages')
+          .select('id')
+          .eq('to_number', from)
+          .eq('sent_by', 'auto:away')
+          .gte('created_at', new Date(Date.now() - 12 * 3600_000).toISOString())
+          .limit(1),
+      ]);
+      if (optedC?.length || optedL?.length || recent?.length) return false;
+
+      const nowHm = new Date().toLocaleTimeString('en-GB', { timeZone: 'America/Chicago', hour: '2-digit', minute: '2-digit', hour12: false });
+      const [sh, sm] = route.workStart.split(':').map(Number);
+      const startLabel = `${sh % 12 === 0 ? 12 : sh % 12}:${String(sm).padStart(2, '0')} ${sh >= 12 ? 'PM' : 'AM'}`;
+      const when = nowHm < route.workStart ? `when they start at ${startLabel}` : 'tomorrow morning';
+      const body = `Thanks for calling DC Solar! ${route.firstName} is away right now and will call you back ${when}. Reply STOP to opt out.`;
+
+      const { data: row } = await admin
+        .from('messages')
+        .insert({
+          company: COMPANY,
+          customer_id: caller.customerId,
+          lead_id: caller.leadId,
+          contact_id: caller.contactId,
+          channel: 'sms',
+          direction: 'out',
+          from_number: dialed,
+          to_number: from,
+          body,
+          status: 'queued',
+          sent_by: 'auto:away',
+        })
+        .select('id')
+        .single();
+      const sms = new URLSearchParams();
+      if (serviceSid) sms.set('MessagingServiceSid', serviceSid);
+      sms.set('From', dialed);
+      sms.set('To', from);
+      sms.set('Body', body);
+      sms.set('StatusCallback', statusUrl);
+      const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`, {
+        method: 'POST',
+        headers: { authorization: `Basic ${btoa(`${accountSid}:${authToken}`)}`, 'content-type': 'application/x-www-form-urlencoded' },
+        body: sms.toString(),
+      });
+      const result = (await res.json().catch(() => ({}))) as { sid?: string; status?: string; code?: number; message?: string };
+      if (row?.id) {
+        await admin
+          .from('messages')
+          .update(
+            res.ok
+              ? { twilio_sid: result.sid ?? null, status: result.status ?? 'queued' }
+              : { status: 'failed', error_code: result.code ? String(result.code) : null, error: result.message ?? null },
+          )
+          .eq('id', row.id);
+      }
+      return res.ok;
     };
 
     // ---- step: the app dial finished ---------------------------------------------
@@ -302,6 +405,17 @@ Deno.serve(async (req) => {
         status: 'ringing',
         twilio_sid: callSid,
       });
+    }
+
+    // Do not disturb: nothing rings, no push, a text back (see the header).
+    if (route?.away) {
+      if (callSid) await admin.from('messages').update({ status: 'no-answer' }).eq('twilio_sid', callSid);
+      const texted = from ? await textBackWhileAway(caller, route) : false;
+      return sayAndHangUp(
+        `Thanks for calling DC Solar. ${route.firstName} is away right now${
+          texted ? '. We just sent you a text, and' : ', and'
+        } they will call you back. Thank you.`,
+      );
     }
 
     // Ring the app only when phones can actually be reached (VoIP push) and

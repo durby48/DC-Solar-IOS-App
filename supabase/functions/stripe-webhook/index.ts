@@ -12,7 +12,15 @@
  *   invoice.payment_failed          a plan payment failed (first charge or a
  *                                   renewal) → customers.payment_issue
  *   customer.subscription.created / .updated / .deleted
- *                                   → customers.plan_status
+ *                                   → customers.plan_status (and a cancel
+ *                                   before the 2-year agreement is flagged)
+ *   charge.refunded                 a refund → the rep's commission is reduced
+ *                                   in the refund's pay period
+ *
+ * COMMISSION (2026-10-06, S4). invoice.paid also records the rep's commission
+ * (record_sales_commission: 30%, first year or renewal, keyed by invoice id),
+ * and charge.refunded records the matching deduction (keyed by charge id +
+ * total refunded, so a second partial refund adds only its own share).
  *
  * VERIFIED, NOT TRUSTED. verify_jwt is OFF (Stripe has no Supabase JWT); every
  * request must carry a valid Stripe-Signature for STRIPE_WEBHOOK_SECRET, within
@@ -32,6 +40,11 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 const STRIPE_VERSION = '2024-06-20';
 const TOLERANCE_SECONDS = 300;
 const SERVICE_TYPES = ['Cleaning', 'Inspection'];
+
+/** YYYY-MM-DD in Kansas City — the pay period a payment falls in. */
+function chicagoDay(d: Date): string {
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+}
 
 function reply(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -141,6 +154,22 @@ Deno.serve(async (req) => {
       case 'invoice.paid': {
         const customer = await findCustomer();
         if (!customer) break;
+        // The rep's commission on this payment (first year or a renewal).
+        const paid = typeof obj.amount_paid === 'number' ? obj.amount_paid : 0;
+        if (paid > 0 && typeof obj.id === 'string') {
+          const transitions = obj.status_transitions as { paid_at?: number } | undefined;
+          const paidAt = transitions?.paid_at ? new Date(transitions.paid_at * 1000) : new Date();
+          const { error: commissionErr } = await admin.rpc('record_sales_commission', {
+            p_customer_id: customer.id,
+            p_kind: obj.billing_reason === 'subscription_cycle' ? 'renewal' : 'first',
+            p_stripe_ref: obj.id,
+            p_invoice_id: obj.id,
+            p_amount: paid,
+            p_occurred_on: chicagoDay(paidAt),
+          });
+          // A 500 makes Stripe retry; the row is keyed by invoice, so a retry is safe.
+          if (commissionErr) throw new Error(`commission: ${commissionErr.message}`);
+        }
         await admin
           .from('customers')
           .update({ plan_status: 'active', payment_issue: null, payment_issue_at: null })
@@ -164,6 +193,32 @@ Deno.serve(async (req) => {
             .is('service_paid_at', null);
           await admin.from('leads').update({ status: 'won' }).eq('converted_job_id', job.id).in('status', ['scheduled', 'visit_done']);
         }
+        break;
+      }
+
+      case 'charge.refunded': {
+        const customer = await findCustomer();
+        const invoiceId = typeof obj.invoice === 'string' ? obj.invoice : null;
+        const refundedTotal = typeof obj.amount_refunded === 'number' ? obj.amount_refunded : 0;
+        if (!customer || !invoiceId || refundedTotal <= 0 || typeof obj.id !== 'string') break;
+        // Only the part of the refund not already deducted.
+        const { data: prior } = await admin
+          .from('sales_commissions')
+          .select('amount_cents')
+          .eq('stripe_invoice_id', invoiceId)
+          .eq('kind', 'refund');
+        const already = ((prior ?? []) as { amount_cents: number }[]).reduce((sum, r) => sum - r.amount_cents, 0);
+        const delta = refundedTotal - already;
+        if (delta <= 0) break;
+        const { error: refundErr } = await admin.rpc('record_sales_commission', {
+          p_customer_id: customer.id,
+          p_kind: 'refund',
+          p_stripe_ref: `refund:${obj.id}:${refundedTotal}`,
+          p_invoice_id: invoiceId,
+          p_amount: -delta,
+          p_occurred_on: chicagoDay(new Date()),
+        });
+        if (refundErr) throw new Error(`commission refund: ${refundErr.message}`);
         break;
       }
 
