@@ -26,7 +26,8 @@ const INK = '#1F2A33';
 const SOFT = '#5C6B77';
 const SUN = '#F2A93B';
 const SKY = '#EAF3FA';
-const LINE = '#E3E8EC';
+const LINE = '#D5DDE3';
+const WARM = '#FFF6E8';
 const TIER_TINT: Record<string, string> = { bronze: '#B87333', silver: '#8A97A3', gold: '#C9A227' };
 
 function dollars(cents: number): string {
@@ -177,28 +178,56 @@ const styles = StyleSheet.create({
   logo: { width: 170, height: 48 },
   heroTitle: { color: '#fff', fontSize: 30, fontWeight: '800', lineHeight: 36 },
   heroSub: { color: 'rgba(255,255,255,0.9)', fontSize: 16, fontWeight: '500' },
-  contact: { marginTop: -24, backgroundColor: '#fff', borderRadius: 14, padding: 18, gap: 12, borderWidth: 1, borderColor: LINE, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 3 },
+  // The rep's card: clearly its own block — warm fill, brand-orange border,
+  // a real shadow (Carson: the first version was hard to see).
+  contact: {
+    marginTop: -28,
+    backgroundColor: WARM,
+    borderRadius: 16,
+    padding: 20,
+    gap: 14,
+    borderWidth: 2,
+    borderColor: SUN,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
   row: { flexDirection: 'row', alignItems: 'stretch', gap: 14 },
   flex: { flex: 1 },
-  contactLabel: { color: SOFT, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  contactName: { color: INK, fontSize: 20, fontWeight: '800', marginTop: 2 },
-  contactPhone: { color: INK, fontSize: 16, fontWeight: '600' },
+  contactLabel: { color: '#B5701A', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
+  contactName: { color: INK, fontSize: 24, fontWeight: '800', marginTop: 4 },
+  contactPhone: { color: INK, fontSize: 18, fontWeight: '700' },
   contactButtons: { flexDirection: 'row', gap: 10, alignItems: 'center' },
   contactButtonsNarrow: { alignSelf: 'stretch' },
   primary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: SUN, borderRadius: 999, paddingHorizontal: 20, paddingVertical: 12 },
   primaryText: { color: '#fff', fontSize: 15, fontWeight: '800' },
-  secondary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: SKY, borderRadius: 999, paddingHorizontal: 20, paddingVertical: 12 },
+  secondary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#fff', borderWidth: 1.5, borderColor: INK, borderRadius: 999, paddingHorizontal: 20, paddingVertical: 12 },
   secondaryText: { color: INK, fontSize: 15, fontWeight: '800' },
   h2: { color: INK, fontSize: 22, fontWeight: '800', marginTop: 18 },
   grid: { gap: 12 },
-  tile: { backgroundColor: SKY, borderRadius: 12, padding: 16, gap: 6 },
+  tile: { backgroundColor: SKY, borderRadius: 12, padding: 16, gap: 6, borderWidth: 1, borderColor: '#CFE0EE' },
   tileTitle: { color: INK, fontSize: 16, fontWeight: '800' },
   tileBody: { color: SOFT, fontSize: 14, lineHeight: 20 },
   list: { gap: 8 },
   listRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   listText: { flex: 1, color: INK, fontSize: 15, lineHeight: 21 },
   step: { width: 22, height: 22, borderRadius: 11, backgroundColor: SUN, color: '#fff', textAlign: 'center', fontWeight: '800', lineHeight: 22, overflow: 'hidden' },
-  plan: { borderRadius: 12, borderWidth: 1, borderColor: LINE, borderTopWidth: 5, padding: 16, gap: 8 },
+  plan: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: LINE,
+    borderTopWidth: 6,
+    padding: 16,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+  },
   planName: { fontSize: 18, fontWeight: '800' },
   planPrice: { color: INK, fontSize: 28, fontWeight: '800' },
   planPer: { color: SOFT, fontSize: 15, fontWeight: '600' },
