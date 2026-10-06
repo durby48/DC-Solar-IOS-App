@@ -15,6 +15,14 @@ import { STAGE_COLOR, type MapPoint } from '@/lib/leadMap';
  * Tapping a dot selects it; the screen shows the card. The phone build gets
  * its own map in the next native build (LeadMapView.tsx explains).
  *
+ * SATELLITE (2026-10-07): a Map / Satellite switch (Leaflet's layer control,
+ * top right; the choice is remembered per browser). Satellite is Esri World
+ * Imagery — sharp enough at zoom 19 to see panels on a roof — with Esri's
+ * place-name labels on top. Esri's keyless tiles are fine for trying it; for
+ * steady commercial use Esri asks for a (free) ArcGIS developer account, whose
+ * key would go on these URLs. `roof` (from the card's "See the roof") switches
+ * to Satellite and flies to that pin at roof level.
+ *
  * Leaflet draws into a plain <div> filling a View. Leaflet is IMPORTED IN THE
  * BROWSER ONLY (in the effect):
  * the web build pre-renders pages on the server, where Leaflet's top-level
@@ -22,15 +30,28 @@ import { STAGE_COLOR, type MapPoint } from '@/lib/leadMap';
  */
 const KANSAS_CITY: Leaflet.LatLngTuple = [39.0997, -94.5786];
 const DARK_TILES_STYLE = 'dc-dark-tiles-style';
+const BASEMAP_KEY = 'dcsolar.leadmap.basemap';
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
+
+function rememberedBasemap(): 'Map' | 'Satellite' {
+  try {
+    return localStorage.getItem(BASEMAP_KEY) === 'Satellite' ? 'Satellite' : 'Map';
+  } catch {
+    return 'Map';
+  }
+}
 
 export function LeadMapView({
   points,
   selectedKey,
   onSelect,
+  roof,
 }: {
   points: MapPoint[];
   selectedKey: string | null;
   onSelect: (key: string | null) => void;
+  /** Fly to this pin at roof level on Satellite; `n` changes on every request. */
+  roof?: { key: string; n: number } | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [L, setL] = useState<typeof Leaflet | null>(null);
@@ -39,6 +60,7 @@ export function LeadMapView({
   const fitted = useRef(false);
   // Bounds waiting for the box to have a real size (see the ResizeObserver).
   const pendingFit = useRef<Leaflet.LatLngBounds | null>(null);
+  const basemaps = useRef<{ Map: Leaflet.Layer; Satellite: Leaflet.Layer } | null>(null);
   const select = useRef(onSelect);
   select.current = onSelect;
 
@@ -63,11 +85,28 @@ export function LeadMapView({
         '.dc-dark-tiles { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(85%) saturate(60%); }';
       document.head.appendChild(style);
     }
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const street = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19,
       className: 'dc-dark-tiles',
-    }).addTo(m);
+    });
+    const satellite = L.layerGroup([
+      L.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, {
+        attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics',
+        maxZoom: 19,
+      }),
+      L.tileLayer(`${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19 }),
+    ]);
+    basemaps.current = { Map: street, Satellite: satellite };
+    (rememberedBasemap() === 'Satellite' ? satellite : street).addTo(m);
+    L.control.layers({ Map: street, Satellite: satellite }, undefined, { position: 'topright' }).addTo(m);
+    m.on('baselayerchange', (e: Leaflet.LayersControlEvent) => {
+      try {
+        localStorage.setItem(BASEMAP_KEY, e.name);
+      } catch {
+        // Private mode / blocked storage: forgetting the choice is fine.
+      }
+    });
     m.on('click', () => select.current(null));
     layer.current = L.layerGroup().addTo(m);
     map.current = m;
@@ -87,6 +126,7 @@ export function LeadMapView({
       m.remove();
       map.current = null;
       layer.current = null;
+      basemaps.current = null;
       fitted.current = false;
       pendingFit.current = null;
     };
@@ -122,6 +162,21 @@ export function LeadMapView({
       else pendingFit.current = bounds; // the ResizeObserver fits it
     }
   }, [L, points, selectedKey]);
+
+  // "See the roof": Satellite on, then fly to the pin at roof level.
+  useEffect(() => {
+    const m = map.current;
+    const layers = basemaps.current;
+    if (!roof || !m || !layers) return;
+    const p = points.find((x) => x.key === roof.key);
+    if (!p) return;
+    if (!m.hasLayer(layers.Satellite)) {
+      m.removeLayer(layers.Map);
+      layers.Satellite.addTo(m);
+      m.fire('baselayerchange', { name: 'Satellite', layer: layers.Satellite });
+    }
+    m.flyTo([p.lat, p.lng], 19, { duration: 1.2 });
+  }, [roof]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A plain <div>, absolutely filling the View: drawing into the React Native
   // View itself left Leaflet measuring a 0-wide box.

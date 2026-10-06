@@ -13,7 +13,14 @@ import { type MapPoint } from '@/lib/leadMap';
  * this says so and opens the web map, where it already works.
  * LeadMapView.web.tsx is the real map.
  */
-export function LeadMapView({ points }: { points: MapPoint[]; selectedKey: string | null; onSelect: (key: string | null) => void }) {
+export function LeadMapView({
+  points,
+}: {
+  points: MapPoint[];
+  selectedKey: string | null;
+  onSelect: (key: string | null) => void;
+  roof?: { key: string; n: number } | null;
+}) {
   return (
     <View style={styles.card}>
       <Ionicons name="map" size={28} color={colors.ocean} />

@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LeadMapView } from '@/components/map/LeadMapView';
@@ -25,7 +25,8 @@ import { useRoleGate } from '@/lib/role';
  * Every lead and customer the caller can see in the CRM, pinned by address
  * and coloured by stage (Prospect · Contacted · Interested · Visit booked ·
  * Customer); chips switch stages off and on, and admins can narrow to one
- * rep or the Unassigned pool. Tap a pin for its card → Open in CRM.
+ * rep or the Unassigned pool. Map / Satellite switch on the map; tap a pin
+ * for its card → Open in CRM, or See the roof (satellite, zoomed in).
  *
  * Opening the map also places any new or edited addresses (geocode-addresses)
  * and reloads if it placed some. On the phone the map itself waits for the
@@ -42,6 +43,7 @@ export default function LeadMapScreen() {
   const [rep, setRep] = useState<string | null>(null); // email, 'unassigned', or null = everyone
   const [reps, setReps] = useState<{ email: string; name: string }[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [roof, setRoof] = useState<{ key: string; n: number } | null>(null);
   const placing = useRef(false);
 
   const load = useCallback(async () => {
@@ -131,7 +133,7 @@ export default function LeadMapScreen() {
         {points === null ? (
           <ActivityIndicator color={hubColors.crm.fg} style={styles.loading} />
         ) : (
-          <LeadMapView points={shown} selectedKey={selectedKey} onSelect={setSelectedKey} />
+          <LeadMapView points={shown} selectedKey={selectedKey} onSelect={setSelectedKey} roof={roof} />
         )}
       </View>
 
@@ -150,12 +152,23 @@ export default function LeadMapScreen() {
               </AppText>
             </View>
           </View>
-          <Button
-            label="Open in CRM"
-            icon="open-outline"
-            size="sm"
-            onPress={() => router.navigate({ pathname: '/workspace', params: { open: selected.key } } as never)}
-          />
+          <View style={styles.cardButtons}>
+            <Button
+              label="Open in CRM"
+              icon="open-outline"
+              size="sm"
+              onPress={() => router.navigate({ pathname: '/workspace', params: { open: selected.key } } as never)}
+            />
+            {Platform.OS === 'web' ? (
+              <Button
+                label="See the roof"
+                icon="earth"
+                size="sm"
+                variant="secondary"
+                onPress={() => setRoof((r) => ({ key: selected.key, n: (r?.n ?? 0) + 1 }))}
+              />
+            ) : null}
+          </View>
         </Card>
       ) : null}
     </SafeAreaView>
@@ -189,5 +202,6 @@ const styles = StyleSheet.create({
   loading: { marginTop: spacing.xl },
   card: { marginHorizontal: spacing.md, marginBottom: spacing.md, gap: spacing.sm },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  cardButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   flex: { flex: 1 },
 });
