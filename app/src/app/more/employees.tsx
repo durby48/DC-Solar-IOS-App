@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -117,27 +117,34 @@ export default function EmployeesScreen() {
   /**
    * Load one employee's paystubs on demand. Admins read the whole company
    * under RLS, so this is scoped by employee_id rather than filtered here.
+   *
+   * FIXED 2026-10-07 — rows hung on the spinner forever. This effect used to
+   * depend on `docs` and cancel its fetch in the cleanup; marking the row
+   * 'loading' changed `docs`, which re-ran the effect, which cancelled the
+   * fetch it had just started and then (row already in `docs`) did nothing.
+   * Now each row is requested once, tracked in a ref, and never cancelled.
    */
+  const requestedDocs = useRef(new Set<string>());
   useEffect(() => {
     const id = expandedId;
-    if (!id || docs.has(id)) return;
-    let cancelled = false;
+    if (!id || requestedDocs.current.has(id)) return;
+    requestedDocs.current.add(id);
     setDocs((prev) => new Map(prev).set(id, { status: 'loading' }));
-    fetchPaystubs(id).then((result) => {
-      if (cancelled) return;
-      setDocs((prev) =>
-        new Map(prev).set(
-          id,
-          result.status === 'ok'
-            ? { status: 'ok', paystubs: result.paystubs }
-            : { status: 'unavailable' },
-        ),
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [expandedId, docs]);
+    fetchPaystubs(id)
+      .then((result) => {
+        setDocs((prev) =>
+          new Map(prev).set(
+            id,
+            result.status === 'ok'
+              ? { status: 'ok', paystubs: result.paystubs }
+              : { status: 'unavailable' },
+          ),
+        );
+      })
+      .catch(() => {
+        setDocs((prev) => new Map(prev).set(id, { status: 'unavailable' }));
+      });
+  }, [expandedId]);
 
   useEffect(() => {
     if (gate.state !== 'in' || !isAdmin) return;
