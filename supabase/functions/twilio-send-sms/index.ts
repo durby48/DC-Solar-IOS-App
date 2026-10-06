@@ -110,6 +110,8 @@ interface Payload {
   templateKey?: string;
   /** Storage paths under `mms/` in the job-photos bucket. Never URLs. */
   mediaPaths?: string[];
+  /** Developer "view as" (2026-10-08): check as this employee, send nothing. */
+  devViewAs?: string;
 }
 
 interface NumberMatch {
@@ -171,19 +173,8 @@ Deno.serve(async (req) => {
     const jwt = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
     if (!jwt) return fail(401, 'unauthorized', 'Missing Authorization header.');
     const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
-    const callerEmail = userData?.user?.email?.toLowerCase();
-    if (userErr || !callerEmail) return fail(401, 'unauthorized', 'Not signed in.');
-    const { data: employee } = await admin
-      .from('employees')
-      .select('role')
-      .eq('email', callerEmail)
-      .maybeSingle();
-    const role = (employee as { role?: string } | null)?.role;
-    // A sales manager (2026-10-07) texts like a rep, from their own number, but
-    // on any lead and any sales-side customer — they run the team.
-    const isManager = role === 'sales_manager';
-    const isSales = role === 'sales' || isManager;
-    if (role !== 'owner' && role !== 'operator' && !isSales) return fail(403, 'forbidden', 'Admins and sales only.');
+    const realEmail = userData?.user?.email?.toLowerCase();
+    if (userErr || !realEmail) return fail(401, 'unauthorized', 'Not signed in.');
 
     // --- input --------------------------------------------------------------
     let payload: Payload;
@@ -191,6 +182,41 @@ Deno.serve(async (req) => {
       payload = (await req.json()) as Payload;
     } catch {
       return fail(400, 'bad_request', 'Invalid JSON body.');
+    }
+
+    // Developer "view as" (2026-10-08): a developer looking through someone
+    // else's eyes asks "could THEY send this?". Every check below runs as that
+    // person, and the answer comes back just before anything is written or
+    // sent — a dry run never texts anyone. Only a developer may ask.
+    let callerEmail = realEmail;
+    let dryRunName: string | null = null;
+    const { data: realRow } = await admin
+      .from('employees')
+      .select('is_developer')
+      .eq('email', realEmail)
+      .maybeSingle();
+    const isDeveloper = Boolean((realRow as { is_developer?: boolean } | null)?.is_developer);
+    if (payload.devViewAs) {
+      if (!isDeveloper) return fail(403, 'forbidden', 'Developers only.');
+      callerEmail = payload.devViewAs.toLowerCase();
+    }
+    const { data: employee } = await admin
+      .from('employees')
+      .select('role, display_name')
+      .eq('email', callerEmail)
+      .maybeSingle();
+    const role = (employee as { role?: string } | null)?.role;
+    if (payload.devViewAs) {
+      if (!employee) return fail(404, 'not_found', 'That person is not an employee.');
+      dryRunName = (employee as { display_name?: string | null }).display_name ?? callerEmail;
+    }
+    // A sales manager (2026-10-07) texts like a rep, from their own number, but
+    // on any lead and any sales-side customer — they run the team. A developer
+    // texting as themselves texts like an admin, whatever their role.
+    const isManager = role === 'sales_manager';
+    const isSales = (role === 'sales' || isManager) && !(isDeveloper && !payload.devViewAs);
+    if (role !== 'owner' && role !== 'operator' && !isSales && !(isDeveloper && !payload.devViewAs)) {
+      return fail(403, 'forbidden', 'Admins and sales only.');
     }
 
     let body = typeof payload.body === 'string' ? payload.body.trim() : '';
@@ -469,6 +495,14 @@ Deno.serve(async (req) => {
     if (!customerId && sharing.length > 0) {
       customerId = sharing[0].id;
       who = sharing[0].name ?? who;
+    }
+
+    // A developer's dry run stops here: every check passed, nothing written.
+    if (dryRunName) {
+      return ok({
+        dryRun: true,
+        message: `${dryRunName} could send this text to ${who}${fromNumber ? ` from ${fromNumber}` : ''}.`,
+      });
     }
 
     // --- write the row FIRST, then hand it to Twilio ------------------------

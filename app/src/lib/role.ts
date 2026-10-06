@@ -6,6 +6,8 @@
 
 import { useEffect, useState } from 'react';
 
+import '@/lib/devView';
+import { getDevView } from '@/lib/devViewState';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -29,6 +31,14 @@ export interface RoleInfo {
    * sees and assigns every lead, can take one over. Admin-only money stays out.
    */
   isSalesManager: boolean;
+  /**
+   * The Developer tag (2026-10-08, employees.is_developer): full power on top
+   * of the role, and Developer Tools. While a developer switches the screens
+   * to another role (Developer Tools → View as a role), `role` and the flags
+   * above follow the chosen role and `realRole` keeps their own.
+   */
+  isDeveloper: boolean;
+  realRole: EmployeeRole;
   payRate: number | null;
 }
 
@@ -55,7 +65,7 @@ export async function getRole(): Promise<RoleInfo | null> {
 
     const { data: row, error } = await supabase
       .from('employees')
-      .select('email, display_name, role, pay_rate')
+      .select('email, display_name, role, pay_rate, is_developer')
       .eq('email', email)
       .maybeSingle();
 
@@ -64,7 +74,12 @@ export async function getRole(): Promise<RoleInfo | null> {
       return null;
     }
 
-    const role = row.role as EmployeeRole;
+    const realRole = row.role as EmployeeRole;
+    const isDeveloper = Boolean((row as { is_developer?: boolean | null }).is_developer);
+    // Developer Tools → View as a role: the screens of that role, own data.
+    // (View as a person needs nothing here: the session already IS them.)
+    const view = getDevView();
+    const role = isDeveloper && view?.kind === 'role' ? view.role : realRole;
     const info: RoleInfo = {
       email,
       displayName: (row.display_name as string | null) ?? null,
@@ -72,6 +87,8 @@ export async function getRole(): Promise<RoleInfo | null> {
       isAdmin: role === 'owner' || role === 'operator',
       isSales: role === 'sales' || role === 'sales_manager',
       isSalesManager: role === 'sales_manager',
+      isDeveloper,
+      realRole,
       payRate: row.pay_rate != null ? Number(row.pay_rate) : null,
     };
     cache = { email, info };

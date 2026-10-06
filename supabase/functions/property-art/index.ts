@@ -123,10 +123,13 @@ Deno.serve(async (req) => {
 
   const { data: employee } = await admin
     .from('employees')
-    .select('role')
+    .select('is_developer, role')
     .eq('email', email)
     .maybeSingle();
-  const role = (employee as { role?: string } | null)?.role;
+  // A developer (2026-10-08, employees.is_developer) may do anything an owner may.
+  const role = (employee as { is_developer?: boolean } | null)?.is_developer
+    ? 'owner'
+    : (employee as { role?: string } | null)?.role;
   if (role !== 'owner' && role !== 'operator') {
     return json({ error: 'Admins only' }, 403);
   }

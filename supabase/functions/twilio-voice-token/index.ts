@@ -128,15 +128,38 @@ Deno.serve(async (req) => {
     const jwt = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
     if (!jwt) return fail(401, 'unauthorized', 'Missing Authorization header.');
     const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
-    const callerEmail = userData?.user?.email?.toLowerCase();
-    if (userErr || !callerEmail) return fail(401, 'unauthorized', 'Not signed in.');
+    const realEmail = userData?.user?.email?.toLowerCase();
+    if (userErr || !realEmail) return fail(401, 'unauthorized', 'Not signed in.');
+
+    // Developer "view as" (2026-10-08): `{ devViewAs }` asks "could THIS
+    // person make calls?" — the same checks, run as them, and an answer
+    // instead of a token. Only a developer may ask.
+    const body = (await req.json().catch(() => ({}))) as { devViewAs?: string };
+    let callerEmail = realEmail;
+    const { data: realRow } = await admin
+      .from('employees')
+      .select('is_developer')
+      .eq('email', realEmail)
+      .maybeSingle();
+    const isDeveloper = Boolean((realRow as { is_developer?: boolean } | null)?.is_developer);
+    if (body.devViewAs) {
+      if (!isDeveloper) return fail(403, 'forbidden', 'Developers only.');
+      callerEmail = body.devViewAs.toLowerCase();
+    }
     const { data: employee } = await admin
       .from('employees')
-      .select('role')
+      .select('role, display_name')
       .eq('email', callerEmail)
       .maybeSingle();
     const role = (employee as { role?: string } | null)?.role;
-    if (role !== 'owner' && role !== 'operator' && role !== 'sales' && role !== 'sales_manager') {
+    const dryRunName = body.devViewAs
+      ? ((employee as { display_name?: string | null } | null)?.display_name ?? callerEmail)
+      : null;
+    // A developer calling as themselves may call like an admin, whatever their role.
+    if (
+      role !== 'owner' && role !== 'operator' && role !== 'sales' && role !== 'sales_manager' &&
+      !(isDeveloper && !body.devViewAs)
+    ) {
       return fail(403, 'forbidden', 'Admins and sales only.');
     }
 
@@ -165,6 +188,22 @@ Deno.serve(async (req) => {
         'In-app calling is not set up yet: it needs TWILIO_API_KEY_SID, TWILIO_API_KEY_SECRET ' +
           'and TWILIO_TWIML_APP_SID on the edge functions. See docs/TWILIO_SETUP.md.',
       );
+    }
+
+    if (dryRunName) {
+      const { data: route } = await admin
+        .from('voice_routes')
+        .select('number_e164')
+        .eq('company', COMPANY)
+        .ilike('assigned_to', callerEmail)
+        .limit(1);
+      const line = ((route ?? []) as { number_e164: string }[])[0]?.number_e164 ?? null;
+      return ok({
+        dryRun: true,
+        message: line
+          ? `${dryRunName} can make calls, from their own line ${line}.`
+          : `${dryRunName} can make calls, from the main DC Solar number (no line of their own yet).`,
+      });
     }
 
     // --- identity: the staff_profiles slug, creating the row if needed ------

@@ -188,8 +188,9 @@ Deno.serve(async (req) => {
     const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
     const callerEmail = userData?.user?.email?.toLowerCase();
     if (userErr || !callerEmail) return fail(401, 'unauthorized', 'Not signed in.');
-    const { data: me } = await admin.from('employees').select('role').eq('company', COMPANY).ilike('email', callerEmail).maybeSingle();
-    const myRole = (me as { role?: string } | null)?.role;
+    const { data: me } = await admin.from('employees').select('is_developer, role').eq('company', COMPANY).ilike('email', callerEmail).maybeSingle();
+    // A developer (2026-10-08, employees.is_developer) may do anything an owner may.
+    const myRole = (me as { is_developer?: boolean } | null)?.is_developer ? 'owner' : (me as { role?: string } | null)?.role;
     const isOwner = myRole === 'owner';
     if (!isOwner && myRole !== 'operator') return fail(403, 'forbidden', 'Admins only.');
 

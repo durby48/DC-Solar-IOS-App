@@ -22,6 +22,7 @@ import {
   removeEmployeeAccess,
   type EmployeeStatus,
 } from '@/lib/employeeInvites';
+import { setDeveloper } from '@/lib/devView';
 import { fetchPaystubs, type EmployeeDocument } from '@/lib/paystubs';
 import { getRole, type EmployeeRole, type RoleInfo } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
@@ -34,6 +35,8 @@ interface EmployeeRow {
   pay_rate: number | null;
   /** Counts toward daily crew availability for service visits (2026-10-06). */
   field_crew: boolean;
+  /** The Developer tag (2026-10-08): full power + Developer Tools. */
+  is_developer: boolean;
 }
 
 const ROLE_META: Record<EmployeeRole, { label: string; bg: string; text: string }> = {
@@ -162,7 +165,7 @@ export default function EmployeesScreen() {
       try {
         const { data, error } = await supabase
           .from('employees')
-          .select('id, email, display_name, role, pay_rate, field_crew')
+          .select('id, email, display_name, role, pay_rate, field_crew, is_developer')
           .eq('is_test', false)
           .order('display_name', { ascending: true });
         if (cancelled) return;
@@ -178,6 +181,7 @@ export default function EmployeesScreen() {
             role: row.role as EmployeeRole,
             pay_rate: row.pay_rate != null ? Number(row.pay_rate) : null,
             field_crew: row.field_crew === true,
+            is_developer: row.is_developer === true,
           })),
         );
         setListState('ok');
@@ -235,6 +239,20 @@ export default function EmployeesScreen() {
       return;
     }
     setEmployees((list) => list.map((e) => (e.id === employee.id ? { ...e, field_crew: !employee.field_crew } : e)));
+  };
+
+  // The Developer tag (2026-10-08): only a developer sees the switch, and
+  // set_developer() checks it again.
+  const toggleDeveloper = async (employee: EmployeeRow) => {
+    setRowBusy(`dev:${employee.email}`);
+    setRowError(null);
+    const result = await setDeveloper(employee.email, !employee.is_developer);
+    setRowBusy(null);
+    if (!result.ok) {
+      setRowError(result.message);
+      return;
+    }
+    setEmployees((list) => list.map((e) => (e.id === employee.id ? { ...e, is_developer: !employee.is_developer } : e)));
   };
 
   // Change someone's role (2026-10-07) — e.g. make a rep the Sales manager.
@@ -343,6 +361,7 @@ export default function EmployeesScreen() {
             </View>
             {pay ? <Text style={styles.payText}>{pay}</Text> : null}
             {employee.field_crew ? <Text style={styles.payText}>Field crew</Text> : null}
+            {employee.is_developer ? <Text style={styles.payText}>Developer</Text> : null}
           </View>
           <Ionicons
             name={expanded ? 'chevron-up' : 'chevron-down'}
@@ -391,6 +410,23 @@ export default function EmployeesScreen() {
                 />
                 <Text style={styles.contactButtonText}>
                   {rowBusy === `crew:${employee.email}` ? 'Saving…' : 'Field crew (counts for visit booking)'}
+                </Text>
+              </Pressable>
+            ) : null}
+            {gate.role?.isDeveloper ? (
+              <Pressable
+                onPress={() => void toggleDeveloper(employee)}
+                disabled={rowBusy !== null}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: employee.is_developer }}
+                style={({ pressed }) => [styles.contactButton, pressed && styles.rowPressed]}>
+                <Ionicons
+                  name={employee.is_developer ? 'checkbox' : 'square-outline'}
+                  size={16}
+                  color={employee.is_developer ? colors.olive : colors.inkSoft}
+                />
+                <Text style={styles.contactButtonText}>
+                  {rowBusy === `dev:${employee.email}` ? 'Saving…' : 'Developer (full access + Developer Tools)'}
                 </Text>
               </Pressable>
             ) : null}

@@ -506,6 +506,16 @@ Deno.serve(async (req) => {
     };
   }
 
+  // Developer Tools → "Send me a test notification" (2026-10-08, dev_test_push).
+  if (!message && table === 'dev_test_pushes' && op === 'INSERT' && typeof record?.email === 'string') {
+    message = {
+      title: '🔔 Test notification',
+      body: 'If you can see this, notifications reach this phone.',
+      emails: [String(record.email).toLowerCase()],
+      audience: 'admins',
+    };
+  }
+
   // A lead assigned to someone (2026-10-06): a new lead created for them, or a
   // reassignment. The trigger (leads_assigned_notify_*) already skips
   // self-assignment, e.g. a rep adding their own prospect.

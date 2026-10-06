@@ -1186,11 +1186,12 @@ Deno.serve(async (req) => {
 
   const { data: employee } = await admin
     .from('employees')
-    .select('role, display_name')
+    .select('is_developer, role, display_name')
     .eq('email', email)
     .maybeSingle();
-  const row = employee as { role?: string; display_name?: string | null } | null;
-  if (row?.role !== 'owner' && row?.role !== 'operator') return json({ error: 'Admins only' }, 403);
+  const row = employee as { is_developer?: boolean; role?: string; display_name?: string | null } | null;
+  // A developer (2026-10-08, employees.is_developer) may do anything an owner may.
+  if (!row?.is_developer && row?.role !== 'owner' && row?.role !== 'operator') return json({ error: 'Admins only' }, 403);
 
   // --- which mailbox is this person allowed to touch? ----------------------
   const mailbox = MAILBOXES[email];

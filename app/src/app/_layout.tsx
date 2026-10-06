@@ -19,8 +19,9 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ConnectionBanner } from '@/components/ConnectionBanner';
+import { DevViewFrame } from '@/components/DevViewBanner';
 import { colors } from '@/constants/theme';
-import { reportDiagnostic } from '@/lib/diagnostics';
+import { installProblemCapture, reportAppOpen, reportDiagnostic } from '@/lib/diagnostics';
 import { useNotificationRouting } from '@/lib/notificationRouter';
 import { configureNotificationHandler } from '@/lib/notifications';
 import { useSalesConfinement } from '@/lib/salesConfinement';
@@ -147,6 +148,13 @@ export default function RootLayout() {
     prepareVoiceAtLaunch();
   }, []);
 
+  // Phone reports (Developer Tools, 2026-10-08): which version this device
+  // runs, and the problems it hits — uncaught errors and failed requests.
+  useEffect(() => {
+    installProblemCapture();
+    reportAppOpen();
+  }, []);
+
   /**
    * Fonts NEVER block the app.
    *
@@ -175,69 +183,75 @@ export default function RootLayout() {
         <SafeAreaView edges={['top']} style={styles.bannerLayer} pointerEvents="box-none">
           <ConnectionBanner />
         </SafeAreaView>
-        <Stack
-          screenOptions={{
-            headerStyle: { backgroundColor: colors.surface },
-            // Ocean-tinted plain back arrow (no route-name label); the title
-            // itself stays ink via headerTitleStyle below.
-            headerTintColor: colors.ocean,
-            headerBackButtonDisplayMode: 'minimal',
-            headerBackTitle: '',
-            headerTitleStyle: { fontWeight: '700', color: colors.ink },
-            headerShadowVisible: false,
-            contentStyle: { backgroundColor: colors.surfaceAlt },
-            ...(Platform.OS === 'web' ? { headerLeft: () => <WebBackButton /> } : {}),
-          }}>
-          <Stack.Screen name="index" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="set-password"
-            options={{ headerShown: false, gestureEnabled: false }}
-          />
-          <Stack.Screen name="sign-up" options={{ headerShown: false }} />
-          <Stack.Screen name="security" options={{ title: 'Security' }} />
-          {/* Rep Settings screens (2026-10-06); /commission is also the admins' report. */}
-          <Stack.Screen name="commission" options={{ title: 'Commission' }} />
-          <Stack.Screen name="plans" options={{ title: 'Plans & prices' }} />
-          <Stack.Screen name="saved-texts" options={{ title: 'Saved texts' }} />
-          <Stack.Screen name="do-not-disturb" options={{ title: 'Do not disturb' }} />
-          <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
-          <Stack.Screen name="calling-check" options={{ title: 'Calling check' }} />
-          <Stack.Screen name="lead-map" options={{ title: 'Lead map' }} />
-          <Stack.Screen name="recents" options={{ title: 'Recent calls' }} />
-          <Stack.Screen name="resources/index" options={{ title: 'Sales resources' }} />
-          <Stack.Screen name="resources/[id]" options={{ title: 'Sales resources' }} />
-          {/* Public: where a customer lands from the Stripe card page (B2). */}
-          <Stack.Screen name="card-saved" options={{ title: 'DC Solar', headerShown: false }} />
-          {/* Public: an invited employee sets their password (employee invites). */}
-          <Stack.Screen name="join" options={{ title: 'DC Solar', headerShown: false }} />
-          {/* Public customer brochure (2026-10-07) — opened from a rep's text. */}
-          <Stack.Screen name="brochure" options={{ title: 'DC Solar service plans', headerShown: false }} />
-          <Stack.Screen name="customer" options={{ headerShown: false, gestureEnabled: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="job/[id]" options={{ title: 'Job' }} />
-          {/* The phone app: a nested Tabs navigator. This header (title +
-              back arrow) is the only one it shows; the tabs hide theirs. */}
-          <Stack.Screen name="phone" options={{ title: 'Phone', headerShown: true, headerBackVisible: true }} />
-          {/* One conversation / the recipient picker, pushed over the tabs
-              the way a phone's Messages app does it. Titles are set by the
-              screens (the person's name). */}
-          <Stack.Screen name="messages/thread" options={{ title: 'Conversation' }} />
-          <Stack.Screen name="messages/compose" options={{ title: 'New Message' }} />
-          {/* The active-call screen. Full-bleed olive, no header; End is the
-              only way out while a call is live. */}
-          <Stack.Screen
-            name="call"
-            options={{ headerShown: false, presentation: 'modal', gestureEnabled: false }}
-          />
-          <Stack.Screen name="leads/index" options={{ title: 'Sales Pipeline' }} />
-          <Stack.Screen name="leads/[id]" options={{ title: 'Lead' }} />
-          <Stack.Screen name="document-builder" options={{ title: 'New document' }} />
-          <Stack.Screen name="job-editor" options={{ title: 'Project' }} />
-          {/* 2026-09-12 overhaul: hub front pages (Human Resources, Systems
-              Management) and the Gmail compose screen. */}
-          <Stack.Screen name="hub/[key]" options={{ title: '' }} />
-          <Stack.Screen name="inbox/compose" options={{ title: 'New Email' }} />
-        </Stack>
+        {/* "Viewing as …" bar + Back to my view, above the app — only while a
+            developer is viewing as someone (components/DevViewBanner.tsx). */}
+        <DevViewFrame>
+          <Stack
+            screenOptions={{
+              headerStyle: { backgroundColor: colors.surface },
+              // Ocean-tinted plain back arrow (no route-name label); the title
+              // itself stays ink via headerTitleStyle below.
+              headerTintColor: colors.ocean,
+              headerBackButtonDisplayMode: 'minimal',
+              headerBackTitle: '',
+              headerTitleStyle: { fontWeight: '700', color: colors.ink },
+              headerShadowVisible: false,
+              contentStyle: { backgroundColor: colors.surfaceAlt },
+              ...(Platform.OS === 'web' ? { headerLeft: () => <WebBackButton /> } : {}),
+            }}>
+            <Stack.Screen name="index" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="set-password"
+              options={{ headerShown: false, gestureEnabled: false }}
+            />
+            <Stack.Screen name="sign-up" options={{ headerShown: false }} />
+            <Stack.Screen name="security" options={{ title: 'Security' }} />
+            {/* Rep Settings screens (2026-10-06); /commission is also the admins' report. */}
+            <Stack.Screen name="commission" options={{ title: 'Commission' }} />
+            <Stack.Screen name="plans" options={{ title: 'Plans & prices' }} />
+            <Stack.Screen name="saved-texts" options={{ title: 'Saved texts' }} />
+            <Stack.Screen name="do-not-disturb" options={{ title: 'Do not disturb' }} />
+            <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
+            <Stack.Screen name="calling-check" options={{ title: 'Calling check' }} />
+            <Stack.Screen name="lead-map" options={{ title: 'Lead map' }} />
+            <Stack.Screen name="recents" options={{ title: 'Recent calls' }} />
+            {/* Developer Tools (2026-10-08) — developers only; the screen checks. */}
+            <Stack.Screen name="dev-tools" options={{ title: 'Developer Tools' }} />
+            <Stack.Screen name="resources/index" options={{ title: 'Sales resources' }} />
+            <Stack.Screen name="resources/[id]" options={{ title: 'Sales resources' }} />
+            {/* Public: where a customer lands from the Stripe card page (B2). */}
+            <Stack.Screen name="card-saved" options={{ title: 'DC Solar', headerShown: false }} />
+            {/* Public: an invited employee sets their password (employee invites). */}
+            <Stack.Screen name="join" options={{ title: 'DC Solar', headerShown: false }} />
+            {/* Public customer brochure (2026-10-07) — opened from a rep's text. */}
+            <Stack.Screen name="brochure" options={{ title: 'DC Solar service plans', headerShown: false }} />
+            <Stack.Screen name="customer" options={{ headerShown: false, gestureEnabled: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="job/[id]" options={{ title: 'Job' }} />
+            {/* The phone app: a nested Tabs navigator. This header (title +
+                back arrow) is the only one it shows; the tabs hide theirs. */}
+            <Stack.Screen name="phone" options={{ title: 'Phone', headerShown: true, headerBackVisible: true }} />
+            {/* One conversation / the recipient picker, pushed over the tabs
+                the way a phone's Messages app does it. Titles are set by the
+                screens (the person's name). */}
+            <Stack.Screen name="messages/thread" options={{ title: 'Conversation' }} />
+            <Stack.Screen name="messages/compose" options={{ title: 'New Message' }} />
+            {/* The active-call screen. Full-bleed olive, no header; End is the
+                only way out while a call is live. */}
+            <Stack.Screen
+              name="call"
+              options={{ headerShown: false, presentation: 'modal', gestureEnabled: false }}
+            />
+            <Stack.Screen name="leads/index" options={{ title: 'Sales Pipeline' }} />
+            <Stack.Screen name="leads/[id]" options={{ title: 'Lead' }} />
+            <Stack.Screen name="document-builder" options={{ title: 'New document' }} />
+            <Stack.Screen name="job-editor" options={{ title: 'Project' }} />
+            {/* 2026-09-12 overhaul: hub front pages (Human Resources, Systems
+                Management) and the Gmail compose screen. */}
+            <Stack.Screen name="hub/[key]" options={{ title: '' }} />
+            <Stack.Screen name="inbox/compose" options={{ title: 'New Email' }} />
+          </Stack>
+        </DevViewFrame>
       </ThemeProvider>
     </GestureHandlerRootView>
   );

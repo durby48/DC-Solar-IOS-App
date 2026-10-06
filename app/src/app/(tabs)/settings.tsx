@@ -23,6 +23,7 @@ import { signOutAndLeave } from '@/lib/signOut';
  *   Phone     · Recent calls, Do not disturb, Notifications, Calling check
  *   Account   · Security (password, two-step sign-in), Sign out
  *   App       · version / check for an update, Delete my account
+ *   Developer · Developer Tools, for a developer on a Sales account (2026-10-08)
  *
  * Each row opens its own screen (`/commission`, `/lead-map`, `/plans`,
  * `/saved-texts`, `/recents`, `/do-not-disturb`, `/notifications`,
@@ -106,6 +107,23 @@ function SalesSettings() {
           <ListRow icon="pulse" title="Calling check" subtitle="Make sure calls ring this phone" onPress={() => go('/calling-check')} />
         </Card>
       </View>
+
+      {/* Developer tag (2026-10-08) — a developer on a Sales account has no Menu tab. */}
+      {me?.isDeveloper ? (
+        <View>
+          <SectionHeader title="Developer" accent={hubColors.systems.fg} />
+          <Card padded={false}>
+            <ListRow
+              icon="construct"
+              iconColor={hubColors.systems.fg}
+              iconBackground={hubColors.systems.bg}
+              title="Developer Tools"
+              subtitle="View as a role or a person, phone reports, view log"
+              onPress={() => go('/dev-tools')}
+            />
+          </Card>
+        </View>
+      ) : null}
 
       <View>
         <SectionHeader title="Account" accent={hubColors.crm.fg} />

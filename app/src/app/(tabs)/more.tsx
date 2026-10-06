@@ -121,6 +121,23 @@ export default function MenuScreen() {
         );
       })}
 
+      {/* Developer tag (2026-10-08): view as a role or a person, phone reports, view log. */}
+      {gate.role?.isDeveloper ? (
+        <View style={styles.section}>
+          <SectionHeader title="Developer" accent={hubColors.systems.fg} />
+          <Card padded={false}>
+            <ListRow
+              icon="construct"
+              iconColor={hubColors.systems.fg}
+              iconBackground={hubColors.systems.bg}
+              title="Developer Tools"
+              subtitle="View as a role or a person, phone reports, view log"
+              onPress={() => router.push('/dev-tools' as never)}
+            />
+          </Card>
+        </View>
+      ) : null}
+
       <Card padded={false} style={styles.section}>
         <ListRow icon="log-out" title="Sign out" danger chevron={false} onPress={signOut} />
       </Card>
