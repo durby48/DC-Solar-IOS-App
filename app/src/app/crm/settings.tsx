@@ -35,6 +35,7 @@ import {
 import { BillingSettingsCard } from '@/components/crm/BillingSettingsCard';
 import { ServiceCapacityCard } from '@/components/crm/ServiceCapacityCard';
 import { CommissionSettingsCard } from '@/components/crm/CommissionSettingsCard';
+import { SalesResourcesCard } from '@/components/crm/SalesResourcesCard';
 import { PhoneNumbersCard } from '@/components/crm/PhoneNumbersCard';
 import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { useRole } from '@/lib/role';
@@ -772,6 +773,7 @@ export default function MessagingSettingsScreen() {
         <BillingSettingsCard />
         <ServiceCapacityCard />
         <CommissionSettingsCard />
+        <SalesResourcesCard />
       </ScrollView>
     </>
   );

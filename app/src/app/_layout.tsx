@@ -204,6 +204,8 @@ export default function RootLayout() {
           <Stack.Screen name="calling-check" options={{ title: 'Calling check' }} />
           <Stack.Screen name="lead-map" options={{ title: 'Lead map' }} />
           <Stack.Screen name="recents" options={{ title: 'Recent calls' }} />
+          <Stack.Screen name="resources/index" options={{ title: 'Sales resources' }} />
+          <Stack.Screen name="resources/[id]" options={{ title: 'Sales resources' }} />
           {/* Public: where a customer lands from the Stripe card page (B2). */}
           <Stack.Screen name="card-saved" options={{ title: 'DC Solar', headerShown: false }} />
           {/* Public: an invited employee sets their password (employee invites). */}

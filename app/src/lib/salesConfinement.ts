@@ -32,6 +32,7 @@ const ALLOWED = [
   '/notifications',
   '/calling-check',
   '/lead-map',
+  '/resources',
   '/recents',
   '/call',
   '/security',

@@ -1,15 +1,17 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
+import { ResourceText } from '@/components/resources/ResourceText';
 import { PulseRing } from '@/components/ui';
 import { colors, fonts, radii, spacing } from '@/constants/theme';
 import { fetchCallStatus, formatDuration, formatPhone, placeBridgeCall } from '@/lib/comms';
 import { takeIncomingCall } from '@/lib/incomingCall';
 import { playRingbackTone } from '@/lib/ringback';
+import { fetchResources } from '@/lib/salesResources';
 import { inAppCallingSupported, startInAppCall, type ActiveCall, type CallState } from '@/lib/voice';
 
 /**
@@ -68,6 +70,18 @@ export default function CallScreen() {
   const [speaker, setSpeaker] = useState(false);
   const [speakerSupported, setSpeakerSupported] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
+  // The call script, on the call screen itself (2026-10-07): reading it never
+  // leaves the call. Loaded the first time it is opened.
+  const [showScript, setShowScript] = useState(false);
+  const [script, setScript] = useState<string | null | undefined>(undefined);
+  const toggleScript = () => {
+    const next = !showScript;
+    setShowScript(next);
+    if (next) setShowKeys(false);
+    if (next && script === undefined) {
+      void fetchResources().then((items) => setScript(items.find((r) => r.kind === 'script')?.body ?? null));
+    }
+  };
   const [dialed, setDialed] = useState('');
   const [seconds, setSeconds] = useState(0);
   const [bridgeBusy, setBridgeBusy] = useState(false);
@@ -340,6 +354,16 @@ export default function CallScreen() {
           {showKeys && dialed ? <Text style={styles.dialed}>{dialed}</Text> : null}
         </View>
 
+        {showScript && !over ? (
+          <ScrollView style={styles.scriptPanel} contentContainerStyle={styles.scriptBody}>
+            {script === undefined ? (
+              <ActivityIndicator color={colors.textOnDark} />
+            ) : (
+              <ResourceText body={script} compact />
+            )}
+          </ScrollView>
+        ) : null}
+
         {showKeys && live ? (
           <View style={styles.keys}>
             {DTMF_KEYS.map((key) => (
@@ -394,8 +418,12 @@ export default function CallScreen() {
                 label="Keypad"
                 active={showKeys}
                 disabled={!live}
-                onPress={() => setShowKeys((v) => !v)}
+                onPress={() => {
+                  setShowKeys((v) => !v);
+                  setShowScript(false);
+                }}
               />
+              <Control icon="document-text" label="Script" active={showScript} disabled={false} onPress={toggleScript} />
               {speakerSupported ? (
                 <Control
                   icon={speaker ? 'volume-high' : 'volume-medium'}
@@ -475,6 +503,9 @@ const styles = StyleSheet.create({
   },
   dialed: { color: colors.textOnDark, fontFamily: fonts.bold, fontSize: 20, letterSpacing: 2 },
 
+  // The call script panel (2026-10-07).
+  scriptPanel: { flex: 1, marginHorizontal: spacing.lg, marginBottom: spacing.md, borderRadius: radii.md, backgroundColor: colors.surface },
+  scriptBody: { padding: spacing.md },
   keys: {
     width: 76 * 3 + spacing.md * 2,
     alignSelf: 'center',
