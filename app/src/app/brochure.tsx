@@ -58,7 +58,10 @@ export default function BrochurePage() {
           <Image source={require('@/assets/images/login-solarflow.jpg')} style={StyleSheet.absoluteFill} contentFit="cover" />
           <View style={styles.heroShade} />
           <View style={[styles.inner, styles.heroInner]}>
-            <Image source={require('@/assets/images/logo.png')} style={styles.logo} contentFit="contain" tintColor="#FFFFFF" />
+            {/* The logo stays black (brand), on a light plate so it reads on the photo. */}
+            <View style={styles.logoPlate}>
+              <Image source={require('@/assets/images/logo.png')} style={styles.logo} contentFit="contain" />
+            </View>
             <Text style={styles.heroTitle}>Keep your solar working like day one.</Text>
             <Text style={styles.heroSub}>Yearly solar service from your local Kansas City team.</Text>
           </View>
@@ -171,21 +174,29 @@ export default function BrochurePage() {
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: '#FFFFFF' },
   scroll: { paddingBottom: 40 },
-  inner: { width: '100%', maxWidth: 960, alignSelf: 'center', paddingHorizontal: 20, gap: 14 },
-  hero: { height: 300, justifyContent: 'flex-end', overflow: 'hidden' },
+  inner: { width: '100%', maxWidth: 960, alignSelf: 'center', paddingHorizontal: 22, gap: 16 },
+  hero: { height: 340, justifyContent: 'flex-end', overflow: 'hidden' },
   heroShade: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(10,20,30,0.55)' },
-  heroInner: { paddingBottom: 28, gap: 8 },
-  logo: { width: 170, height: 48 },
+  heroInner: { paddingBottom: 56, gap: 12 },
+  logoPlate: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginBottom: 4,
+  },
+  logo: { width: 150, height: 40 },
   heroTitle: { color: '#fff', fontSize: 30, fontWeight: '800', lineHeight: 36 },
-  heroSub: { color: 'rgba(255,255,255,0.9)', fontSize: 16, fontWeight: '500' },
+  heroSub: { color: 'rgba(255,255,255,0.92)', fontSize: 16, fontWeight: '500', lineHeight: 23 },
   // The rep's card: clearly its own block — warm fill, brand-orange border,
   // a real shadow (Carson: the first version was hard to see).
   contact: {
     marginTop: -28,
     backgroundColor: WARM,
     borderRadius: 16,
-    padding: 20,
-    gap: 14,
+    padding: 22,
+    gap: 18,
     borderWidth: 2,
     borderColor: SUN,
     shadowColor: '#000',
@@ -199,19 +210,20 @@ const styles = StyleSheet.create({
   contactLabel: { color: '#B5701A', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.6 },
   contactName: { color: INK, fontSize: 24, fontWeight: '800', marginTop: 4 },
   contactPhone: { color: INK, fontSize: 18, fontWeight: '700' },
-  contactButtons: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  contactButtons: { flexDirection: 'row', gap: 12, alignItems: 'center' },
   contactButtonsNarrow: { alignSelf: 'stretch' },
   primary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: SUN, borderRadius: 999, paddingHorizontal: 20, paddingVertical: 12 },
   primaryText: { color: '#fff', fontSize: 15, fontWeight: '800' },
   secondary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#fff', borderWidth: 1.5, borderColor: INK, borderRadius: 999, paddingHorizontal: 20, paddingVertical: 12 },
   secondaryText: { color: INK, fontSize: 15, fontWeight: '800' },
-  h2: { color: INK, fontSize: 22, fontWeight: '800', marginTop: 18 },
-  grid: { gap: 12 },
-  tile: { backgroundColor: SKY, borderRadius: 12, padding: 16, gap: 6, borderWidth: 1, borderColor: '#CFE0EE' },
+  // Clear separation between sections, a little room under each heading.
+  h2: { color: INK, fontSize: 22, fontWeight: '800', marginTop: 30, marginBottom: 2 },
+  grid: { gap: 14 },
+  tile: { backgroundColor: SKY, borderRadius: 14, padding: 18, gap: 8, borderWidth: 1, borderColor: '#CFE0EE' },
   tileTitle: { color: INK, fontSize: 16, fontWeight: '800' },
-  tileBody: { color: SOFT, fontSize: 14, lineHeight: 20 },
-  list: { gap: 8 },
-  listRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  tileBody: { color: SOFT, fontSize: 14, lineHeight: 21 },
+  list: { gap: 12 },
+  listRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   listText: { flex: 1, color: INK, fontSize: 15, lineHeight: 21 },
   step: { width: 22, height: 22, borderRadius: 11, backgroundColor: SUN, color: '#fff', textAlign: 'center', fontWeight: '800', lineHeight: 22, overflow: 'hidden' },
   plan: {
@@ -220,8 +232,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: LINE,
     borderTopWidth: 6,
-    padding: 16,
-    gap: 8,
+    padding: 18,
+    gap: 10,
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 10,
@@ -231,7 +243,7 @@ const styles = StyleSheet.create({
   planName: { fontSize: 18, fontWeight: '800' },
   planPrice: { color: INK, fontSize: 28, fontWeight: '800' },
   planPer: { color: SOFT, fontSize: 15, fontWeight: '600' },
-  about: { color: SOFT, fontSize: 15, lineHeight: 22 },
-  printButton: { alignSelf: 'flex-start', marginTop: 18 },
-  footer: { color: SOFT, fontSize: 12, marginTop: 18, textAlign: 'center' },
+  about: { color: SOFT, fontSize: 15, lineHeight: 23 },
+  printButton: { alignSelf: 'flex-start', marginTop: 24 },
+  footer: { color: SOFT, fontSize: 12, marginTop: 28, textAlign: 'center' },
 });
