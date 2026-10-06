@@ -56,7 +56,7 @@ const UUID_RE = /^[0-9a-fA-F-]{36}$/;
  * Safe inside a PostgREST embed too: `select('*, customers(' + CUSTOMER_COLUMNS + ')')`.
  */
 export const CUSTOMER_COLUMNS =
-  'id, name, phone, phone_e164, email, address, notes, company, photo_path, archived_at, sms_opt_out_at, possible_duplicate_of';
+  'id, name, phone, phone_e164, email, address, notes, company, photo_path, archived_at, sms_opt_out_at, possible_duplicate_of, plan_tier, plan_price_cents, contract_ends_on';
 
 export type MutationResult = { ok: true } | { ok: false; message: string };
 

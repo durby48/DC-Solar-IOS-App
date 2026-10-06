@@ -18,6 +18,7 @@
  */
 
 import { readFunctionError } from '@/lib/artwork';
+import { type PlanChoice } from '@/lib/servicePlans';
 import { supabase } from '@/lib/supabase';
 
 export type ServiceKind = 'Cleaning' | 'Inspection';
@@ -45,6 +46,10 @@ export interface ServiceVisit {
   cardLabel: string | null;
   /** Why the last charge did not go through, for admins and the rep. */
   paymentIssue: string | null;
+  /** The plan sold on this booking (2026-10-06); null = booked before plans. */
+  planTier: PlanChoice | null;
+  /** Its yearly price in cents. */
+  planPriceCents: number | null;
 }
 
 export type DoneCharge = 'paid' | 'covered' | 'failed' | 'no_card' | 'not_configured';
@@ -68,6 +73,9 @@ export async function bookServiceVisit(input: {
   /** 'HH:MM', optional */
   startTime?: string | null;
   note?: string | null;
+  plan: PlanChoice;
+  /** Custom only: the yearly price in cents (a tier's price comes from the database). */
+  priceCents?: number | null;
 }): Promise<{ ok: true; jobId: string; jobNumber: string; possibleDuplicate: boolean } | { ok: false; message: string }> {
   try {
     const { data, error } = await supabase.rpc('book_service_visit', {
@@ -76,6 +84,8 @@ export async function bookServiceVisit(input: {
       p_date: input.date,
       p_start: asTime(input.startTime),
       p_note: input.note?.trim() || null,
+      p_plan: input.plan,
+      p_price_cents: input.plan === 'custom' ? (input.priceCents ?? null) : null,
     });
     if (error || !data) return { ok: false, message: error?.message || 'Could not book the visit.' };
     const row = data as { job_id: string; job_number: string; possible_duplicate_of: string | null };
@@ -95,6 +105,20 @@ export async function rescheduleServiceVisit(jobId: string, date: string, startT
     return error ? failure(error, 'Could not reschedule the visit.') : { ok: true };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : 'Could not reschedule the visit.' };
+  }
+}
+
+/** Change the plan on an open, unpaid visit (the rep who booked it, or an admin). */
+export async function setServicePlan(jobId: string, plan: PlanChoice, priceCents?: number | null): Promise<VisitResult> {
+  try {
+    const { error } = await supabase.rpc('set_service_plan', {
+      p_job_id: jobId,
+      p_plan: plan,
+      p_price_cents: plan === 'custom' ? (priceCents ?? null) : null,
+    });
+    return error ? failure(error, 'Could not change the plan.') : { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not change the plan.' };
   }
 }
 
@@ -147,7 +171,7 @@ export async function fetchServiceVisit(jobId: string): Promise<ServiceVisit | n
     const [{ data: job, error }, { data: dates }] = await Promise.all([
       supabase
         .from('jobs')
-        .select('id, job_number, job_type, stage, scheduled_for, completed_on, service_paid_at, customer_id')
+        .select('id, job_number, job_type, stage, scheduled_for, completed_on, service_paid_at, customer_id, plan_tier, plan_price_cents')
         .eq('id', jobId)
         .maybeSingle(),
       supabase
@@ -167,6 +191,8 @@ export async function fetchServiceVisit(jobId: string): Promise<ServiceVisit | n
       completed_on: string | null;
       service_paid_at: string | null;
       customer_id: string | null;
+      plan_tier: PlanChoice | null;
+      plan_price_cents: number | null;
     };
     const { data: cust } = j.customer_id
       ? await supabase
@@ -196,6 +222,8 @@ export async function fetchServiceVisit(jobId: string): Promise<ServiceVisit | n
       cardOnFileAt: c?.card_on_file_at ?? null,
       cardLabel: c?.card_last4 ? `${brand} •${c.card_last4}` : null,
       paymentIssue: c?.payment_issue ?? null,
+      planTier: j.plan_tier,
+      planPriceCents: j.plan_price_cents,
     };
   } catch {
     return null;

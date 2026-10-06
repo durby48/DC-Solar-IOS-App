@@ -8,12 +8,21 @@ import { colors, radii, spacing } from '@/constants/theme';
 import { sendSms } from '@/lib/comms';
 import { formatShortDate } from '@/lib/dates';
 import {
+  fetchServicePlans,
+  formatCents,
+  parseDollars,
+  planSummary,
+  type PlanChoice,
+  type ServicePlan,
+} from '@/lib/servicePlans';
+import {
   bookServiceVisit,
   cancelServiceVisit,
   fetchServiceVisit,
   formatVisitTime,
   requestCardLink,
   rescheduleServiceVisit,
+  setServicePlan,
   SERVICE_KINDS,
   type ServiceKind,
   type ServiceVisit,
@@ -24,8 +33,10 @@ import {
  * (2026-10-05, B1). The database does the work and the permission checks
  * (`lib/serviceVisits.ts`); these are the forms around it.
  *
- *   BookVisitForm — type (Cleaning / Inspection), date, optional time, note.
- *   VisitCard     — what was booked, Paid / Not paid, card on file, the
+ *   BookVisitForm — type (Cleaning / Inspection), PLAN (Bronze / Silver /
+ *                   Gold / Custom price — 2026-10-06), date, optional time, note.
+ *   VisitCard     — what was booked and on which plan (changeable until it is
+ *                   paid), Paid / Not paid, card on file, the
  *                   Stripe card link (Copy / Text / Email from the rep's own
  *                   phone or mail app), and Reschedule / Cancel while open.
  *
@@ -81,6 +92,60 @@ function DateFields({
   );
 }
 
+/**
+ * Bronze / Silver / Gold with their prices, or Custom with the rep's own
+ * yearly price (no floor for now; admins just see it tagged Custom).
+ */
+function PlanPicker({
+  plans,
+  plan,
+  custom,
+  onPlan,
+  onCustom,
+}: {
+  plans: ServicePlan[];
+  plan: PlanChoice | null;
+  custom: string;
+  onPlan: (p: PlanChoice) => void;
+  onCustom: (v: string) => void;
+}) {
+  return (
+    <>
+      <View style={styles.chips}>
+        {plans.map((p) => (
+          <Chip
+            key={p.tier}
+            label={`${p.label} ${formatCents(p.amountCents)}`}
+            tone="olive"
+            selected={plan === p.tier}
+            onPress={() => onPlan(p.tier)}
+          />
+        ))}
+        <Chip label="Custom" tone="olive" selected={plan === 'custom'} onPress={() => onPlan('custom')} />
+      </View>
+      {plan === 'custom' ? (
+        <TextInput
+          value={custom}
+          onChangeText={onCustom}
+          placeholder="Yearly price, e.g. 650"
+          placeholderTextColor={colors.inkSoft}
+          keyboardType="decimal-pad"
+          style={styles.input}
+        />
+      ) : null}
+      <Text style={styles.meta}>Per year · 2-year agreement · first year charged after the first visit.</Text>
+    </>
+  );
+}
+
+/** The plan choice as the database wants it, or the reason it is not ready. */
+function planInput(plan: PlanChoice | null, custom: string): { plan: PlanChoice; priceCents: number | null } | string {
+  if (!plan) return 'Pick a plan.';
+  if (plan !== 'custom') return { plan, priceCents: null };
+  const cents = parseDollars(custom);
+  return cents ? { plan, priceCents: cents } : 'Enter the custom yearly price, e.g. 650.';
+}
+
 export function BookVisitForm({
   leadId,
   onBooked,
@@ -94,13 +159,39 @@ export function BookVisitForm({
   const [date, setDate] = useState(isoPlusDays(1));
   const [time, setTime] = useState('');
   const [note, setNote] = useState('');
+  const [plans, setPlans] = useState<ServicePlan[]>([]);
+  const [plan, setPlan] = useState<PlanChoice | null>(null);
+  const [custom, setCustom] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    let cancelled = false;
+    void fetchServicePlans().then((p) => {
+      if (!cancelled) setPlans(p);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const submit = async () => {
+    const chosen = planInput(plan, custom);
+    if (typeof chosen === 'string') {
+      setError(chosen);
+      return;
+    }
     setSaving(true);
     setError(null);
-    const result = await bookServiceVisit({ leadId, kind, date: date.trim(), startTime: time.trim() || null, note });
+    const result = await bookServiceVisit({
+      leadId,
+      kind,
+      date: date.trim(),
+      startTime: time.trim() || null,
+      note,
+      plan: chosen.plan,
+      priceCents: chosen.priceCents,
+    });
     setSaving(false);
     if (result.ok) {
       onBooked(
@@ -120,6 +211,8 @@ export function BookVisitForm({
           <Chip key={k} label={k} tone="olive" selected={kind === k} onPress={() => setKind(k)} />
         ))}
       </View>
+      <Text style={styles.label}>Plan</Text>
+      <PlanPicker plans={plans} plan={plan} custom={custom} onPlan={setPlan} onCustom={setCustom} />
       <Text style={styles.label}>When</Text>
       <DateFields date={date} time={time} onDate={setDate} onTime={setTime} />
       <TextInput
@@ -142,7 +235,7 @@ export function BookVisitForm({
   );
 }
 
-type Mode = 'view' | 'reschedule' | 'cancel';
+type Mode = 'view' | 'reschedule' | 'cancel' | 'plan';
 
 export function VisitCard({
   jobId,
@@ -166,6 +259,9 @@ export function VisitCard({
   const [copied, setCopied] = useState(false);
   const [texting, setTexting] = useState(false);
   const [texted, setTexted] = useState(false);
+  const [plans, setPlans] = useState<ServicePlan[]>([]);
+  const [plan, setPlan] = useState<PlanChoice | null>(null);
+  const [custom, setCustom] = useState('');
 
   const load = useCallback(async () => {
     setVisit(await fetchServiceVisit(jobId));
@@ -192,8 +288,13 @@ export function VisitCard({
   const when = [visit.date ? formatShortDate(visit.date) : 'No date', formatVisitTime(visit.startTime)].filter(Boolean).join(' · ');
 
   const firstName = (person?.name ?? '').split(' ')[0] || 'there';
+  const sold = planSummary(visit.planTier, visit.planPriceCents);
+  const planWords =
+    visit.planTier && visit.planPriceCents
+      ? `${planSummary(visit.planTier, null)} solar service plan (${formatCents(visit.planPriceCents)} a year, 2-year agreement)`
+      : 'annual solar service plan';
   const linkMessage = (url: string) =>
-    `Hi ${firstName}, this is DC Solar. Here is a secure Stripe link to save the card for your annual solar service plan — it is only charged after your visit: ${url}`;
+    `Hi ${firstName}, this is DC Solar. Here is a secure Stripe link to save the card for your ${planWords}. Nothing is charged until after your first visit: ${url}`;
 
   const makeLink = async () => {
     setLinkBusy(true);
@@ -231,6 +332,7 @@ export function VisitCard({
         </View>
       </View>
       <Text style={styles.meta}>{open ? when : `Done ${visit.completedOn ? formatShortDate(visit.completedOn) : ''}`}</Text>
+      <Text style={[styles.meta, styles.plan]}>{sold ? `${sold} · 2-year agreement` : 'No plan picked'}</Text>
       {!visit.paidAt ? (
         <View style={styles.cardRow}>
           <Ionicons
@@ -319,8 +421,45 @@ export function VisitCard({
               setMode('reschedule');
             }}
           />
+          {!visit.paidAt ? (
+            <Chip
+              label="Change plan"
+              tone="olive"
+              icon="pricetag-outline"
+              onPress={() => {
+                setPlan(visit.planTier);
+                setCustom(visit.planTier === 'custom' && visit.planPriceCents ? String(visit.planPriceCents / 100) : '');
+                setMode('plan');
+                if (plans.length === 0) void fetchServicePlans().then(setPlans);
+              }}
+            />
+          ) : null}
           <Chip label="Cancel visit" tone="danger" icon="close-circle-outline" onPress={() => setMode('cancel')} />
         </View>
+      ) : null}
+
+      {mode === 'plan' ? (
+        <>
+          <PlanPicker plans={plans} plan={plan} custom={custom} onPlan={setPlan} onCustom={setCustom} />
+          <View style={styles.buttons}>
+            <Pressable onPress={() => setMode('view')} style={({ pressed }) => [styles.cancel, pressed && styles.pressed]}>
+              <Text style={styles.cancelText}>Back</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                const chosen = planInput(plan, custom);
+                if (typeof chosen === 'string') {
+                  setError(chosen);
+                  return;
+                }
+                void run(() => setServicePlan(jobId, chosen.plan, chosen.priceCents));
+              }}
+              disabled={busy}
+              style={({ pressed }) => [styles.save, (pressed || busy) && styles.pressed]}>
+              {busy ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.saveText}>Save plan</Text>}
+            </Pressable>
+          </View>
+        </>
       ) : null}
 
       {mode === 'reschedule' ? (
@@ -392,6 +531,7 @@ const styles = StyleSheet.create({
   tag: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radii.pill },
   cardRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   cardOk: { color: colors.olive },
+  plan: { color: colors.ink },
   linkBox: { gap: spacing.xs, padding: spacing.sm, borderRadius: radii.sm, backgroundColor: colors.surface },
   linkText: { color: colors.ocean, fontSize: 12, fontWeight: '600' },
   tagPaid: { backgroundColor: colors.mintSoft },

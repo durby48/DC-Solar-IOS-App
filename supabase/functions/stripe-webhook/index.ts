@@ -190,6 +190,20 @@ Deno.serve(async (req) => {
             plan_status: event.type === 'customer.subscription.deleted' ? 'canceled' : String(obj.status ?? ''),
           })
           .eq('id', customer.id);
+        // The 2-year minimum (2026-10-06): a plan ended before its agreement
+        // runs out is flagged for an admin. What happens next (balance owed,
+        // a fee, nothing) is not decided yet, so this only records it.
+        if (event.type === 'customer.subscription.deleted') {
+          const { data: row } = await admin.from('customers').select('contract_ends_on').eq('id', customer.id).maybeSingle();
+          const ends = (row as { contract_ends_on?: string | null } | null)?.contract_ends_on;
+          const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+          if (ends && today < ends) {
+            await admin
+              .from('customers')
+              .update({ payment_issue: `Plan canceled before the 2-year agreement ends (${ends}).`, payment_issue_at: now })
+              .eq('id', customer.id);
+          }
+        }
         break;
       }
 

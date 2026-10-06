@@ -44,6 +44,14 @@ export interface Customer {
   phone_e164?: string | null;
   /** Set when the customer replies STOP to a DC Solar text. */
   sms_opt_out_at?: string | null;
+  /**
+   * The service plan they are on (2026-10-06), written when year one is
+   * charged: bronze / silver / gold / custom, its yearly price in cents, and
+   * the end of the 2-year minimum agreement (YYYY-MM-DD).
+   */
+  plan_tier?: string | null;
+  plan_price_cents?: number | null;
+  contract_ends_on?: string | null;
 }
 
 /** A scheduled work day for a job (mirrors the job_schedule_dates table). */
@@ -75,5 +83,8 @@ export interface Job {
   job_type?: string | null;
   /** Service visits: when the card was charged (null = Not paid). */
   service_paid_at?: string | null;
+  /** Service visits (2026-10-06): the plan sold on this booking, and its yearly price. */
+  plan_tier?: string | null;
+  plan_price_cents?: number | null;
   customer?: Customer | null;
 }

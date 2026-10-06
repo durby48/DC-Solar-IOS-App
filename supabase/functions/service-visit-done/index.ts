@@ -19,6 +19,16 @@
  *    becomes 'won' — a customer — and any payment flag clears. `stripe-webhook`
  *    records the same thing from invoice.paid, so either arriving first is fine.
  *
+ * WHICH PRICE (2026-10-06, plans). The booking's `jobs.plan_tier`:
+ *   bronze / silver / gold → that tier's Stripe price (`service_plans`);
+ *   custom                 → a yearly price made on the fly at the rep's
+ *                            `plan_price_cents`, on the same Stripe product as
+ *                            the tiers (read from the Bronze price);
+ *   null                   → booked before plans: the legacy
+ *                            company_settings.stripe_annual_price_id.
+ * On success the customer records what they are on (plan_tier,
+ * plan_price_cents) and the 2-year agreement (contract_starts_on / _ends_on).
+ *
  * The visit being done never depends on the charge: a declined card or a
  * missing one leaves it done, Not paid, with customers.payment_issue set for
  * an admin to chase in the Stripe dashboard.
@@ -104,7 +114,11 @@ Deno.serve(async (req) => {
     if (doneErr) return fail(409, 'not_done', doneErr.message);
 
     // --- 2. the charge ------------------------------------------------------
-    const { data: job } = await admin.from('jobs').select('id, company, customer_id').eq('id', jobId).maybeSingle();
+    const { data: job } = await admin
+      .from('jobs')
+      .select('id, company, customer_id, plan_tier, plan_price_cents')
+      .eq('id', jobId)
+      .maybeSingle();
     const { data: customer } = job?.customer_id
       ? await admin
           .from('customers')
@@ -145,15 +159,52 @@ Deno.serve(async (req) => {
       await flag('No card on file when the visit was marked done.');
       return ok({ charge: 'no_card', message: 'Visit done, but there is no card on file — an admin will follow up.' });
     }
-    const { data: settings } = await admin
-      .from('company_settings')
-      .select('stripe_annual_price_id')
-      .eq('company', job!.company)
-      .maybeSingle();
-    const priceId = (settings as { stripe_annual_price_id?: string | null } | null)?.stripe_annual_price_id;
-    if (!priceId) {
-      await flag('No annual plan price is set, so the visit was not charged.');
-      return ok({ charge: 'not_configured', message: 'Visit done, but no plan price is set — not charged.' });
+    // --- which price ---------------------------------------------------------
+    const tier = (job!.plan_tier as string | null) ?? null;
+    const notSet = async (what: string) => {
+      await flag(`${what}, so the visit was not charged.`);
+      return ok({ charge: 'not_configured', message: `Visit done, but ${what.toLowerCase()} — not charged.` });
+    };
+    let item: Record<string, string>;
+    let planPrice: number | null = (job!.plan_price_cents as number | null) ?? null;
+    if (tier === 'bronze' || tier === 'silver' || tier === 'gold') {
+      const { data: plan } = await admin
+        .from('service_plans')
+        .select('stripe_price_id, amount_cents')
+        .eq('company', job!.company)
+        .eq('tier', tier)
+        .maybeSingle();
+      if (!plan?.stripe_price_id) return await notSet(`The ${tier} plan has no Stripe price`);
+      item = { 'items[0][price]': plan.stripe_price_id as string };
+      planPrice = (plan.amount_cents as number) ?? planPrice;
+    } else if (tier === 'custom') {
+      if (!planPrice || planPrice < 100) return await notSet('The custom price is missing');
+      // Same Stripe product as the tiers, so every plan reports together.
+      const { data: bronze } = await admin
+        .from('service_plans')
+        .select('stripe_price_id')
+        .eq('company', job!.company)
+        .eq('tier', 'bronze')
+        .maybeSingle();
+      if (!bronze?.stripe_price_id) return await notSet('The plans are not set up in Stripe');
+      const base = await stripe(stripeKey, 'GET', `prices/${encodeURIComponent(bronze.stripe_price_id as string)}`);
+      const product = base.ok ? (base.data.product as string | undefined) : undefined;
+      if (!product) return await notSet('The plan product could not be read from Stripe');
+      item = {
+        'items[0][price_data][currency]': 'usd',
+        'items[0][price_data][product]': product,
+        'items[0][price_data][unit_amount]': String(planPrice),
+        'items[0][price_data][recurring][interval]': 'year',
+      };
+    } else {
+      const { data: settings } = await admin
+        .from('company_settings')
+        .select('stripe_annual_price_id')
+        .eq('company', job!.company)
+        .maybeSingle();
+      const legacy = (settings as { stripe_annual_price_id?: string | null } | null)?.stripe_annual_price_id;
+      if (!legacy) return await notSet('No plan was picked and no annual plan price is set');
+      item = { 'items[0][price]': legacy };
     }
 
     const sub = await stripe(
@@ -162,7 +213,8 @@ Deno.serve(async (req) => {
       'subscriptions',
       {
         customer: customer.stripe_customer_id,
-        'items[0][price]': priceId,
+        ...item,
+        'metadata[plan_tier]': tier ?? 'legacy',
         payment_behavior: 'allow_incomplete',
         off_session: 'true',
         'expand[0]': 'latest_invoice.payment_intent',
@@ -185,7 +237,21 @@ Deno.serve(async (req) => {
 
     if (status === 'active' || status === 'trialing') {
       await markPaid(invoice?.id ?? null);
-      await admin.from('customers').update({ payment_issue: null, payment_issue_at: null }).eq('id', customer.id);
+      // What they are on, and the 2-year minimum agreement from today.
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+      const [y, m, d] = today.split('-');
+      await admin
+        .from('customers')
+        .update({
+          payment_issue: null,
+          payment_issue_at: null,
+          plan_tier: tier,
+          plan_price_cents: planPrice,
+          contract_starts_on: today,
+          // Feb 29 has no twin two years on; the 28th is the same anniversary.
+          contract_ends_on: `${Number(y) + 2}-${m}-${m === '02' && d === '29' ? '28' : d}`,
+        })
+        .eq('id', customer.id);
       return ok({ charge: 'paid', message: 'Visit done — the annual plan started and year one was charged.' });
     }
     const reason = invoice?.payment_intent?.last_payment_error?.message ?? 'The card was declined.';

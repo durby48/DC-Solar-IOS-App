@@ -29,6 +29,7 @@ import { fetchJob } from '@/lib/data';
 import { formatShortDate } from '@/lib/dates';
 import { fetchMyJobHours, type JobWithPM } from '@/lib/jobs';
 import { useRole } from '@/lib/role';
+import { PLAN_LABEL, type PlanChoice } from '@/lib/servicePlans';
 import { markServiceVisitDone } from '@/lib/serviceVisits';
 import { isServiceJob, stageOrDefault } from '@/lib/stages';
 
@@ -206,7 +207,9 @@ export default function JobDetailScreen() {
               // sets it in B2) and, while it is open, the crew's Visit done.
               <Card style={styles.visitCard}>
                 <View style={styles.topRow}>
-                  <AppText variant="section">{job.job_type} visit</AppText>
+                  <AppText variant="section">
+                    {job.job_type} visit{job.plan_tier ? ` · ${PLAN_LABEL[job.plan_tier as PlanChoice] ?? job.plan_tier} plan` : ''}
+                  </AppText>
                   <Chip
                     label={job.service_paid_at ? 'Paid' : 'Not paid'}
                     tone={job.service_paid_at ? 'olive' : 'danger'}

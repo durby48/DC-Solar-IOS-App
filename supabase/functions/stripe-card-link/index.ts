@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
     if (!body.job_id) return fail(400, 'bad_request', 'job_id is required.');
     const { data: job } = await admin
       .from('jobs')
-      .select('id, company, job_number, job_type, stage, sales_rep_email, customer_id')
+      .select('id, company, job_number, job_type, stage, sales_rep_email, customer_id, plan_tier, plan_price_cents')
       .eq('id', body.job_id)
       .maybeSingle();
     if (!job) return fail(404, 'not_found', 'Visit not found.');
@@ -141,8 +141,22 @@ Deno.serve(async (req) => {
       if (saveErr) return fail(500, 'save_failed', `Could not save the Stripe customer: ${saveErr.message}`);
     }
 
+    // --- what they are agreeing to (2026-10-06, plans) -----------------------
+    // Shown above the Save button on Stripe's page: the plan, its yearly
+    // price, the 2-year agreement, and that nothing is charged yet.
+    const TIER_LABEL: Record<string, string> = { bronze: 'Bronze', silver: 'Silver', gold: 'Gold', custom: 'Custom' };
+    const cents = job.plan_price_cents as number | null;
+    const dollars = cents ? `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: cents % 100 ? 2 : 0 })}` : null;
+    const terms = [
+      job.plan_tier && dollars ? `DC Solar ${TIER_LABEL[job.plan_tier as string] ?? ''} service plan: ${dollars} per year, 2-year agreement.` : null,
+      'Nothing is charged until after your first service visit.',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
     // --- the card page ------------------------------------------------------
     const session = await stripe(stripeKey, 'POST', 'checkout/sessions', {
+      'custom_text[submit][message]': terms,
       mode: 'setup',
       customer: stripeCustomerId,
       'payment_method_types[0]': 'card',

@@ -14,6 +14,7 @@ import { type Assignment } from '@/lib/assignments';
 import { formatPhone } from '@/lib/comms';
 import { updateCustomer, type CustomerFinanceRow, type CustomerJob } from '@/lib/crm';
 import { LEAD_STATUS_LABEL, LEAD_STATUS_ORDER, type WorkspaceRecord } from '@/lib/crmWorkspace';
+import { planSummary } from '@/lib/servicePlans';
 import { type CustomerDocument } from '@/lib/customers';
 import { todayISO } from '@/lib/dates';
 import { isUpcoming, type LeadAppointment } from '@/lib/leadAppointments';
@@ -304,6 +305,16 @@ export function DetailPanel({
             <Fact label="Phone" value={record.phoneE164 ? formatPhone(record.phoneE164) : record.phone} />
             <Fact label="Email" value={record.email} />
             <Fact label="Address" value={record.address} />
+            {record.kind === 'customer' && !isSales && record.customer?.plan_tier ? (
+              <Fact
+                label="Plan"
+                value={`${planSummary(record.customer.plan_tier, record.customer.plan_price_cents)}${
+                  record.customer.contract_ends_on
+                    ? ` · agreement to ${new Date(`${record.customer.contract_ends_on}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                    : ''
+                }`}
+              />
+            ) : null}
             {record.optedOut ? <Text style={styles.warn}>Replied STOP — texting is off. Calling is fine.</Text> : null}
             {record.duplicateOfName && !isSales ? (
               <Text style={styles.warn}>
