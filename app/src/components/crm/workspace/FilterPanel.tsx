@@ -1,5 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import {
@@ -43,6 +44,72 @@ function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
 
+/**
+ * ZIP codes (2026-10-08): type and the matching ZIPs appear (with how many
+ * records each), instead of every ZIP in the list as a wall of chips. Picked
+ * ZIPs stay shown above the box; tap one to remove it.
+ */
+function ZipPicker({
+  zips,
+  selected,
+  onToggle,
+}: {
+  zips: { value: string; count: number }[];
+  selected: string[];
+  onToggle: (zip: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const q = query.replace(/[^0-9]/g, '');
+  const matches = q ? zips.filter((z) => z.value.startsWith(q) && !selected.includes(z.value)).slice(0, 12) : [];
+  const pick = (zip: string) => {
+    onToggle(zip);
+    setQuery('');
+  };
+  return (
+    <View style={styles.zipBox}>
+      {selected.length > 0 ? (
+        <View style={styles.wrap}>
+          {selected.map((z) => (
+            <Pill key={z} label={`${z}  ✕`} on onPress={() => onToggle(z)} />
+          ))}
+        </View>
+      ) : null}
+      <View style={styles.searchRow}>
+        <Ionicons name="search" size={14} color={colors.inkSoft} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder={`Type a ZIP code (${zips.length} in this list)`}
+          placeholderTextColor={colors.inkSoft}
+          keyboardType="number-pad"
+          maxLength={5}
+          returnKeyType="done"
+          onSubmitEditing={() => {
+            if (matches.length > 0 && (matches.length === 1 || matches[0].value === q)) pick(matches[0].value);
+          }}
+          style={styles.searchInput}
+        />
+        {query ? (
+          <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityLabel="Clear">
+            <Ionicons name="close-circle" size={16} color={colors.inkSoft} />
+          </Pressable>
+        ) : null}
+      </View>
+      {q ? (
+        matches.length === 0 ? (
+          <Text style={styles.none}>No ZIP in this list starts with {q}.</Text>
+        ) : (
+          <View style={styles.wrap}>
+            {matches.map((z) => (
+              <Pill key={z.value} label={`${z.value} · ${z.count}`} on={false} onPress={() => pick(z.value)} />
+            ))}
+          </View>
+        )
+      ) : null}
+    </View>
+  );
+}
+
 export function FilterPanel({
   filters,
   onChange,
@@ -84,16 +151,11 @@ export function FilterPanel({
         {options.zips.length === 0 ? (
           <Text style={styles.none}>No ZIP codes in these addresses.</Text>
         ) : (
-          <View style={styles.wrap}>
-            {options.zips.map((z) => (
-              <Pill
-                key={z.value}
-                label={`${z.value} · ${z.count}`}
-                on={filters.zips.includes(z.value)}
-                onPress={() => set({ zips: toggle(filters.zips, z.value) })}
-              />
-            ))}
-          </View>
+          <ZipPicker
+            zips={options.zips}
+            selected={filters.zips}
+            onToggle={(z) => set({ zips: toggle(filters.zips, z) })}
+          />
         )}
 
         <Text style={styles.section}>Stage</Text>
@@ -230,6 +292,18 @@ const styles = StyleSheet.create({
   section: { color: colors.inkSoft, fontSize: 11, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase', marginTop: spacing.sm },
   none: { color: colors.inkSoft, fontSize: 12 },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  zipBox: { gap: 6 },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.line,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm + 2,
+    backgroundColor: colors.surfaceAlt,
+  },
+  searchInput: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: '600', paddingVertical: 7 },
   pill: { paddingHorizontal: spacing.sm + 2, paddingVertical: 5, borderRadius: radii.pill, backgroundColor: hubColors.crm.bg, maxWidth: 260 },
   pillOn: { backgroundColor: hubColors.crm.fg },
   pillText: { color: hubColors.crm.deep, fontSize: 12, fontWeight: '700' },

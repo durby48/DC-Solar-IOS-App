@@ -42,7 +42,7 @@ interface EmployeeRow {
 const ROLE_META: Record<EmployeeRole, { label: string; bg: string; text: string }> = {
   owner: { bg: colors.sunLight, text: colors.ink, label: 'Owner' },
   operator: { bg: colors.skySoft, text: colors.ocean, label: 'Operator' },
-  viewer: { bg: colors.tan, text: colors.inkSoft, label: 'Viewer' },
+  viewer: { bg: colors.tan, text: colors.inkSoft, label: 'Crew' },
   sales: { bg: colors.violetSoft, text: colors.violet, label: 'Sales' },
   sales_manager: { bg: colors.violetSoft, text: colors.violetDeep, label: 'Sales manager' },
 };
