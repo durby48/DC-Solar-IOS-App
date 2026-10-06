@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { presetProspectPhone } from '@/components/crm/workspace/ProspectForm';
@@ -100,38 +100,51 @@ function SalesKeypad() {
     router.navigate({ pathname: '/workspace', params: { new: 'prospect' } } as never);
   };
 
+  // FIT ON ONE SCREEN (2026-10-07). The pad is 5 rows of keys (4 + call)
+  // plus the number display and gaps, ≈ 6.8 × the key size. The free height
+  // under the header is measured and the keys sized to it (44–76 pt), so it
+  // never scrolls on an iPhone SE or spreads out on a big phone. One name
+  // match (or one notice) sits in a fixed slot above, so nothing moves while
+  // typing.
+  const [freeHeight, setFreeHeight] = useState(0);
+  const keySize = freeHeight > 0 ? Math.max(44, Math.min(76, Math.floor(freeHeight / 6.8))) : 64;
+  const extra = matches.length - 1;
+
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <View style={styles.container}>
         <View style={styles.head}>
-          <AppText variant="title" color={colors.textPrimary}>
+          <AppText variant="heading" color={colors.textPrimary}>
             Keypad
           </AppText>
-          <AppText variant="caption" color={colors.textSecondary}>
-            {line ? `Calls go out from your number, ${formatPhone(line)}` : 'No DC Solar number assigned yet — ask an admin'}
+          <AppText variant="caption" color={colors.textSecondary} numberOfLines={1}>
+            {line ? `From your number ${formatPhone(line)}` : 'No DC Solar number yet — ask an admin'}
           </AppText>
         </View>
 
-        <View style={styles.matchArea}>
-          {matches.map((r) => (
+        <View style={styles.slot}>
+          {note ? (
+            <Text style={styles.note} numberOfLines={2}>
+              {note}
+            </Text>
+          ) : matches[0] ? (
             <Pressable
-              key={r.key}
-              onPress={() => router.navigate({ pathname: '/workspace', params: { open: r.key } } as never)}
-              style={({ pressed }) => [styles.match, r === match && styles.matchPrimary, pressed && styles.pressed]}>
+              onPress={() => router.navigate({ pathname: '/workspace', params: { open: matches[0].key } } as never)}
+              style={({ pressed }) => [styles.match, matches[0] === match && styles.matchPrimary, pressed && styles.pressed]}>
               <Ionicons name="person" size={16} color={hubColors.crm.fg} />
               <View style={styles.matchBody}>
                 <Text style={styles.matchName} numberOfLines={1}>
-                  {r.name}
+                  {matches[0].name}
                 </Text>
                 <Text style={styles.matchMeta} numberOfLines={1}>
-                  {r.kind === 'customer' ? 'Customer' : 'Prospect / lead'}
-                  {r.phoneE164 ? ` · ${formatPhone(r.phoneE164)}` : ''}
+                  {matches[0].kind === 'customer' ? 'Customer' : 'Prospect / lead'}
+                  {matches[0].phoneE164 ? ` · ${formatPhone(matches[0].phoneE164)}` : ''}
+                  {extra > 0 ? ` · +${extra} more` : ''}
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
             </Pressable>
-          ))}
-          {matches.length === 0 && e164 ? (
+          ) : e164 ? (
             <Pressable onPress={saveAsProspect} style={({ pressed }) => [styles.save, pressed && styles.pressed]}>
               <Ionicons name="person-add-outline" size={15} color={hubColors.crm.fg} />
               <Text style={styles.saveText}>New number · Save as prospect</Text>
@@ -139,17 +152,18 @@ function SalesKeypad() {
           ) : null}
         </View>
 
-        <Dialpad
-          value={value}
-          onChange={(next) => {
-            setValue(next);
-            if (note) setNote(null);
-          }}
-          onCall={call}
-        />
-
-        {note ? <Text style={styles.note}>{note}</Text> : null}
-      </ScrollView>
+        <View style={styles.padArea} onLayout={(e) => setFreeHeight(e.nativeEvent.layout.height)}>
+          <Dialpad
+            value={value}
+            onChange={(next) => {
+              setValue(next);
+              if (note) setNote(null);
+            }}
+            onCall={call}
+            keySize={keySize}
+          />
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -157,22 +171,26 @@ function SalesKeypad() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surfaceAlt },
   container: {
+    flex: 1,
     width: '100%',
     maxWidth: 480,
     alignSelf: 'center',
-    padding: spacing.lg,
-    gap: spacing.md,
-    paddingBottom: spacing.xxl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+    gap: spacing.sm,
   },
   head: { gap: 2 },
-  matchArea: { minHeight: 44, gap: spacing.xs, justifyContent: 'flex-end' },
+  slot: { height: 52, justifyContent: 'center' },
+  padArea: { flex: 1, justifyContent: 'center' },
   match: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     backgroundColor: colors.surface,
     borderRadius: radii.md,
-    padding: spacing.sm + 2,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: spacing.xs + 2,
     opacity: 0.8,
   },
   matchPrimary: { opacity: 1, backgroundColor: hubColors.crm.bg },
