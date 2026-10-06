@@ -1,7 +1,8 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { Stack, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { StyleSheet, TextInput, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { AppText, Button, Card, Chip, Screen } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
@@ -47,6 +48,8 @@ export default function ImportLeadsScreen() {
   const [headerIndex, setHeaderIndex] = useState(0);
   const [fields, setFields] = useState<Field[]>([]);
   const [source, setSource] = useState('');
+  // Fill in missing details (installer, email, phone) on leads already in the CRM.
+  const [update, setUpdate] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -85,7 +88,7 @@ export default function ImportLeadsScreen() {
   const doImport = async () => {
     setBusy(true);
     setError(null);
-    const out = await runImport(source.trim(), built);
+    const out = await runImport(source.trim(), built, update);
     setBusy(false);
     if (out.ok) setResult(out.result);
     else setError(out.message);
@@ -108,8 +111,9 @@ export default function ImportLeadsScreen() {
         <Card style={styles.card}>
           <AppText variant="title">Added {result.inserted} prospects</AppText>
           <AppText variant="body" color={colors.textSecondary}>
-            They are unassigned and marked call first.
-            {result.skippedExisting ? ` ${result.skippedExisting} were already in the CRM and skipped.` : ''}
+            New ones are unassigned and marked call first.
+            {result.updated ? ` ${result.updated} leads already in the CRM got missing details filled in (installer, email, phone).` : ''}
+            {result.skippedExisting ? ` ${result.skippedExisting} were already in the CRM with nothing new.` : ''}
             {result.skippedDuplicate ? ` ${result.skippedDuplicate} more duplicates were skipped.` : ''}
           </AppText>
           <Button
@@ -193,9 +197,22 @@ export default function ImportLeadsScreen() {
                     – {counts.no_name} skipped: no name
                   </AppText>
                 ) : null}
-                <AppText variant="caption" color={colors.textSecondary}>
-                  Anyone already in the CRM (same phone or email at the same address) is skipped automatically.
-                </AppText>
+                <Pressable
+                  onPress={() => setUpdate((v) => !v)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: update }}
+                  style={styles.checkRow}>
+                  <Ionicons name={update ? 'checkbox' : 'square-outline'} size={18} color={update ? colors.olive : colors.inkSoft} />
+                  <AppText variant="caption" color={colors.textPrimary} style={styles.flex}>
+                    Fill in missing details on leads already in the CRM — installer, email, phone. Nothing is
+                    overwritten. Off: people already in the CRM are just skipped.
+                  </AppText>
+                </Pressable>
+                {fields.includes('installer') ? (
+                  <AppText variant="caption" color={colors.textSecondary}>
+                    The installer is saved on each lead and added to its notes as &quot;Original installer: …&quot;.
+                  </AppText>
+                ) : null}
                 <View style={styles.sample}>
                   {built
                     .filter((r) => !r.skip)
@@ -212,7 +229,7 @@ export default function ImportLeadsScreen() {
                   </AppText>
                 ) : null}
                 <Button
-                  label={`Import ${counts.keep} as unassigned`}
+                  label={update ? `Import ${counts.keep} (new + updates)` : `Import ${counts.keep} as unassigned`}
                   icon="cloud-upload"
                   loading={busy}
                   disabled={!hasName || !hasContact || counts.keep === 0 || !source.trim()}
@@ -248,5 +265,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 15,
   },
+  checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  flex: { flex: 1 },
   sample: { gap: 2, padding: spacing.sm, borderRadius: radii.sm, backgroundColor: colors.surfaceSunk },
 });

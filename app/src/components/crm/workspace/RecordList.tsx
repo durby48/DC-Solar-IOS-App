@@ -108,6 +108,9 @@ export function RecordList({
   salesView = false,
   onImport,
   onMap,
+  onFilter,
+  filterCount = 0,
+  replaceList,
   unassignedCount,
   listHeader,
 }: {
@@ -135,6 +138,11 @@ export function RecordList({
   onImport?: () => void;
   /** The Lead map button (2026-10-07), for reps and admins. */
   onMap?: () => void;
+  /** The Filter & sort button (2026-10-07); `filterCount` badges it. */
+  onFilter?: () => void;
+  filterCount?: number;
+  /** Shown in place of the list (the open Filter & sort panel). */
+  replaceList?: ReactNode;
   /** Admins: leads nobody has been given — shows the Unassigned lens. */
   unassignedCount?: number;
   /** Shown above the list (the Unassigned lens's bulk-assign bar). */
@@ -253,6 +261,16 @@ export function RecordList({
             <Ionicons name="person-add-outline" size={15} color={hubColors.crm.fg} />
           </Pressable>
         ) : null}
+        {onFilter ? (
+          <Pressable
+            onPress={onFilter}
+            hitSlop={6}
+            accessibilityLabel={filterCount ? `Filter and sort, ${filterCount} on` : 'Filter and sort'}
+            style={({ pressed }) => [styles.newLead, filterCount > 0 && styles.filterOn, pressed && styles.pressed]}>
+            <Ionicons name="options-outline" size={15} color={filterCount > 0 ? colors.white : hubColors.crm.fg} />
+            {filterCount > 0 ? <Text style={styles.filterBadge}>{filterCount}</Text> : null}
+          </Pressable>
+        ) : null}
         {onMap ? (
           <Pressable
             onPress={onMap}
@@ -311,8 +329,10 @@ export function RecordList({
           />
         ) : null}
       </View>
-      {kind !== 'tasks' && listHeader ? listHeader : null}
-      {kind === 'tasks' && tasksPane ? (
+      {kind !== 'tasks' && !replaceList && listHeader ? listHeader : null}
+      {kind !== 'tasks' && replaceList ? (
+        replaceList
+      ) : kind === 'tasks' && tasksPane ? (
         tasksPane
       ) : (
         <FlatList
@@ -419,4 +439,7 @@ const styles = StyleSheet.create({
   unreadPillText: { color: colors.textInverse, fontSize: 10, fontWeight: '800' },
   empty: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center', padding: spacing.lg },
   pressed: { opacity: 0.6 },
+  // Filter button lit up while filters are on, with their count (2026-10-07).
+  filterOn: { backgroundColor: hubColors.crm.fg, flexDirection: 'row', gap: 2, width: undefined, paddingHorizontal: 8 },
+  filterBadge: { color: colors.white, fontSize: 11, fontWeight: '800' },
 });

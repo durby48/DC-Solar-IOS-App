@@ -19,7 +19,18 @@ import { type Sheet } from '@/lib/spreadsheet';
  *      everything and also skips people already in the CRM.
  */
 
-export type Field = 'name' | 'phone' | 'email' | 'street' | 'city' | 'state' | 'zip' | 'notes' | 'duplicate' | 'skip';
+export type Field =
+  | 'name'
+  | 'phone'
+  | 'email'
+  | 'street'
+  | 'city'
+  | 'state'
+  | 'zip'
+  | 'installer'
+  | 'notes'
+  | 'duplicate'
+  | 'skip';
 
 export const FIELD_LABEL: Record<Field, string> = {
   name: 'Name',
@@ -29,14 +40,17 @@ export const FIELD_LABEL: Record<Field, string> = {
   city: 'City',
   state: 'State',
   zip: 'ZIP',
+  installer: 'Installer',
   notes: 'Notes',
   duplicate: 'Duplicate marker',
   skip: 'Skip',
 };
-export const FIELD_ORDER: Field[] = ['name', 'phone', 'email', 'street', 'city', 'state', 'zip', 'notes', 'duplicate', 'skip'];
+export const FIELD_ORDER: Field[] = ['name', 'phone', 'email', 'street', 'city', 'state', 'zip', 'installer', 'notes', 'duplicate', 'skip'];
 
 const PATTERNS: [Field, RegExp][] = [
   ['duplicate', /duplicate/i],
+  // Before Name: "Solar company" / "Installed by" is the installer, not the lead.
+  ['installer', /installer|installed by|install(ing|ation)? company|solar company|contractor/i],
   ['email', /e-?mail/i],
   ['phone', /phone|mobile|cell|tel\b/i],
   ['zip', /\bzip|postal/i],
@@ -70,6 +84,8 @@ export interface ImportRow {
   phone: string;
   email: string;
   address: string;
+  /** The original solar installer (goes on the lead AND into its notes). */
+  installer: string;
   notes: string;
   /** Why this row will not be imported; undefined = it will be. */
   skip?: 'no_contact' | 'duplicate' | 'no_name';
@@ -97,7 +113,8 @@ export function buildRows(rows: Sheet, headerIndex: number, fields: Field[]): Im
       .map((f, i) => (f === 'notes' && !blank(raw[i] ?? '') ? `${header[i] || 'Note'}: ${raw[i].trim()}` : ''))
       .filter(Boolean)
       .join('\n');
-    const row: ImportRow = { name, phone, email, address, notes };
+    const installer = pick('installer')[0] ?? '';
+    const row: ImportRow = { name, phone, email, address, installer, notes };
     const digits = phone.replace(/\D/g, '').slice(-10);
     const key = `${digits || email}|${address.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
     if (!name) row.skip = 'no_name';
@@ -111,26 +128,49 @@ export function buildRows(rows: Sheet, headerIndex: number, fields: Field[]): Im
 
 export interface ImportResult {
   inserted: number;
+  /** Existing leads that got missing details filled in (update mode). */
+  updated: number;
   skippedExisting: number;
   skippedInvalid: number;
   skippedDuplicate: number;
 }
 
 /** Send the kept rows to the database, 500 at a time. */
-export async function runImport(source: string, rows: ImportRow[]): Promise<{ ok: true; result: ImportResult } | { ok: false; message: string }> {
-  const keep = rows.filter((r) => !r.skip).map(({ name, phone, email, address, notes }) => ({ name, phone, email, address, notes }));
-  const total: ImportResult = { inserted: 0, skippedExisting: 0, skippedInvalid: 0, skippedDuplicate: 0 };
+/**
+ * `update`: a row that matches a lead already in the CRM fills in what that
+ * lead is missing (installer, email, phone) instead of being skipped.
+ */
+export async function runImport(
+  source: string,
+  rows: ImportRow[],
+  update = false,
+): Promise<{ ok: true; result: ImportResult } | { ok: false; message: string }> {
+  const keep = rows
+    .filter((r) => !r.skip)
+    .map(({ name, phone, email, address, installer, notes }) => ({ name, phone, email, address, installer, notes }));
+  const total: ImportResult = { inserted: 0, updated: 0, skippedExisting: 0, skippedInvalid: 0, skippedDuplicate: 0 };
   try {
     for (let i = 0; i < keep.length; i += 500) {
-      const { data, error } = await supabase.rpc('import_leads', { p_source: source, p_rows: keep.slice(i, i + 500) });
+      const { data, error } = await supabase.rpc('import_leads', {
+        p_source: source,
+        p_rows: keep.slice(i, i + 500),
+        p_update: update,
+      });
       if (error) {
         return {
           ok: false,
           message: `${error.message}${total.inserted ? ` (${total.inserted} were already imported before this stopped)` : ''}`,
         };
       }
-      const r = data as { inserted: number; skipped_existing: number; skipped_invalid: number; skipped_duplicate: number };
+      const r = data as {
+        inserted: number;
+        updated?: number;
+        skipped_existing: number;
+        skipped_invalid: number;
+        skipped_duplicate: number;
+      };
       total.inserted += r.inserted;
+      total.updated += r.updated ?? 0;
       total.skippedExisting += r.skipped_existing;
       total.skippedInvalid += r.skipped_invalid;
       total.skippedDuplicate += r.skipped_duplicate;

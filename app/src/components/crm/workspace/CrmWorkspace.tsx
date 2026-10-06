@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { DetailPanel } from '@/components/crm/workspace/DetailPanel';
+import { ActiveFilters, FilterPanel } from '@/components/crm/workspace/FilterPanel';
 import { ProspectForm } from '@/components/crm/workspace/ProspectForm';
 import { RecordList, type ListMode } from '@/components/crm/workspace/RecordList';
 import { TasksPane } from '@/components/crm/workspace/TasksPane';
@@ -44,6 +45,7 @@ import { fetchRecordEmailThreads, type RecordEmailResult } from '@/lib/crmEmail'
 import { fetchCustomerDocuments, type CustomerDocument } from '@/lib/customers';
 import { fetchLeadAppointments, type LeadAppointment } from '@/lib/leadAppointments';
 import { fetchEmployeeOptions } from '@/lib/myhours';
+import { activeCount, applyFilters, filterOptions, loadFilters, saveFilters, type CrmFilters } from '@/lib/crmFilters';
 import { assignLeads } from '@/lib/leadImport';
 import { fetchJobsBoardData, type JobsBoardData } from '@/lib/pipeline';
 import { useRole } from '@/lib/role';
@@ -416,14 +418,27 @@ export function CrmWorkspace() {
     [records, isSales],
   );
 
+  // Filter & sort (2026-10-07): applied after the lens and the search box.
+  const [filters, setFiltersState] = useState<CrmFilters>(() => loadFilters());
+  const [filterOpen, setFilterOpen] = useState(false);
+  const setFilters = useCallback((next: CrmFilters) => {
+    setFiltersState(next);
+    saveFilters(next);
+  }, []);
+  const options = useMemo(() => filterOptions(roleRecords), [roleRecords]);
+
   const visible = useMemo(
     () =>
-      filterRecords(
-        roleRecords,
-        kind === 'tasks' || kind === 'jobs' ? '' : search,
-        kind === 'tasks' || kind === 'jobs' ? 'all' : kind,
+      applyFilters(
+        filterRecords(
+          roleRecords,
+          kind === 'tasks' || kind === 'jobs' ? '' : search,
+          kind === 'tasks' || kind === 'jobs' ? 'all' : kind,
+        ),
+        filters,
+        tasks,
       ),
-    [roleRecords, search, kind],
+    [roleRecords, search, kind, filters, tasks],
   );
   // On the Jobs lens the search box filters the board, not the list.
   const boardJobs = useMemo(() => {
@@ -542,9 +557,30 @@ export function CrmWorkspace() {
       salesView={isSales}
       onImport={role?.isAdmin ? () => router.push('/crm/import' as never) : undefined}
       onMap={role?.isAdmin || isSales ? () => router.push('/lead-map' as never) : undefined}
+      onFilter={() => setFilterOpen((v) => !v)}
+      filterCount={activeCount(filters) + (filters.sort !== 'activity' ? 1 : 0)}
+      replaceList={
+        filterOpen ? (
+          <FilterPanel
+            filters={filters}
+            onChange={setFilters}
+            options={options}
+            reps={role?.isAdmin ? reps : undefined}
+            shown={visible.length}
+            onDone={() => setFilterOpen(false)}
+          />
+        ) : undefined
+      }
       unassignedCount={role?.isAdmin ? unassignedCount : undefined}
       listHeader={
-        kind === 'unassigned' && role?.isAdmin && unassignedCount > 0 ? (
+        <>
+          <ActiveFilters
+            filters={filters}
+            onChange={setFilters}
+            repName={(email) => reps.find((r) => r.email.toLowerCase() === email)?.name ?? email}
+            onOpen={() => setFilterOpen(true)}
+          />
+          {kind === 'unassigned' && role?.isAdmin && unassignedCount > 0 ? (
           <View style={styles.assignBar}>
             <Text style={styles.assignLabel}>Give the first</Text>
             <View style={styles.assignChips}>
@@ -584,7 +620,8 @@ export function CrmWorkspace() {
               <Text style={[styles.assignNote, !assignNote.ok && styles.assignNoteBad]}>{assignNote.text}</Text>
             ) : null}
           </View>
-        ) : null
+          ) : null}
+        </>
       }
       tasksPane={
         <TasksPane
