@@ -210,6 +210,8 @@ export default function RootLayout() {
           <Stack.Screen name="card-saved" options={{ title: 'DC Solar', headerShown: false }} />
           {/* Public: an invited employee sets their password (employee invites). */}
           <Stack.Screen name="join" options={{ title: 'DC Solar', headerShown: false }} />
+          {/* Public customer brochure (2026-10-07) — opened from a rep's text. */}
+          <Stack.Screen name="brochure" options={{ title: 'DC Solar service plans', headerShown: false }} />
           <Stack.Screen name="customer" options={{ headerShown: false, gestureEnabled: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="job/[id]" options={{ title: 'Job' }} />

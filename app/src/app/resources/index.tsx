@@ -1,9 +1,11 @@
+import * as Clipboard from 'expo-clipboard';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Linking, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, Card, ListRow, Screen, SectionHeader } from '@/components/ui';
 import { colors, hubColors, spacing } from '@/constants/theme';
+import { useMyBrochureLink } from '@/lib/brochure';
 import { fetchResources, resourceFileUrl, type SalesResource } from '@/lib/salesResources';
 import { fetchServicePlans, formatCents, type ServicePlan } from '@/lib/servicePlans';
 
@@ -24,6 +26,8 @@ export default function ResourcesScreen() {
   const [items, setItems] = useState<SalesResource[] | null>(null);
   const [plans, setPlans] = useState<ServicePlan[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const brochureLink = useMyBrochureLink();
+  const [copied, setCopied] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -83,9 +87,30 @@ export default function ResourcesScreen() {
       <View>
         <SectionHeader title="Brochure" accent={hubColors.crm.fg} />
         <Card padded={false}>
+          <ListRow
+            icon="globe"
+            iconColor={hubColors.crm.fg}
+            iconBackground={hubColors.crm.bg}
+            title="Customer brochure page"
+            subtitle="Your personal link — your name and number are on it"
+            onPress={() => void Linking.openURL(brochureLink)}
+            right={
+              <Pressable
+                hitSlop={8}
+                onPress={() => {
+                  void Clipboard.setStringAsync(brochureLink).then(() => setCopied(true));
+                }}>
+                <AppText variant="caption" color={colors.accentLink}>
+                  {copied ? 'Copied' : 'Copy link'}
+                </AppText>
+              </Pressable>
+            }
+            chevron={false}
+            divider
+          />
           {files.length === 0 ? (
-            <AppText variant="body" color={colors.textSecondary} style={styles.empty}>
-              The brochure is on its way.
+            <AppText variant="caption" color={colors.textSecondary} style={styles.empty}>
+              To text it to a customer, open their conversation and pick the saved text &quot;Service plan info&quot;.
             </AppText>
           ) : (
             files.map((r, i) => (

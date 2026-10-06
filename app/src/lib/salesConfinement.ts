@@ -39,6 +39,7 @@ const ALLOWED = [
   '/set-password',
   '/join',
   '/card-saved',
+  '/brochure',
 ];
 
 function allowed(pathname: string): boolean {

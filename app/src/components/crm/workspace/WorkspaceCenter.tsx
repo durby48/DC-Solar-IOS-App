@@ -20,6 +20,7 @@ import { type ActivityEvent, type ActivityKind, type WorkspaceRecord } from '@/l
 import { updateLead } from '@/lib/leads';
 import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
+import { useMyBrochureLink } from '@/lib/brochure';
 import { inAppCallingSupported } from '@/lib/voice';
 
 /**
@@ -158,7 +159,9 @@ export function WorkspaceCenter({
 
   const smsReady = settings?.smsEnabled === true;
   const phone = record.phoneE164;
+  const brochureLink = useMyBrochureLink();
   const templateVars = buildTemplateVars({
+    brochureLink,
     customer: record.customer ?? (record.lead ? { name: record.lead.name, address: record.lead.address } : null),
     job: record.currentJob
       ? { job_number: record.currentJob.job_number, address: null, scheduled_for: record.currentJob.scheduled_for }

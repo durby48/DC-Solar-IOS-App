@@ -1477,6 +1477,8 @@ export interface TemplateVars {
   amount?: string | null;
   review_link?: string | null;
   company_phone?: string | null;
+  /** The sender's own customer brochure link (2026-10-07, "Service plan info"). */
+  brochure_link?: string | null;
 }
 
 /**
@@ -1552,6 +1554,7 @@ export function buildTemplateVars(input: {
   documentNumber?: string | null;
   amount?: string | null;
   eta?: string | null;
+  brochureLink?: string | null;
 }): TemplateVars {
   const name = input.customer?.name?.trim() ?? '';
   const first = name.split(/\s+/)[0] ?? '';
@@ -1570,6 +1573,7 @@ export function buildTemplateVars(input: {
     amount: input.amount ?? null,
     review_link: input.settings?.reviewLink ?? null,
     company_phone: COMPANY_PHONE,
+    brochure_link: input.brochureLink ?? null,
   };
 }
 
