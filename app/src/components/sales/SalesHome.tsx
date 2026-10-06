@@ -18,6 +18,7 @@ import { inAppCallingSupported } from '@/lib/voice';
  *   greeting + their DC Solar number (in the header)
  *   [ 3  Today              › ]   visits, appointments, tasks due — opens in place
  *   [ 8  Prospects to call  › ]   → the CRM's Prospects list
+ *   [ 40 On your lead map   › ]   → /lead-map (2026-10-07)
  *   [ 2  New messages       › ]   missed calls + unread texts — only when > 0
  *   [ + New prospect ]
  *
@@ -123,6 +124,18 @@ export function SalesHome() {
                 icon="call"
                 tint={hubColors.crm}
                 onPress={() => router.navigate({ pathname: '/workspace', params: { lens: 'prospect' } } as never)}
+              />
+            </FadeInUp>
+
+            <FadeInUp index={1}>
+              <Box
+                count={
+                  data.counts.prospects + data.counts.contacted + data.counts.interested + data.counts.booked + data.counts.customers
+                }
+                label="On your lead map"
+                icon="map"
+                tint={hubColors.operations}
+                onPress={() => router.push('/lead-map' as never)}
               />
             </FadeInUp>
 

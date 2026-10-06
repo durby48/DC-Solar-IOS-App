@@ -107,6 +107,7 @@ export function RecordList({
   jobCount,
   salesView = false,
   onImport,
+  onMap,
   unassignedCount,
   listHeader,
 }: {
@@ -132,6 +133,8 @@ export function RecordList({
   salesView?: boolean;
   /** Admins: the Import leads button beside New lead (2026-10-07). */
   onImport?: () => void;
+  /** The Lead map button (2026-10-07), for reps and admins. */
+  onMap?: () => void;
   /** Admins: leads nobody has been given — shows the Unassigned lens. */
   unassignedCount?: number;
   /** Shown above the list (the Unassigned lens's bulk-assign bar). */
@@ -248,6 +251,15 @@ export function RecordList({
             accessibilityLabel={salesView ? 'New prospect' : 'New lead'}
             style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
             <Ionicons name="person-add-outline" size={15} color={hubColors.crm.fg} />
+          </Pressable>
+        ) : null}
+        {onMap ? (
+          <Pressable
+            onPress={onMap}
+            hitSlop={6}
+            accessibilityLabel="Lead map"
+            style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
+            <Ionicons name="map-outline" size={15} color={hubColors.crm.fg} />
           </Pressable>
         ) : null}
         {onImport ? (

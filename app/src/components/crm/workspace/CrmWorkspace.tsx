@@ -541,6 +541,7 @@ export function CrmWorkspace() {
       jobCount={openJobCount}
       salesView={isSales}
       onImport={role?.isAdmin ? () => router.push('/crm/import' as never) : undefined}
+      onMap={role?.isAdmin || isSales ? () => router.push('/lead-map' as never) : undefined}
       unassignedCount={role?.isAdmin ? unassignedCount : undefined}
       listHeader={
         kind === 'unassigned' && role?.isAdmin && unassignedCount > 0 ? (
