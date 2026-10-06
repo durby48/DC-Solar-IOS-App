@@ -73,7 +73,7 @@ export function PhoneNumbersCard() {
 
   const nameOf = (email: string) => {
     const p = people.find((x) => x.email.toLowerCase() === email.toLowerCase());
-    return p ? `${p.name}${p.role === 'sales' ? ' (sales)' : ''}` : email;
+    return p ? `${p.name}${p.role === 'sales' || p.role === 'sales_manager' ? ' (sales)' : ''}` : email;
   };
 
   const saveRoute = async (number: string, patch: { assigned_to?: string; label?: string | null }) => {
@@ -125,7 +125,7 @@ export function PhoneNumbersCard() {
       {people.map((p) => (
         <Chip
           key={p.email}
-          label={p.role === 'sales' ? `${p.name} · sales` : p.name}
+          label={p.role === 'sales' || p.role === 'sales_manager' ? `${p.name} · sales` : p.name}
           tone="olive"
           selected={selected?.toLowerCase() === p.email.toLowerCase()}
           onPress={() => onPick(p.email)}

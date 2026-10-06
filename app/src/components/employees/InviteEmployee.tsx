@@ -22,6 +22,7 @@ import { inviteEmployee, inviteMessage, type InviteRole } from '@/lib/employeeIn
 
 const ROLES: { key: InviteRole; label: string; hint: string }[] = [
   { key: 'sales', label: 'Sales', hint: 'Only the CRM, only their own prospects and customers.' },
+  { key: 'sales_manager', label: 'Sales manager', hint: 'A rep who runs the team: sees every lead, assigns them, can take one over.' },
   { key: 'viewer', label: 'Crew', hint: 'The field app: schedule, jobs, clock-in.' },
   { key: 'operator', label: 'Operator', hint: 'An admin: everything, including money.' },
 ];
@@ -124,7 +125,7 @@ export function InviteEmployeeForm({
       email: email.trim(),
       role,
       cell: cell.trim(),
-      number: role === 'sales' ? (number ?? '') : '',
+      number: role === 'sales' || role === 'sales_manager' ? (number ?? '') : '',
       payRate: role === 'viewer' ? payRate.trim() : '',
     });
     setBusy(false);
@@ -174,7 +175,7 @@ export function InviteEmployeeForm({
       </View>
       <Text style={styles.hint}>{ROLES.find((r) => r.key === role)?.hint}</Text>
       {field(cell, setCell, 'Their cell (optional — to text them the link)', { keyboardType: 'phone-pad' })}
-      {role === 'sales' ? (
+      {role === 'sales' || role === 'sales_manager' ? (
         <>
           <Text style={styles.label}>Their DC Solar number</Text>
           <NumberDropdown value={number} onChange={setNumber} />

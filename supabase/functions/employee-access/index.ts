@@ -35,7 +35,7 @@ const CORS_HEADERS = {
 const COMPANY = 'dc-solar';
 const LINK_DAYS = 7;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const INVITE_ROLES = ['sales', 'viewer', 'operator'];
+const INVITE_ROLES = ['sales', 'sales_manager', 'viewer', 'operator'];
 
 function ok(payload: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify({ ok: true, ...payload }), {
@@ -242,7 +242,7 @@ Deno.serve(async (req) => {
       const role = String(body.role ?? '');
       if (!name) return fail(400, 'bad_request', 'A name is required.');
       if (!EMAIL_RE.test(email)) return fail(400, 'bad_request', 'That email address does not look right.');
-      if (!INVITE_ROLES.includes(role)) return fail(400, 'bad_request', 'Pick a role: Sales, Crew or Operator.');
+      if (!INVITE_ROLES.includes(role)) return fail(400, 'bad_request', 'Pick a role: Sales, Sales manager, Crew or Operator.');
       if (role === 'operator' && !isOwner) return fail(403, 'forbidden', 'Only the owner can invite an operator (admin).');
 
       const { data: existing } = await admin.from('employees').select('id').ilike('email', email).maybeSingle();
@@ -297,7 +297,7 @@ Deno.serve(async (req) => {
           number_e164: number,
           company: COMPANY,
           assigned_to: email,
-          label: role === 'sales' ? `Sales — ${name}` : name,
+          label: role === 'sales' || role === 'sales_manager' ? `Sales — ${name}` : name,
         });
         if (routeErr) {
           const taken = /duplicate|unique/i.test(routeErr.message);

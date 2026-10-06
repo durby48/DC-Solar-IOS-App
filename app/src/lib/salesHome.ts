@@ -62,6 +62,8 @@ export interface SalesHomeData {
   today: TodayItem[];
   /** Their commission in the current pay period, in cents (S4). */
   commissionCents: number;
+  /** Sales managers only: leads nobody owns yet (2026-10-07). */
+  unassigned: number;
 }
 
 /** How far back an unanswered call still counts as "needs attention". */
@@ -78,7 +80,7 @@ export async function fetchMyLine(): Promise<string | null> {
   }
 }
 
-export async function fetchSalesHome(myEmail: string | null): Promise<SalesHomeData> {
+export async function fetchSalesHome(myEmail: string | null, isManager = false): Promise<SalesHomeData> {
   const today = todayISO();
   const [recordsResult, line, recents, taskResult, appointments, visits, commissions, period] = await Promise.all([
     fetchWorkspaceRecords(),
@@ -91,7 +93,19 @@ export async function fetchSalesHome(myEmail: string | null): Promise<SalesHomeD
     fetchCurrentPayPeriod(),
   ]);
 
-  const records = recordsResult.records.filter((r) => !(r.kind === 'customer' && r.serviceStatus === 'unpaid'));
+  // A sales manager reads the whole team's leads (RLS); Home stays HIS day:
+  // his own leads, plus a count of the unassigned pool (2026-10-07).
+  const me = myEmail?.toLowerCase() ?? null;
+  const unassigned = isManager
+    ? recordsResult.records.filter(
+        (r) => r.kind === 'lead' && !r.lead?.assigned_to && r.lead?.status !== 'lost' && r.lead?.status !== 'won',
+      ).length
+    : 0;
+  const records = recordsResult.records.filter(
+    (r) =>
+      !(r.kind === 'customer' && r.serviceStatus === 'unpaid') &&
+      !(isManager && r.kind === 'lead' && r.lead?.assigned_to?.toLowerCase() !== me),
+  );
   const leads = records.filter((r) => r.kind === 'lead');
   const status = (r: WorkspaceRecord) => r.lead?.status ?? 'new';
 
@@ -164,7 +178,6 @@ export async function fetchSalesHome(myEmail: string | null): Promise<SalesHomeD
   // Timed items in time order; the tasks list follows.
   todayItems.sort((x, y) => (x.when && y.when ? sortableTime(x.when) - sortableTime(y.when) : x.when ? -1 : y.when ? 1 : 0));
 
-  const me = myEmail?.toLowerCase() ?? null;
   const tasks = taskResult.status === 'ok' ? taskResult.tasks : [];
   for (const t of tasks) {
     if (t.assigned_to && me && t.assigned_to.toLowerCase() !== me) continue;
@@ -190,6 +203,7 @@ export async function fetchSalesHome(myEmail: string | null): Promise<SalesHomeD
     missed,
     today: todayItems,
     commissionCents: period ? totalCents(commissions.filter((c) => c.periodStart === period.start)) : 0,
+    unassigned,
   };
 }
 

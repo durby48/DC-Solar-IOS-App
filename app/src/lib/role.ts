@@ -14,7 +14,7 @@ import { supabase } from '@/lib/supabase';
  * enforces the narrowing (supabase/migrations/2026-10-05_sales_role.sql);
  * `isSales` only shapes the screens.
  */
-export type EmployeeRole = 'owner' | 'operator' | 'viewer' | 'sales';
+export type EmployeeRole = 'owner' | 'operator' | 'viewer' | 'sales' | 'sales_manager';
 
 export interface RoleInfo {
   email: string;
@@ -22,8 +22,13 @@ export interface RoleInfo {
   role: EmployeeRole;
   /** owner/operator = admin */
   isAdmin: boolean;
-  /** role === 'sales' — CRM-only layout. */
+  /** role === 'sales' or 'sales_manager' — the sales app layout. */
   isSales: boolean;
+  /**
+   * role === 'sales_manager' (2026-10-07): a rep who also runs the team —
+   * sees and assigns every lead, can take one over. Admin-only money stays out.
+   */
+  isSalesManager: boolean;
   payRate: number | null;
 }
 
@@ -65,7 +70,8 @@ export async function getRole(): Promise<RoleInfo | null> {
       displayName: (row.display_name as string | null) ?? null,
       role,
       isAdmin: role === 'owner' || role === 'operator',
-      isSales: role === 'sales',
+      isSales: role === 'sales' || role === 'sales_manager',
+      isSalesManager: role === 'sales_manager',
       payRate: row.pay_rate != null ? Number(row.pay_rate) : null,
     };
     cache = { email, info };

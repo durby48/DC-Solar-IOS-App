@@ -179,7 +179,10 @@ Deno.serve(async (req) => {
       .eq('email', callerEmail)
       .maybeSingle();
     const role = (employee as { role?: string } | null)?.role;
-    const isSales = role === 'sales';
+    // A sales manager (2026-10-07) texts like a rep, from their own number, but
+    // on any lead and any sales-side customer — they run the team.
+    const isManager = role === 'sales_manager';
+    const isSales = role === 'sales' || isManager;
     if (role !== 'owner' && role !== 'operator' && !isSales) return fail(403, 'forbidden', 'Admins and sales only.');
 
     // --- input --------------------------------------------------------------
@@ -197,7 +200,18 @@ Deno.serve(async (req) => {
         return fail(403, 'forbidden', 'Sales can text their own leads and customers only.');
       }
       if (payload.to) return fail(403, 'forbidden', 'Sales texts go to the number on the record.');
-      if (payload.leadId) {
+      if (isManager && payload.leadId) {
+        // Any lead.
+      } else if (isManager && payload.customerId) {
+        // Any customer the sales side made: a service visit, or a booked lead.
+        const { data: service } = await admin
+          .from('jobs')
+          .select('id')
+          .eq('customer_id', payload.customerId)
+          .in('job_type', ['Cleaning', 'Inspection'])
+          .limit(1);
+        if ((service ?? []).length === 0) return fail(403, 'forbidden', 'That customer is not on the sales side.');
+      } else if (payload.leadId) {
         const { data: own } = await admin.from('leads').select('assigned_to').eq('id', payload.leadId).maybeSingle();
         if ((own as { assigned_to?: string | null } | null)?.assigned_to?.toLowerCase() !== callerEmail) {
           return fail(403, 'forbidden', 'That lead is not assigned to you.');

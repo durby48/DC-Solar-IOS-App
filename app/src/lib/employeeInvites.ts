@@ -10,7 +10,7 @@
 import { readFunctionError } from '@/lib/artwork';
 import { supabase } from '@/lib/supabase';
 
-export type InviteRole = 'sales' | 'viewer' | 'operator';
+export type InviteRole = 'sales' | 'sales_manager' | 'viewer' | 'operator';
 
 export interface EmployeeStatus {
   email: string;

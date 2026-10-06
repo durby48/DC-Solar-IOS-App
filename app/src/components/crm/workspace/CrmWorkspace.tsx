@@ -48,6 +48,7 @@ import { fetchEmployeeOptions } from '@/lib/myhours';
 import { activeCount, applyFilters, filterOptions, loadFilters, saveFilters, type CrmFilters } from '@/lib/crmFilters';
 import { assignLeads } from '@/lib/leadImport';
 import { fetchJobsBoardData, type JobsBoardData } from '@/lib/pipeline';
+import { fetchSalesTeam } from '@/lib/sales';
 import { useRole } from '@/lib/role';
 import { isCompanyJob, stageOrDefault } from '@/lib/stages';
 import { countDueNow, fetchTasks, type Task } from '@/lib/tasks';
@@ -95,6 +96,7 @@ import { type Job } from '@/lib/types';
  */
 
 const WIDE = 1100;
+const OWNER_COLORS = ['#7FB3E6', '#E0B25C', '#C58AD6', '#5FB3A6', '#E58A7B', '#9CC46F', '#D69CC0'];
 const LENSES: ListMode[] = ['all', 'customer', 'lead', 'prospect', 'working', 'unassigned', 'tasks', 'jobs'];
 const MEDIUM = 760;
 
@@ -135,6 +137,9 @@ function remember(state: { selectedKey: string | null; kind: ListMode }): void {
 export function CrmWorkspace() {
   const role = useRole();
   const isSales = role?.isSales === true;
+  // Admins and sales managers run assignment (2026-10-07).
+  const isManager = role?.isSalesManager === true;
+  const canManage = role?.isAdmin === true || isManager;
   const router = useRouter();
   const { width } = useWindowDimensions();
   const layout: 'wide' | 'medium' | 'narrow' = width >= WIDE ? 'wide' : width >= MEDIUM ? 'medium' : 'narrow';
@@ -186,7 +191,8 @@ export function CrmWorkspace() {
       fetchWorkspaceRecords(),
       fetchCommsSettings(),
       fetchTemplates(),
-      fetchEmployeeOptions(),
+      // The sales app reads names from sales_team() (employees is admin-read).
+      role?.isSales ? fetchSalesTeam() : fetchEmployeeOptions(),
       fetchAssignmentsByJob(),
       fetchCustomerDocuments(),
       loadTasks(),
@@ -199,7 +205,7 @@ export function CrmWorkspace() {
     setReps(r);
     setAssignments(a ?? new Map());
     setDocuments(d ?? new Map());
-  }, [loadTasks]);
+  }, [loadTasks, role?.isSales]);
 
   const loadBoard = useCallback(async () => {
     setBoardLoading(true);
@@ -220,8 +226,8 @@ export function CrmWorkspace() {
   // A lens a sales rep does not have (remembered from an admin session on the
   // same browser) falls back to All.
   useEffect(() => {
-    if (isSales && (kind === 'jobs' || kind === 'lead' || kind === 'unassigned')) setKind('all');
-  }, [isSales, kind]);
+    if (isSales && (kind === 'jobs' || kind === 'lead' || (kind === 'unassigned' && !isManager))) setKind('all');
+  }, [isSales, isManager, kind]);
 
   // First open of the Jobs lens (including a remembered one).
   useEffect(() => {
@@ -472,6 +478,19 @@ export function CrmWorkspace() {
   );
   const unassignedCount = useMemo(() => roleRecords.filter(isUnassigned).length, [roleRecords]);
 
+  // Owner chip per lead row, coloured per person so a glance tells them apart.
+  const ownerOf = useCallback(
+    (r: WorkspaceRecord) => {
+      if (r.kind !== 'lead') return null;
+      const owner = r.lead?.assigned_to?.toLowerCase() ?? null;
+      if (!owner) return { label: 'Unassigned', color: colors.inkSoft };
+      const i = Math.max(0, reps.findIndex((p) => p.email.toLowerCase() === owner));
+      const name = reps.find((p) => p.email.toLowerCase() === owner)?.name ?? owner.split('@')[0];
+      return { label: owner === role?.email?.toLowerCase() ? 'You' : name.split(' ')[0], color: OWNER_COLORS[i % OWNER_COLORS.length] };
+    },
+    [reps, role?.email],
+  );
+
   // Bulk assign (2026-10-07): the first N of the Unassigned list, as shown
   // (search applies), to one person — one push for the batch.
   const [assignCount, setAssignCount] = useState<number | 'all'>(25);
@@ -565,13 +584,14 @@ export function CrmWorkspace() {
             filters={filters}
             onChange={setFilters}
             options={options}
-            reps={role?.isAdmin ? reps : undefined}
+            reps={canManage ? reps : undefined}
             shown={visible.length}
             onDone={() => setFilterOpen(false)}
           />
         ) : undefined
       }
-      unassignedCount={role?.isAdmin ? unassignedCount : undefined}
+      unassignedCount={canManage ? unassignedCount : undefined}
+      ownerOf={canManage ? ownerOf : undefined}
       listHeader={
         <>
           <ActiveFilters
@@ -580,7 +600,7 @@ export function CrmWorkspace() {
             repName={(email) => reps.find((r) => r.email.toLowerCase() === email)?.name ?? email}
             onOpen={() => setFilterOpen(true)}
           />
-          {kind === 'unassigned' && role?.isAdmin && unassignedCount > 0 ? (
+          {kind === 'unassigned' && canManage && unassignedCount > 0 ? (
           <View style={styles.assignBar}>
             <Text style={styles.assignLabel}>Give the first</Text>
             <View style={styles.assignChips}>
@@ -680,6 +700,13 @@ export function CrmWorkspace() {
       onEmailChanged={() => void loadEmail(selected)}
       onRecordChanged={() => void refreshAll()}
       onOpenDetail={layout === 'wide' ? undefined : () => setDetailOpen(true)}
+      ownerNote={(() => {
+        // Working someone else's lead: say whose it is, and whose number it texts from.
+        const owner = selected.kind === 'lead' ? selected.lead?.assigned_to?.toLowerCase() : null;
+        if (!canManage || !owner || owner === role?.email?.toLowerCase()) return null;
+        const name = reps.find((p) => p.email.toLowerCase() === owner)?.name ?? owner;
+        return `${name.split(' ')[0]}'s lead · you're texting and calling from your own number`;
+      })()}
     />
   ) : (
     placeholder
@@ -698,6 +725,7 @@ export function CrmWorkspace() {
       appointments={appointments}
       myEmail={role?.email ?? null}
       canEditStage={role?.isAdmin === true}
+      canAssign={canManage}
       onChanged={() => void refreshAll()}
       onTasksChanged={() => void loadTasks()}
       onAppointmentsChanged={() => void loadAppointments(selected)}

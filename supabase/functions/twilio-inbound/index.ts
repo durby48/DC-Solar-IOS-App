@@ -354,7 +354,8 @@ Deno.serve(async (req) => {
       const assigned = (route as { assigned_to?: string | null } | null)?.assigned_to ?? null;
       if (assigned) {
         const { data: emp } = await admin.from('employees').select('role').ilike('email', assigned).maybeSingle();
-        if ((emp as { role?: string } | null)?.role === 'sales') repEmail = assigned.toLowerCase();
+        const r = (emp as { role?: string } | null)?.role;
+        if (r === 'sales' || r === 'sales_manager') repEmail = assigned.toLowerCase();
       }
     }
     const notifySecret = Deno.env.get('NOTIFY_SECRET');

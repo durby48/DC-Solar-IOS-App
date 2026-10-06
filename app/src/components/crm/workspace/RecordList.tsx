@@ -111,6 +111,7 @@ export function RecordList({
   onFilter,
   filterCount = 0,
   replaceList,
+  ownerOf,
   unassignedCount,
   listHeader,
 }: {
@@ -143,6 +144,11 @@ export function RecordList({
   filterCount?: number;
   /** Shown in place of the list (the open Filter & sort panel). */
   replaceList?: ReactNode;
+  /**
+   * Admins + sales managers (2026-10-07): who owns a lead, shown as a chip on
+   * its row ("Jamie", "Unassigned"). null = no chip (customers).
+   */
+  ownerOf?: (record: WorkspaceRecord) => { label: string; color: string } | null;
   /** Admins: leads nobody has been given — shows the Unassigned lens. */
   unassignedCount?: number;
   /** Shown above the list (the Unassigned lens's bulk-assign bar). */
@@ -209,6 +215,13 @@ export function RecordList({
             {item.kind === 'lead' ? (
               <View style={styles.leadPill}>
                 <Text style={styles.leadPillText}>LEAD</Text>
+              </View>
+            ) : null}
+            {ownerOf && ownerOf(item) ? (
+              <View style={[styles.ownerPill, { borderColor: ownerOf(item)!.color }]}>
+                <Text style={[styles.ownerPillText, { color: ownerOf(item)!.color }]} numberOfLines={1}>
+                  {ownerOf(item)!.label}
+                </Text>
               </View>
             ) : null}
             <Text style={styles.subtitle} numberOfLines={1}>
@@ -297,6 +310,14 @@ export function RecordList({
             <LensChip label={`Prospects ${total.prospects}`} selected={kind === 'prospect'} onPress={() => onKind('prospect')} />
             <LensChip label={`Leads ${total.working}`} selected={kind === 'working'} onPress={() => onKind('working')} />
             <LensChip label={`Customers ${total.customers}`} selected={kind === 'customer'} onPress={() => onKind('customer')} />
+            {unassignedCount !== undefined && (unassignedCount > 0 || kind === 'unassigned') ? (
+              <LensChip
+                label={`Unassigned ${unassignedCount}`}
+                selected={kind === 'unassigned'}
+                attention={unassignedCount > 0 && kind !== 'unassigned'}
+                onPress={() => onKind('unassigned')}
+              />
+            ) : null}
           </>
         ) : (
           <>
@@ -442,4 +463,7 @@ const styles = StyleSheet.create({
   // Filter button lit up while filters are on, with their count (2026-10-07).
   filterOn: { backgroundColor: hubColors.crm.fg, flexDirection: 'row', gap: 2, width: undefined, paddingHorizontal: 8 },
   filterBadge: { color: colors.white, fontSize: 11, fontWeight: '800' },
+  // Lead owner chip (admins + sales managers, 2026-10-07).
+  ownerPill: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1, maxWidth: 90 },
+  ownerPillText: { fontSize: 9, fontWeight: '800' },
 });

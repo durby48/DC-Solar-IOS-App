@@ -37,8 +37,8 @@ export function SalesHome() {
   const [callNotice, setCallNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setData(await fetchSalesHome(role?.email ?? null));
-  }, [role?.email]);
+    setData(await fetchSalesHome(role?.email ?? null, role?.isSalesManager === true));
+  }, [role?.email, role?.isSalesManager]);
 
   useFocusEffect(
     useCallback(() => {
@@ -126,6 +126,18 @@ export function SalesHome() {
                 onPress={() => router.navigate({ pathname: '/workspace', params: { lens: 'prospect' } } as never)}
               />
             </FadeInUp>
+
+            {role?.isSalesManager ? (
+              <FadeInUp index={1}>
+                <Box
+                  count={data.unassigned}
+                  label="Unassigned leads"
+                  icon="people"
+                  tint={{ fg: colors.amberDeep, bg: colors.amberSoft }}
+                  onPress={() => router.navigate({ pathname: '/workspace', params: { lens: 'unassigned' } } as never)}
+                />
+              </FadeInUp>
+            ) : null}
 
             <FadeInUp index={1}>
               <Box

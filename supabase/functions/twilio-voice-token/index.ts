@@ -136,7 +136,7 @@ Deno.serve(async (req) => {
       .eq('email', callerEmail)
       .maybeSingle();
     const role = (employee as { role?: string } | null)?.role;
-    if (role !== 'owner' && role !== 'operator' && role !== 'sales') {
+    if (role !== 'owner' && role !== 'operator' && role !== 'sales' && role !== 'sales_manager') {
       return fail(403, 'forbidden', 'Admins and sales only.');
     }
 

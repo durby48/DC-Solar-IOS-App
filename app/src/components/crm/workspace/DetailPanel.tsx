@@ -103,6 +103,7 @@ export function DetailPanel({
   documents,
   assignments,
   reps,
+  canAssign = false,
   hasMoney,
   tasks,
   appointments,
@@ -119,6 +120,8 @@ export function DetailPanel({
   documents: CustomerDocument[];
   assignments: Assignment[];
   reps: { email: string; name: string }[];
+  /** Admins + sales managers may change a lead's owner (2026-10-07). */
+  canAssign?: boolean;
   hasMoney: boolean;
   tasks: Task[];
   appointments: LeadAppointment[];
@@ -432,11 +435,16 @@ export function DetailPanel({
           {isSales ? null : (
             <Fact label="Estimated value" value={record.lead.estimated_value != null ? money(record.lead.estimated_value) : null} />
           )}
-          {isSales ? (
+          {isSales && !canAssign ? (
             <Fact label="Assigned to" value={repName ?? 'You'} />
           ) : (
           <View style={styles.fact}>
-            <Text style={styles.factLabel}>Assigned to</Text>
+            <Text style={styles.factLabel}>Owner</Text>
+            {myEmail && rep?.toLowerCase() !== myEmail.toLowerCase() ? (
+              <Pressable onPress={() => void assign(myEmail)} style={({ pressed }) => [styles.takeIt, pressed && styles.pressed]}>
+                <Text style={styles.takeItText}>Take it</Text>
+              </Pressable>
+            ) : null}
             <Pressable onPress={() => setRepOpen((v) => !v)} style={styles.repButton}>
               <Text style={[styles.factValue, !repName && styles.factMuted]}>{repName ?? 'Nobody yet'}</Text>
               <Ionicons name={repOpen ? 'chevron-up' : 'chevron-down'} size={14} color={colors.inkSoft} />
@@ -736,4 +744,6 @@ const styles = StyleSheet.create({
   fileText: { flex: 1, color: colors.ink, fontSize: 13, fontWeight: '600' },
   linkText: { color: hubColors.crm.fg, fontSize: 12, fontWeight: '700' },
   pressed: { opacity: 0.6 },
+  takeIt: { alignSelf: 'flex-start', paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radii.pill, backgroundColor: colors.sun, marginBottom: 4 },
+  takeItText: { color: colors.textOnAction, fontSize: 12, fontWeight: '800' },
 });

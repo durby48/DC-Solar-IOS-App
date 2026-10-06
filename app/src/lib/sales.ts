@@ -310,7 +310,26 @@ export async function fetchOpenLeads(): Promise<Lead[]> {
   }
 }
 
-/** Assign or reassign a lead's rep. Admin-only; RLS rejects anyone else. */
+/**
+ * The sales team — reps and sales managers, names + emails (2026-10-07), from
+ * `sales_team()`; employees itself is admin-read only. For owner chips and the
+ * manager's assign picker.
+ */
+export async function fetchSalesTeam(): Promise<{ email: string; name: string; role: string }[]> {
+  try {
+    const { data, error } = await supabase.rpc('sales_team');
+    if (error || !data) return [];
+    return (data as { email: string; display_name: string; role: string }[]).map((r) => ({
+      email: r.email,
+      name: r.display_name,
+      role: r.role,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** Assign or reassign a lead's rep. Admins and sales managers; RLS rejects anyone else. */
 export async function assignLead(
   leadId: string,
   repEmail: string | null,

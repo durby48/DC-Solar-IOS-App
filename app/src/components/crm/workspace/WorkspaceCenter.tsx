@@ -85,6 +85,7 @@ export function WorkspaceCenter({
   onEmailChanged,
   onRecordChanged,
   onOpenDetail,
+  ownerNote = null,
 }: {
   record: WorkspaceRecord;
   settings: CommsSettings | null;
@@ -102,6 +103,8 @@ export function WorkspaceCenter({
   onRecordChanged?: () => void;
   /** Narrow layouts: the detail column lives behind this. */
   onOpenDetail?: () => void;
+  /** Someone else's lead (admins / sales managers, 2026-10-07): whose it is. */
+  ownerNote?: string | null;
 }) {
   const router = useRouter();
   // SALES (2026-10-05). Texts and calls, from the rep's own number (B3): the
@@ -353,6 +356,14 @@ export function WorkspaceCenter({
           templates={templates}
           templateVars={templateVars}
           keyboardOffset={0}
+          banner={
+            ownerNote ? (
+              <View style={styles.ownerNote}>
+                <Ionicons name="person-circle-outline" size={15} color={colors.amberDeep} />
+                <Text style={styles.ownerNoteText}>{ownerNote}</Text>
+              </View>
+            ) : undefined
+          }
         />
       );
   } else if (pane === 'activity') {
@@ -581,4 +592,13 @@ const styles = StyleSheet.create({
   noteBody: { color: colors.ink, fontSize: 14, fontWeight: '500', lineHeight: 20 },
   noteMeta: { color: colors.inkSoft, fontSize: 11, fontWeight: '600' },
   pressed: { opacity: 0.6 },
+  ownerNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    backgroundColor: colors.amberSoft,
+  },
+  ownerNoteText: { flex: 1, color: colors.amberDeep, fontSize: 12, fontWeight: '700' },
 });

@@ -41,7 +41,16 @@ const ROLE_META: Record<EmployeeRole, { label: string; bg: string; text: string 
   operator: { bg: colors.skySoft, text: colors.ocean, label: 'Operator' },
   viewer: { bg: colors.tan, text: colors.inkSoft, label: 'Viewer' },
   sales: { bg: colors.violetSoft, text: colors.violet, label: 'Sales' },
+  sales_manager: { bg: colors.violetSoft, text: colors.violetDeep, label: 'Sales manager' },
 };
+
+/** What an admin can switch someone to (set_employee_role; never the owner). */
+const ROLE_CHOICES: { role: EmployeeRole; label: string }[] = [
+  { role: 'sales', label: 'Sales' },
+  { role: 'sales_manager', label: 'Sales manager' },
+  { role: 'viewer', label: 'Crew' },
+  { role: 'operator', label: 'Operator' },
+];
 
 /** What the expanded row shows for one employee's documents. */
 type DocsState =
@@ -228,6 +237,22 @@ export default function EmployeesScreen() {
     setEmployees((list) => list.map((e) => (e.id === employee.id ? { ...e, field_crew: !employee.field_crew } : e)));
   };
 
+  // Change someone's role (2026-10-07) — e.g. make a rep the Sales manager.
+  // employees has no write policies; set_employee_role() is admin-only and
+  // refuses the owner. An Operator (admin) may only be made by the owner.
+  const changeRole = async (employee: EmployeeRow, next: EmployeeRole) => {
+    if (next === employee.role) return;
+    setRowBusy(`role:${employee.email}`);
+    setRowError(null);
+    const { error } = await supabase.rpc('set_employee_role', { p_email: employee.email, p_role: next });
+    setRowBusy(null);
+    if (error) {
+      setRowError(error.message);
+      return;
+    }
+    setEmployees((list) => list.map((e) => (e.id === employee.id ? { ...e, role: next } : e)));
+  };
+
   const statusLine = (employee: EmployeeRow): { text: string; invited: boolean } | null => {
     const st = statuses.get(employee.email.toLowerCase());
     if (!st) return null;
@@ -336,9 +361,23 @@ export default function EmployeesScreen() {
               <Ionicons name="call-outline" size={16} color={colors.ocean} />
               <Text style={styles.contactButtonText}>Edit contact info</Text>
             </Pressable>
+            {employee.role !== 'owner' ? (
+              <View style={styles.roleRow}>
+                <Text style={styles.roleLabel}>Role</Text>
+                {ROLE_CHOICES.filter((c) => c.role !== 'operator' || isOwner).map((c) => (
+                  <Pressable
+                    key={c.role}
+                    onPress={() => void changeRole(employee, c.role)}
+                    disabled={rowBusy !== null}
+                    style={({ pressed }) => [styles.roleChoice, employee.role === c.role && styles.roleChoiceOn, pressed && styles.rowPressed]}>
+                    <Text style={[styles.roleChoiceText, employee.role === c.role && styles.roleChoiceTextOn]}>{c.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
             {/* Field crew (2026-10-06): counts toward how many service
                 visits sales can book on a day. Not for sales reps. */}
-            {employee.role !== 'sales' ? (
+            {employee.role !== 'sales' && employee.role !== 'sales_manager' ? (
               <Pressable
                 onPress={() => void toggleFieldCrew(employee)}
                 disabled={rowBusy !== null}
@@ -644,4 +683,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  // Role switch (2026-10-07).
+  roleRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingVertical: 4 },
+  roleLabel: { color: colors.inkSoft, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', marginRight: 2 },
+  roleChoice: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: colors.surfaceSunk },
+  roleChoiceOn: { backgroundColor: colors.violet },
+  roleChoiceText: { color: colors.ink, fontSize: 12, fontWeight: '700' },
+  roleChoiceTextOn: { color: colors.white },
 });

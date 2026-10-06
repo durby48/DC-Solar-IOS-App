@@ -108,7 +108,10 @@ Deno.serve(async (req) => {
     if (!job) return fail(404, 'not_found', 'Visit not found.');
     const isAdmin = role === 'owner' || role === 'operator';
     const isTheRep = (job.sales_rep_email ?? '').toLowerCase() === callerEmail;
-    if (!isAdmin && !isTheRep) return fail(403, 'forbidden', 'Only the rep who booked this visit, or an admin, can send its card link.');
+    const isManager = role === 'sales_manager'; // runs the sales team (2026-10-07)
+    if (!isAdmin && !isTheRep && !isManager) {
+      return fail(403, 'forbidden', 'Only the rep who booked this visit, a sales manager or an admin can send its card link.');
+    }
     if (!SERVICE_TYPES.includes(job.job_type ?? '') || job.stage !== 'Service Call') {
       return fail(409, 'not_open', 'Card links are for an open service visit.');
     }

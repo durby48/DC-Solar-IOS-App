@@ -16,6 +16,7 @@ import {
   type MapStage,
 } from '@/lib/leadMap';
 import { fetchEmployeeOptions } from '@/lib/myhours';
+import { fetchSalesTeam } from '@/lib/sales';
 import { useRoleGate } from '@/lib/role';
 
 /**
@@ -36,7 +37,8 @@ export default function LeadMapScreen() {
   const router = useRouter();
   const gate = useRoleGate();
   const isSales = gate.role?.isSales === true;
-  const isAdmin = gate.role?.isAdmin === true;
+  // Admins and sales managers see the whole team, and filter by rep.
+  const isAdmin = gate.role?.isAdmin === true || gate.role?.isSalesManager === true;
   const [points, setPoints] = useState<MapPoint[] | null>(null);
   const [unplaced, setUnplaced] = useState(0);
   const [hidden, setHidden] = useState<Set<MapStage>>(new Set());
@@ -56,7 +58,7 @@ export default function LeadMapScreen() {
     useCallback(() => {
       if (gate.phase !== 'ready') return;
       void load();
-      if (isAdmin) void fetchEmployeeOptions().then(setReps);
+      if (isAdmin) void (gate.role?.isSales ? fetchSalesTeam() : fetchEmployeeOptions()).then(setReps);
       if (!placing.current) {
         placing.current = true;
         void placeNewAddresses().then((placed) => {
@@ -64,7 +66,7 @@ export default function LeadMapScreen() {
           if (placed > 0) void load();
         });
       }
-    }, [gate.phase, load, isAdmin]),
+    }, [gate.phase, load, isAdmin, gate.role?.isSales]),
   );
 
   const shown = useMemo(
