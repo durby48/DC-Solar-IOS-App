@@ -1,4 +1,4 @@
-import { fetchMyStaffProfile, fetchRecents } from '@/lib/comms';
+import { fetchRecents } from '@/lib/comms';
 import { fetchWorkspaceRecords, isProspect, type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { fetchScheduleRange } from '@/lib/data';
 import { todayISO } from '@/lib/dates';
@@ -54,8 +54,6 @@ export interface TodayItem {
 export interface SalesHomeData {
   /** Their DC Solar number, E.164, or null when none is assigned yet. */
   line: string | null;
-  /** The cell their missed calls fall back to (staff_profiles). */
-  cell: string | null;
   counts: SalesCounts;
   /** Newest prospects nobody has contacted yet, at most five. */
   callNext: WorkspaceRecord[];
@@ -80,10 +78,9 @@ async function fetchMyLine(): Promise<string | null> {
 
 export async function fetchSalesHome(myEmail: string | null): Promise<SalesHomeData> {
   const today = todayISO();
-  const [recordsResult, line, profile, recents, taskResult, appointments, visits] = await Promise.all([
+  const [recordsResult, line, recents, taskResult, appointments, visits] = await Promise.all([
     fetchWorkspaceRecords(),
     fetchMyLine(),
-    fetchMyStaffProfile(),
     fetchRecents(100),
     fetchTasks({ all: true }),
     fetchLeadAppointmentsRange(today, today),
@@ -189,7 +186,6 @@ export async function fetchSalesHome(myEmail: string | null): Promise<SalesHomeD
 
   return {
     line,
-    cell: profile?.cellPhone ?? null,
     counts,
     callNext,
     unread,

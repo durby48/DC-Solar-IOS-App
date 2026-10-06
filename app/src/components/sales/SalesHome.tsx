@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import {
   AnimatedPressable,
@@ -14,7 +14,7 @@ import {
   StatTile,
 } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
-import { formatPhone, saveMyCellPhone, useCommsRealtime } from '@/lib/comms';
+import { formatPhone, useCommsRealtime } from '@/lib/comms';
 import { type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { useRole } from '@/lib/role';
 import { fetchSalesHome, type SalesHomeData, type TodayItem } from '@/lib/salesHome';
@@ -24,8 +24,7 @@ import { inAppCallingSupported } from '@/lib/voice';
  * The Sales Home (2026-10-06, S1): a rep's day at a glance, between the
  * greeting header and the shared Account section of `(tabs)/index.tsx`.
  *
- *   Your number      · their DC Solar line, and their cell (the fallback when
- *                      they miss a call in the app) — editable right here
+ *   Your number      · their DC Solar line
  *   Needs attention  · missed calls (last 3 days, not yet called back) and
  *                      unread texts; hidden when there are none
  *   Today            · their booked visits, appointments, and tasks due today
@@ -99,7 +98,7 @@ export function SalesHome() {
   return (
     <View style={styles.wrap}>
       <FadeInUp index={0}>
-        <LineCard line={data.line} cell={data.cell} onSaved={() => void load()} />
+        <LineCard line={data.line} />
       </FadeInUp>
 
       {attention > 0 ? (
@@ -261,30 +260,8 @@ function whenLabel(iso: string): string {
   return `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
 }
 
-/**
- * Their DC Solar number, and their cell. The cell is where an incoming call
- * goes when they do not answer in the app (twilio-voice-inbound), so it is
- * edited here rather than buried in a settings screen.
- */
-function LineCard({ line, cell, onSaved }: { line: string | null; cell: string | null; onSaved: () => void }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(cell ?? '');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async () => {
-    setBusy(true);
-    setError(null);
-    const result = await saveMyCellPhone(draft);
-    setBusy(false);
-    if (!result.ok) {
-      setError(result.message);
-      return;
-    }
-    setEditing(false);
-    onSaved();
-  };
-
+/** Their DC Solar number: the one their calls and texts come from. */
+function LineCard({ line }: { line: string | null }) {
   return (
     <Card style={styles.lineCard}>
       <View style={styles.lineRow}>
@@ -300,44 +277,6 @@ function LineCard({ line, cell, onSaved }: { line: string | null; cell: string |
           </AppText>
         </View>
       </View>
-      {editing ? (
-        <View style={styles.cellEdit}>
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Your cell, e.g. 816 555 0123"
-            placeholderTextColor={colors.textMuted}
-            keyboardType="phone-pad"
-            style={styles.input}
-          />
-          <View style={styles.cellButtons}>
-            <Button label="Cancel" variant="ghost" size="sm" onPress={() => setEditing(false)} />
-            <Button label="Save" size="sm" loading={busy} onPress={() => void save()} />
-          </View>
-          {error ? (
-            <AppText variant="caption" color={colors.danger}>
-              {error}
-            </AppText>
-          ) : null}
-        </View>
-      ) : (
-        <AnimatedPressable
-          onPress={() => {
-            setDraft(cell ?? '');
-            setEditing(true);
-          }}
-          accessibilityRole="button"
-          style={styles.cellRow}>
-          <AppText variant="caption" color={colors.textSecondary} style={styles.cellText}>
-            {cell
-              ? `Missed calls ring your cell: ${formatPhone(cell)}`
-              : 'Add your cell so calls you miss in the app still reach you'}
-          </AppText>
-          <AppText variant="caption" color={colors.accentLink}>
-            {cell ? 'Change' : 'Add'}
-          </AppText>
-        </AnimatedPressable>
-      )}
     </Card>
   );
 }
@@ -360,18 +299,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   lineBody: { flex: 1, gap: 2 },
-  cellRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  cellText: { flex: 1 },
-  cellEdit: { gap: spacing.xs },
-  cellButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
-  input: {
-    backgroundColor: colors.surfaceSunk,
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    color: colors.textPrimary,
-    fontSize: 15,
-  },
 });
