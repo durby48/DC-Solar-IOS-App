@@ -60,7 +60,8 @@ function toggle<T>(list: T[], v: T): T[] {
 
 export default function AssignLeadsScreen() {
   const gate = useRoleGate();
-  const allowed = gate.role?.isAdmin === true || gate.role?.isSalesManager === true || gate.role?.isDeveloper === true;
+  // A developer gets in through a role view (Owner / Sales manager), like anyone with that role.
+  const allowed = gate.role?.isAdmin === true || gate.role?.isSalesManager === true;
 
   if (gate.phase === 'loading') {
     return (
@@ -83,7 +84,7 @@ export default function AssignLeadsScreen() {
   return (
     <AssignLeads
       myEmail={gate.role?.email.toLowerCase() ?? ''}
-      canRestore={gate.role?.isAdmin === true || gate.role?.isDeveloper === true}
+      canRestore={gate.role?.isAdmin === true}
     />
   );
 }

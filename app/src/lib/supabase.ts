@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type Session, type User } from '@supabase/supabase-js';
 import { AppState, Platform } from 'react-native';
 
-import { getViewAsPerson, isDevViewLoaded, pushDevNotice, setDevViewState, whenDevViewLoaded } from '@/lib/devViewState';
+import { getDevView, getViewAsPerson, isDevViewLoaded, pushDevNotice, setDevViewState, whenDevViewLoaded } from '@/lib/devViewState';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_KEY ?? '';
@@ -79,7 +79,33 @@ async function devFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
   }
   if (!isDevViewLoaded()) await whenDevViewLoaded();
   const person = getViewAsPerson();
-  if (!person) return watched(input, init, url, method);
+  if (!person) {
+    // View as a ROLE (2026-10-08): a developer's extra power applies only
+    // here. The database reads `x-dev-as-role` (dev_pre_request →
+    // app.dev_role); the texting / calling functions read `devAsRole` from
+    // the body (a new header would need every function's CORS changed).
+    const view = getDevView();
+    if (view?.kind === 'role') {
+      if (url.includes('/rest/v1/') && !url.includes('/rest/v1/rpc/dev_')) {
+        const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+        headers.set('x-dev-as-role', view.role);
+        return watched(input, { ...init, headers }, url, method);
+      }
+      const fn = url.includes('/functions/v1/') ? (url.split('/functions/v1/')[1]?.split(/[?/]/)[0] ?? '') : '';
+      if (DRY_RUN_FUNCTIONS.has(fn) && (init?.body === undefined || typeof init.body === 'string')) {
+        let body: Record<string, unknown> = {};
+        try {
+          body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+        } catch {
+          body = {};
+        }
+        const headers = new Headers(init?.headers);
+        headers.set('Content-Type', 'application/json');
+        return watched(url, { ...init, method: 'POST', headers, body: JSON.stringify({ ...body, devAsRole: view.role }) }, url, 'POST');
+      }
+    }
+    return watched(input, init, url, method);
+  }
 
   const first = person.name.split(' ')[0] || person.name;
 

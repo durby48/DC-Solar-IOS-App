@@ -86,7 +86,7 @@ function SalesSettings() {
         <SectionHeader title="Selling" accent={hubColors.crm.fg} />
         <Card padded={false}>
           {/* The sales manager hands out leads in bulk (2026-10-08). */}
-          {me?.isSalesManager || me?.isDeveloper ? (
+          {me?.isSalesManager ? (
             <ListRow icon="people" title="Assign leads" subtitle="Filter leads and hand them out to the team" onPress={() => go('/assign-leads')} divider />
           ) : null}
           <ListRow icon="library" title="Sales resources" subtitle="Brochure, call script, objections" onPress={() => go('/resources')} divider />

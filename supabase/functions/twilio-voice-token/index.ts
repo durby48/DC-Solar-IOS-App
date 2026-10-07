@@ -134,7 +134,7 @@ Deno.serve(async (req) => {
     // Developer "view as" (2026-10-08): `{ devViewAs }` asks "could THIS
     // person make calls?" — the same checks, run as them, and an answer
     // instead of a token. Only a developer may ask.
-    const body = (await req.json().catch(() => ({}))) as { devViewAs?: string };
+    const body = (await req.json().catch(() => ({}))) as { devViewAs?: string; devAsRole?: string };
     let callerEmail = realEmail;
     const { data: realRow } = await admin
       .from('employees')
@@ -155,11 +155,9 @@ Deno.serve(async (req) => {
     const dryRunName = body.devViewAs
       ? ((employee as { display_name?: string | null } | null)?.display_name ?? callerEmail)
       : null;
-    // A developer calling as themselves may call like an admin, whatever their role.
-    if (
-      role !== 'owner' && role !== 'operator' && role !== 'sales' && role !== 'sales_manager' &&
-      !(isDeveloper && !body.devViewAs)
-    ) {
+    // A developer may call like an admin only in an Owner/Operator view (2026-10-08).
+    const devAdmin = isDeveloper && !body.devViewAs && (body.devAsRole === 'owner' || body.devAsRole === 'operator');
+    if (role !== 'owner' && role !== 'operator' && role !== 'sales' && role !== 'sales_manager' && !devAdmin) {
       return fail(403, 'forbidden', 'Admins and sales only.');
     }
 

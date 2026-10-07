@@ -143,11 +143,9 @@ export interface PickPerson {
 
 /** Everyone a developer can view as (employees is admin-read; a developer is an admin). */
 export async function fetchPeople(): Promise<PickPerson[]> {
-  const { data } = await supabase
-    .from('employees')
-    .select('email, display_name, role, is_test')
-    .eq('company', 'dc-solar')
-    .order('display_name');
+  // dev_people(): developer-gated, so it works in the normal view too
+  // (employees is admin-read, and a developer is an admin only in a role view).
+  const { data } = await supabase.rpc('dev_people');
   return ((data ?? []) as { email: string; display_name: string | null; role: ViewRole; is_test: boolean | null }[]).map(
     (r) => ({ email: r.email, name: r.display_name ?? r.email, role: r.role, isTest: Boolean(r.is_test) }),
   );
@@ -220,12 +218,7 @@ export interface PhoneEvent {
 
 /** One person's recent events, newest first. */
 export async function fetchPhoneEvents(email: string): Promise<PhoneEvent[]> {
-  const { data } = await supabase
-    .from('client_diagnostics')
-    .select('id, kind, ok, detail, app_version, runtime, platform, created_at')
-    .ilike('email', email)
-    .order('created_at', { ascending: false })
-    .limit(30);
+  const { data } = await supabase.rpc('dev_phone_events', { p_email: email });
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id),
     kind: String(r.kind),

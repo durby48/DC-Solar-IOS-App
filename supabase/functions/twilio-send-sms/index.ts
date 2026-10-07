@@ -112,6 +112,8 @@ interface Payload {
   mediaPaths?: string[];
   /** Developer "view as" (2026-10-08): check as this employee, send nothing. */
   devViewAs?: string;
+  /** Developer "view as a role" (2026-10-08): their power applies only in an Owner/Operator view. */
+  devAsRole?: string;
 }
 
 interface NumberMatch {
@@ -196,6 +198,9 @@ Deno.serve(async (req) => {
       .eq('email', realEmail)
       .maybeSingle();
     const isDeveloper = Boolean((realRow as { is_developer?: boolean } | null)?.is_developer);
+    // A developer texts like an admin only while in an Owner/Operator view;
+    // in their normal view they are their own role (2026-10-08).
+    const devAdmin = isDeveloper && !payload.devViewAs && (payload.devAsRole === 'owner' || payload.devAsRole === 'operator');
     if (payload.devViewAs) {
       if (!isDeveloper) return fail(403, 'forbidden', 'Developers only.');
       callerEmail = payload.devViewAs.toLowerCase();
@@ -214,8 +219,8 @@ Deno.serve(async (req) => {
     // on any lead and any sales-side customer — they run the team. A developer
     // texting as themselves texts like an admin, whatever their role.
     const isManager = role === 'sales_manager';
-    const isSales = (role === 'sales' || isManager) && !(isDeveloper && !payload.devViewAs);
-    if (role !== 'owner' && role !== 'operator' && !isSales && !(isDeveloper && !payload.devViewAs)) {
+    const isSales = (role === 'sales' || isManager) && !devAdmin;
+    if (role !== 'owner' && role !== 'operator' && !isSales && !devAdmin) {
       return fail(403, 'forbidden', 'Admins and sales only.');
     }
 

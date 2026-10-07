@@ -489,13 +489,13 @@ export function DetailPanel({
           ) : null}
           <Fact label={record.lead.source_ref ? 'Received' : 'Created'} value={shortDate(record.lead.created_at)} muted />
           {(() => {
-            // Who may remove (mirrors remove_leads()): admins, the manager,
-            // developers; a rep only a lead they added by hand.
+            // Who may remove (mirrors remove_leads()): admins, the manager;
+            // a rep only a lead they added by hand.
             const mine =
               !!myEmail &&
               record.lead?.created_by?.toLowerCase() === myEmail.toLowerCase() &&
               !record.lead?.import_batch;
-            const canRemove = role?.isAdmin || role?.isSalesManager || role?.isDeveloper || mine;
+            const canRemove = role?.isAdmin || role?.isSalesManager || mine;
             if (!canRemove) return null;
             const booked = record.lead?.status === 'scheduled' || record.lead?.status === 'visit_done';
             if (booked) {

@@ -17,7 +17,7 @@ import { personName } from '@/lib/staffNames';
  */
 export default function RemovedLeadsScreen() {
   const gate = useRoleGate();
-  const allowed = gate.role?.isAdmin === true || gate.role?.isDeveloper === true;
+  const allowed = gate.role?.isAdmin === true;
   const [rows, setRows] = useState<RemovedLead[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
