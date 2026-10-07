@@ -764,7 +764,9 @@ export interface CustomerNote {
   id: string;
   created_at: string;
   updated_at: string | null;
-  customer_id: string;
+  /** A customer's note — or null for a LEAD's note (2026-10-09_lead_note_entries.sql). */
+  customer_id: string | null;
+  lead_id: string | null;
   job_id: string | null;
   body: string;
   author_email: string;
@@ -777,12 +779,22 @@ export type CustomerNotesResult =
 
 /** The note timeline, pinned first then newest first. */
 export async function fetchCustomerNotes(customerId: string): Promise<CustomerNotesResult> {
+  return fetchRecordNotes({ customerId });
+}
+
+/**
+ * A customer's or a LEAD's notes (2026-10-09: lead notes are entries too,
+ * not one text box). RLS decides who reads a lead's: whoever can see the lead.
+ */
+export async function fetchRecordNotes(
+  target: { customerId: string; leadId?: undefined } | { leadId: string; customerId?: undefined },
+): Promise<CustomerNotesResult> {
   try {
     const { data, error } = await supabase
       .from('customer_notes')
-      .select('id, created_at, updated_at, customer_id, job_id, body, author_email, pinned')
+      .select('id, created_at, updated_at, customer_id, lead_id, job_id, body, author_email, pinned')
       .eq('company', COMPANY)
-      .eq('customer_id', customerId)
+      .eq(target.leadId ? 'lead_id' : 'customer_id', (target.leadId ?? target.customerId) as string)
       .order('pinned', { ascending: false })
       .order('created_at', { ascending: false });
     if (error) return { status: 'unavailable' };
@@ -799,7 +811,9 @@ export async function fetchCustomerNotes(customerId: string): Promise<CustomerNo
  * relying on the column default.
  */
 export async function addCustomerNote(params: {
-  customerId: string;
+  /** One of the two: a customer's note, or a lead's. */
+  customerId?: string | null;
+  leadId?: string | null;
   body: string;
   jobId?: string | null;
   pinned?: boolean;
@@ -814,7 +828,8 @@ export async function addCustomerNote(params: {
 
     const { error } = await supabase.from('customer_notes').insert({
       company: COMPANY,
-      customer_id: params.customerId,
+      customer_id: params.customerId ?? null,
+      lead_id: params.customerId ? null : (params.leadId ?? null),
       job_id: params.jobId ?? null,
       body,
       author_email: email,
@@ -876,9 +891,8 @@ export async function updateCustomerNote(
 }
 
 /**
- * Delete a note. Only `cn_admin_all` grants DELETE — an author who is not an
- * admin can edit their note but not remove it, which is why the screen shows
- * the trash icon to admins only.
+ * Delete a note. Its author may (`cn_author_delete`, 2026-10-09) and admins
+ * may delete any (`cn_admin_all`); zero rows back means neither applied.
  */
 export async function deleteCustomerNote(id: string): Promise<MutationResult> {
   try {
@@ -892,12 +906,12 @@ export async function deleteCustomerNote(id: string): Promise<MutationResult> {
       return {
         ok: false,
         message: crmError(error, 'Could not delete that note.', {
-          denied: 'Only owners and operators can delete notes.',
+          denied: 'You can only delete your own notes.',
         }),
       };
     }
     if (!data || data.length === 0) {
-      return { ok: false, message: 'Only owners and operators can delete notes.' };
+      return { ok: false, message: 'You can only delete your own notes.' };
     }
     return { ok: true };
   } catch (e) {

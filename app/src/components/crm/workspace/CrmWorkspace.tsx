@@ -25,6 +25,7 @@ import {
   fetchCustomerFinance,
   fetchCustomerJobs,
   fetchCustomerNotes,
+  fetchRecordNotes,
   type CustomerFinanceRow,
   type CustomerJob,
   type CustomerNote,
@@ -319,15 +320,16 @@ export function CrmWorkspace() {
       setHistory(stageHistory);
       setAppointments([]);
     } else {
-      const [thread, statusHistory, appts] = await Promise.all([
+      const [thread, statusHistory, appts, noteResult] = await Promise.all([
         fetchThread(record.id, { byLead: true }),
         fetchLeadStatusHistory(record.id),
         fetchLeadAppointments(record.id),
+        fetchRecordNotes({ leadId: record.id }),
       ]);
       if (detailFor.current !== record.key) return;
       setMessages(thread);
-      setNotes([]);
-      setNotesAvailable(true);
+      setNotes(noteResult.status === 'ok' ? noteResult.notes : []);
+      setNotesAvailable(noteResult.status === 'ok');
       setJobs([]);
       setFinance([]);
       setHistory(statusHistory);

@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 
 import { ActivityTimeline } from '@/components/crm/workspace/ActivityTimeline';
 import { EmailPane } from '@/components/crm/workspace/EmailPane';
+import { NoteEntry } from '@/components/crm/workspace/NoteEntry';
 import { Conversation } from '@/components/comms/Conversation';
 import { colors, radii, spacing } from '@/constants/theme';
 import {
@@ -17,12 +18,10 @@ import { addCustomerNote, type CustomerNote } from '@/lib/crm';
 import { type RecordEmailResult } from '@/lib/crmEmail';
 import { Chip } from '@/components/ui';
 import { type ActivityEvent, type ActivityKind, type WorkspaceRecord } from '@/lib/crmWorkspace';
-import { updateLead } from '@/lib/leads';
 import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 import { useMyBrochureLink } from '@/lib/brochure';
 import { inAppCallingSupported } from '@/lib/voice';
-import { personName } from '@/lib/staffNames';
 
 /**
  * The middle column: the relationship's communication, three ways.
@@ -60,17 +59,6 @@ const ACTIVITY_GROUPS: { key: Exclude<ActivityFilter, 'all'>; label: string; kin
   { key: 'notes', label: 'Notes', kinds: ['note'] },
   { key: 'followups', label: 'Tasks & visits', kinds: ['task_added', 'task_done', 'appointment', 'lead_created', 'lead_status'] },
 ];
-
-function noteTime(iso: string): string {
-  const d = new Date(iso);
-  if (!Number.isFinite(d.getTime())) return '';
-  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
-
-/** "ke4ting@gmail.com" → "Carson" (lib/staffNames.ts, 2026-10-08). */
-function authorName(email: string): string {
-  return personName(email) ?? 'Someone';
-}
 
 export function WorkspaceCenter({
   record,
@@ -112,7 +100,10 @@ export function WorkspaceCenter({
   // Conversation pane is theirs, SMS only — the company mailbox is not. No
   // "open full record": the record screens are outside the CRM a sales login
   // is kept in.
-  const isSales = useRole()?.isSales === true;
+  const role = useRole();
+  const isSales = role?.isSales === true;
+  const isAdmin = role?.isAdmin === true;
+  const myEmail = role?.email?.toLowerCase() ?? null;
   const [pane, setPane] = useState<Pane>('conversation');
   const [rawChannel, setChannel] = useState<Channel>('sms');
   const channel: Channel = isSales ? 'sms' : rawChannel;
@@ -198,41 +189,15 @@ export function WorkspaceCenter({
     setCallNotice(null);
   }, [record.key]);
 
-  // A sales rep keeps a lead's running notes on the lead itself.
-  const [leadNotes, setLeadNotes] = useState(record.lead?.notes ?? '');
-  const [leadNotesHeight, setLeadNotesHeight] = useState(0);
-  const [savingLeadNotes, setSavingLeadNotes] = useState(false);
-  const [leadNotesError, setLeadNotesError] = useState<string | null>(null);
-  const [leadNotesSaved, setLeadNotesSaved] = useState(false);
-  useEffect(() => {
-    setLeadNotes(record.lead?.notes ?? '');
-    setLeadNotesError(null);
-  }, [record.key, record.lead?.notes]);
-  useEffect(() => {
-    setLeadNotesSaved(false);
-  }, [record.key]);
-  const saveLeadNotes = async () => {
-    if (record.kind !== 'lead') return;
-    setSavingLeadNotes(true);
-    setLeadNotesError(null);
-    setLeadNotesSaved(false);
-    const result = await updateLead(record.id, { notes: leadNotes.trim() || null });
-    setSavingLeadNotes(false);
-    if (result.ok) {
-      setLeadNotesSaved(true);
-      onRecordChanged?.();
-    } else {
-      setLeadNotesError(result.message);
-    }
-  };
-
   const submitNote = async () => {
-    if (record.kind !== 'customer') return;
     const body = noteDraft.trim();
     if (!body) return;
     setSavingNote(true);
     setNoteError(null);
-    const result = await addCustomerNote({ customerId: record.id, body, jobId: record.currentJob?.id ?? null });
+    const result =
+      record.kind === 'customer'
+        ? await addCustomerNote({ customerId: record.id, body, jobId: record.currentJob?.id ?? null })
+        : await addCustomerNote({ leadId: record.id, body });
     setSavingNote(false);
     if (result.ok) {
       setNoteDraft('');
@@ -413,87 +378,47 @@ export function WorkspaceCenter({
         contentContainerStyle={styles.notesContent}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets>
-        {record.kind === 'customer' ? (
-          <View style={styles.noteBox}>
-            <TextInput
-              value={noteDraft}
-              onChangeText={setNoteDraft}
-              placeholder="Gate code, dog, who to call…"
-              placeholderTextColor={colors.inkSoft}
-              multiline
-              style={styles.noteInput}
-            />
-            <View style={styles.noteActions}>
-              {noteError ? <Text style={styles.noteError}>{noteError}</Text> : <View />}
-              <Pressable
-                onPress={() => void submitNote()}
-                disabled={savingNote || !noteDraft.trim()}
-                style={({ pressed }) => [styles.noteSave, (pressed || savingNote || !noteDraft.trim()) && styles.pressed]}>
-                {savingNote ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.noteSaveText}>Add note</Text>}
-              </Pressable>
-            </View>
+        {/* Notes are ENTRIES for leads and customers alike (2026-10-09):
+            add one here; each has its author, date and time, and Edit /
+            Delete for its author or an admin (components/.../NoteEntry). */}
+        <View style={styles.noteBox}>
+          <TextInput
+            value={noteDraft}
+            onChangeText={setNoteDraft}
+            placeholder={
+              record.kind === 'customer' ? 'Gate code, dog, who to call…' : 'What they said, who to ask for, best time to call…'
+            }
+            placeholderTextColor={colors.inkSoft}
+            multiline
+            textAlignVertical="top"
+            style={styles.noteInput}
+          />
+          <View style={styles.noteActions}>
+            {noteError ? <Text style={styles.noteError}>{noteError}</Text> : <View />}
+            <Pressable
+              onPress={() => void submitNote()}
+              disabled={savingNote || !noteDraft.trim()}
+              style={({ pressed }) => [styles.noteSave, (pressed || savingNote || !noteDraft.trim()) && styles.pressed]}>
+              {savingNote ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.noteSaveText}>Add note</Text>}
+            </Pressable>
           </View>
-        ) : isSales ? (
-          <View style={styles.noteBox}>
-            <TextInput
-              value={leadNotes}
-              onChangeText={(v) => {
-                setLeadNotes(v);
-                setLeadNotesSaved(false);
-              }}
-              placeholder="What they said, who to ask for, best time to call…"
-              placeholderTextColor={colors.inkSoft}
-              multiline
-              textAlignVertical="top"
-              // Grows with the notes (2026-10-08) — it was three lines tall,
-              // so imported notes scrolled inside a sliver.
-              onContentSizeChange={(e) => setLeadNotesHeight(e.nativeEvent.contentSize.height)}
-              style={[styles.noteInput, styles.leadNotesInput, { height: Math.min(560, Math.max(220, leadNotesHeight + 24)) }]}
-            />
-            <View style={styles.noteActions}>
-              {leadNotesError ? (
-                <Text style={styles.noteError}>{leadNotesError}</Text>
-              ) : leadNotesSaved ? (
-                <Text style={styles.noteSaved}>Saved ✓</Text>
-              ) : (
-                <View />
-              )}
-              <Pressable
-                onPress={() => void saveLeadNotes()}
-                disabled={savingLeadNotes || leadNotes === (record.lead?.notes ?? '')}
-                style={({ pressed }) => [
-                  styles.noteSave,
-                  (pressed || savingLeadNotes || leadNotes === (record.lead?.notes ?? '')) && styles.pressed,
-                ]}>
-                {savingLeadNotes ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.noteSaveText}>Save notes</Text>}
-              </Pressable>
-            </View>
-          </View>
-        ) : (
-          <View style={styles.noteCard}>
-            <Text style={styles.noteBody}>{record.lead?.notes?.trim() || 'No notes on this lead.'}</Text>
-            <Text style={styles.noteMeta}>Lead notes are edited on the lead record (open it from the header).</Text>
-          </View>
-        )}
+        </View>
         {record.kind === 'customer' && record.customer?.notes ? (
           <View style={[styles.noteCard, styles.notePinned]}>
             <Text style={styles.noteBody}>{record.customer.notes}</Text>
             <Text style={styles.noteMeta}>General notes on the customer record</Text>
           </View>
         ) : null}
-        {!notesAvailable && record.kind === 'customer' ? (
-          <Text style={styles.emptyBody}>Notes could not be loaded right now.</Text>
-        ) : null}
+        {!notesAvailable ? <Text style={styles.emptyBody}>Notes could not be loaded right now.</Text> : null}
         {notes.map((n) => (
-          <View key={n.id} style={[styles.noteCard, n.pinned && styles.notePinned]}>
-            <Text style={styles.noteBody}>{n.body}</Text>
-            <Text style={styles.noteMeta}>
-              {n.pinned ? 'Pinned · ' : ''}
-              {authorName(n.author_email)} · {noteTime(n.created_at)}
-            </Text>
-          </View>
+          <NoteEntry
+            key={n.id}
+            note={n}
+            canChange={isAdmin || (!!myEmail && n.author_email.toLowerCase() === myEmail)}
+            onChanged={onNotesChanged}
+          />
         ))}
-        {record.kind === 'customer' && notesAvailable && notes.length === 0 && !record.customer?.notes ? (
+        {notesAvailable && notes.length === 0 && !(record.kind === 'customer' && record.customer?.notes) ? (
           <Text style={styles.emptyBody}>No notes yet.</Text>
         ) : null}
       </ScrollView>
@@ -588,11 +513,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  leadNotesInput: { lineHeight: 20 },
   noteActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   noteError: { color: colors.danger, fontSize: 12, fontWeight: '700' },
   callNotice: { color: colors.coralDeep, fontSize: 12, fontWeight: '700', paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
-  noteSaved: { color: colors.olive, fontSize: 12, fontWeight: '700' },
   noteSave: { backgroundColor: colors.sun, borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: 6, minWidth: 90, alignItems: 'center' },
   noteSaveText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
   noteCard: { backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.md, gap: spacing.xs },
