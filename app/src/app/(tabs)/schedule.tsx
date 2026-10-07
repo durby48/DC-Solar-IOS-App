@@ -9,9 +9,10 @@ import { fetchAvailability, isoDay, spotsLabel, type DayAvailability } from '@/l
 import { fetchWorkspaceRecords } from '@/lib/crmWorkspace';
 import { fetchScheduleRange, type ScheduleEntry } from '@/lib/data';
 import { fetchLeadAppointmentsRange, KIND_LABEL, type LeadAppointmentEntry } from '@/lib/leadAppointments';
+import { fetchTasks, type Task } from '@/lib/tasks';
 import { useRoleGate } from '@/lib/role';
 import { isServiceJob } from '@/lib/stages';
-import { formatTimeLabel } from '@/lib/time';
+import { formatTimeLabel, toHHMM, toISODate } from '@/lib/time';
 
 /**
  * The Calendar tab (2026-10-06, S2) — a sales rep's week, Mon–Sat.
@@ -19,8 +20,10 @@ import { formatTimeLabel } from '@/lib/time';
  * Each day shows the service crew's availability as COUNTS ("3 of 5 visits
  * left", "Full", "⚠ Job not staffed" — `service_availability()`), never whose
  * job is taking the crew, and under it the rep's OWN items: the service
- * visits they booked (Paid / Not paid) and their appointments. RLS already
- * narrows both reads to the rep. Tapping an item opens that person in the CRM.
+ * visits they booked (Paid / Not paid), their appointments and (2026-10-08)
+ * their open tasks, at the time set on each. RLS narrows the reads to the rep;
+ * tasks are also filtered to the ones assigned to them (a manager reads the
+ * team's). Tapping an item opens that person in the CRM.
  *
  * Admins and crew have the Operations calendar; this tab is hidden from them
  * and sends them there.
@@ -45,13 +48,17 @@ interface Item {
   sort: string;
   title: string;
   subtitle: string | null;
-  icon: 'construct' | 'calendar';
+  icon: 'construct' | 'calendar' | 'checkbox-outline';
   paid?: boolean;
   recordKey: string | null;
 }
 
 function SalesWeek() {
   const router = useRouter();
+  const gate = useRoleGate();
+  const myEmail = gate.role?.email.toLowerCase() ?? '';
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [nameByKey, setNameByKey] = useState<Map<string, string>>(new Map());
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
   const [avail, setAvail] = useState<Map<string, DayAvailability> | null>(null);
   const [visits, setVisits] = useState<ScheduleEntry[]>([]);
@@ -79,7 +86,8 @@ function SalesWeek() {
         fetchScheduleRange(from, to),
         fetchLeadAppointmentsRange(from, to),
         fetchWorkspaceRecords(),
-      ]).then(([a, v, ap, recs]) => {
+        fetchTasks({ all: true }),
+      ]).then(([a, v, ap, recs, t]) => {
         if (cancelled) return;
         setAvail(a);
         setVisits(v.filter((e) => isServiceJob(e.job)));
@@ -89,11 +97,18 @@ function SalesWeek() {
         const map = new Map<string, string>();
         for (const r of recs.records) if (r.lead?.converted_job_id) map.set(r.lead.converted_job_id, r.key);
         setLeadByJob(map);
+        setNameByKey(new Map(recs.records.map((r) => [r.key, r.name])));
+        setTasks(t.status === 'ok' ? t.tasks.filter((x) => !x.done_at && x.due_at) : []);
       });
       return () => {
         cancelled = true;
       };
     }, [from, to]),
+  );
+
+  const myTasks = useMemo(
+    () => tasks.filter((t) => (t.assigned_to ?? '').toLowerCase() === myEmail),
+    [tasks, myEmail],
   );
 
   const itemsFor = (day: string): Item[] => {
@@ -121,6 +136,22 @@ function SalesWeek() {
           icon: 'calendar' as const,
           recordKey: `lead:${a.lead_id}`,
         })),
+      ...myTasks
+        .filter((t) => t.due_at && toISODate(new Date(t.due_at)) === day)
+        .map((t) => {
+          const at = new Date(t.due_at as string);
+          const hhmm = toHHMM(at);
+          const recordKey = t.lead_id ? `lead:${t.lead_id}` : t.customer_id ? `customer:${t.customer_id}` : null;
+          return {
+            key: `t:${t.id}`,
+            time: formatTimeLabel(hhmm),
+            sort: hhmm,
+            title: `Task · ${t.title}`,
+            subtitle: recordKey ? (nameByKey.get(recordKey) ?? null) : null,
+            icon: 'checkbox-outline' as const,
+            recordKey,
+          };
+        }),
     ];
     return list.sort((x, y) => x.sort.localeCompare(y.sort));
   };

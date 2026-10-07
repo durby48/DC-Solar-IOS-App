@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { TimeChips } from '@/components/TimeChips';
 import { Chip } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
 import { createTask, dueFromPick } from '@/lib/tasks';
@@ -9,7 +10,9 @@ import { createTask, dueFromPick } from '@/lib/tasks';
  * Add a task inline: title, when (Today / Tomorrow / Next week / a date /
  * none), who (you by default). No modal, no type picker — Atomic CRM's
  * AddTask dialog reduced to the three things the crew actually fills in.
- * Defaults are the useful ones: due today at 9, assigned to you.
+ * Defaults are the useful ones: due today at 9, assigned to you. A time
+ * (2026-10-08): one tap on 8 AM – 5 PM or "Other…"; the task then sits at that
+ * time on the rep's Calendar.
  */
 type Due = 'today' | 'tomorrow' | 'nextWeek' | 'date' | 'none';
 
@@ -32,6 +35,7 @@ export function TaskComposer({
   const [title, setTitle] = useState('');
   const [due, setDue] = useState<Due>('today');
   const [dateText, setDateText] = useState('');
+  const [time, setTime] = useState<string | null>('09:00');
   const [assignee, setAssignee] = useState<string | null>(myEmail);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +56,12 @@ export function TaskComposer({
       }
     } else if (due !== 'none') {
       dueAt = dueFromPick(due);
+    }
+    if (dueAt && time) {
+      const at = new Date(dueAt);
+      const [h, m] = time.split(':').map(Number);
+      at.setHours(h, m, 0, 0);
+      dueAt = at.toISOString();
     }
     setSaving(true);
     setError(null);
@@ -109,6 +119,12 @@ export function TaskComposer({
           autoCorrect={false}
           style={[styles.input, styles.dateInput]}
         />
+      ) : null}
+      {due !== 'none' ? (
+        <>
+          <Text style={styles.label}>Time</Text>
+          <TimeChips value={time} onChange={(t) => setTime(t ?? '09:00')} />
+        </>
       ) : null}
       <Text style={styles.label}>Who</Text>
       <View style={styles.chips}>

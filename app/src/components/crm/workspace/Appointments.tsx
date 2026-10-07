@@ -5,6 +5,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 
 import { Chip } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
 import { authorName } from '@/lib/crmWorkspace';
+import { TimeChips } from '@/components/TimeChips';
 import {
   APPOINTMENT_KINDS,
   appointmentWhen,
@@ -181,16 +182,9 @@ export function AppointmentComposer({
           autoCorrect={false}
           style={[styles.input, styles.dateInput]}
         />
-        <TextInput
-          value={time}
-          onChangeText={setTime}
-          placeholder="HH:MM (24h) or blank"
-          placeholderTextColor={colors.inkSoft}
-          autoCapitalize="none"
-          autoCorrect={false}
-          style={[styles.input, styles.timeInput]}
-        />
       </View>
+      <Text style={styles.label}>Time</Text>
+      <TimeChips value={time || null} onChange={(t) => setTime(t ?? '')} noneLabel="No time" />
       <Text style={styles.label}>Who is going</Text>
       <View style={styles.chips}>
         {myEmail ? <Chip label="Me" tone="olive" selected={assignee?.toLowerCase() === myEmail.toLowerCase()} onPress={() => setAssignee(myEmail)} /> : null}
