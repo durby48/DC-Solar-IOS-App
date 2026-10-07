@@ -281,7 +281,7 @@ export function LeadMapBody({
                   return (
                     <Pressable key={st.key} onPress={() => setStormPick(st.key)} style={[styles.stormChip, on && styles.stormChipOn]}>
                       <Text style={[styles.stormChipTitle, on && styles.stormChipTextOn]}>
-                        {stormDayLabel(st.day, false)}
+                        {stormDayLabel(st.day)}
                         {st.kind === 'hail' ? ` · ${hailLabel(st.maxSize)}` : st.maxSize ? ` · ${st.maxSize} mph` : ''}
                       </Text>
                       <Text style={[styles.stormChipSub, on && styles.stormChipTextOn]} numberOfLines={1}>
@@ -361,7 +361,7 @@ export function LeadMapBody({
           </View>
           <AppText variant="bodyStrong">
             {pickedStorm
-              ? `${stormDayLabel(pickedStorm.day, false)} ${pickedStorm.kind}`
+              ? `${stormDayLabel(pickedStorm.day)} ${pickedStorm.kind}`
               : `All ${stormKind} storms · ${STORM_WINDOWS.find((w) => w.key === pickedWindow)?.label ?? ''}`}
             {' · '}
             {hitLeads} lead{hitLeads === 1 ? '' : 's'} · {hitCustomers} customer{hitCustomers === 1 ? '' : 's'} in the path

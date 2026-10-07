@@ -1,12 +1,15 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { LeadMapView } from '@/components/map/LeadMapView';
 import { AppText, Card, Screen, SectionHeader } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { sendSms } from '@/lib/comms';
+import { fetchMapPoints, type MapPoint } from '@/lib/leadMap';
+import { inPath, loadAllReports, MIN_HAIL, ZONE_LEGEND, type StormLayers, type StormReportPoint } from '@/lib/stormLayers';
 import { useRoleGate } from '@/lib/role';
 import { personName } from '@/lib/staffNames';
 import {
@@ -48,13 +51,32 @@ export default function StormDetailScreen() {
   const [textOpen, setTextOpen] = useState(false);
   const [text, setText] = useState('');
   const [progress, setProgress] = useState<string | null>(null);
+  // The storm on the map (2026-10-09): zoomed in on its zones; Full screen →
+  // the Lead map on this storm.
+  const [mapPoints, setMapPoints] = useState<MapPoint[] | null>(null);
+  const [dayReports, setDayReports] = useState<StormReportPoint[]>([]);
 
   const load = useCallback(async () => {
     if (!day) return;
-    const [list, rows] = await Promise.all([fetchStorms(), fetchStormHits(day)]);
+    const [list, rows, pts, reports] = await Promise.all([
+      fetchStorms(),
+      fetchStormHits(day),
+      fetchMapPoints(gate.role?.isSales === true),
+      loadAllReports(),
+    ]);
     setStorm(list.find((s) => s.day === day) ?? null);
     setHits(rows);
-  }, [day]);
+    setMapPoints(pts.points);
+    setDayReports(reports.filter((r) => r.day === day && r.kind === 'hail' && (r.size ?? 0) >= MIN_HAIL));
+  }, [day, gate.role?.isSales]);
+
+  const mapLayers = useMemo<StormLayers | null>(
+    () =>
+      dayReports.length && mapPoints
+        ? { radar: false, warnings: [], reports: dayReports, highlight: new Set(inPath(mapPoints, dayReports)), fitKey: `hail:${day}` }
+        : null,
+    [dayReports, mapPoints, day],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -135,7 +157,29 @@ export default function StormDetailScreen() {
 
   return (
     <Screen edges={[]} contentContainerStyle={styles.content}>
-      <Stack.Screen options={{ title: `${stormDayLabel(day, false)} hail` }} />
+      <Stack.Screen options={{ title: `${stormDayLabel(day)} hail` }} />
+
+      {mapPoints && mapLayers ? (
+        <View style={styles.mapBox}>
+          <LeadMapView points={mapPoints} selectedKey={null} onSelect={() => {}} storms={mapLayers} labels />
+          <Pressable
+            onPress={() => router.push({ pathname: '/lead-map', params: { storm: day } } as never)}
+            style={({ pressed }) => [styles.fullScreen, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Open the map full screen">
+            <Ionicons name="expand" size={14} color="#fff" />
+            <Text style={styles.fullScreenText}>Full screen</Text>
+          </Pressable>
+          <View pointerEvents="none" style={styles.mapLegend}>
+            {ZONE_LEGEND.map((l) => (
+              <View key={l.label} style={styles.mapLegendItem}>
+                <View style={[styles.mapLegendSwatch, { backgroundColor: l.color }]} />
+                <Text style={styles.mapLegendText}>{l.label}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
 
       <Card style={styles.head}>
         <AppText variant="heading">
@@ -255,6 +299,34 @@ const styles = StyleSheet.create({
   content: { width: '100%', maxWidth: 680, alignSelf: 'center', gap: spacing.md, paddingBottom: spacing.xl },
   loading: { marginVertical: spacing.xl },
   head: { gap: spacing.xs },
+  mapBox: { height: 280, borderRadius: radii.md, overflow: 'hidden' },
+  fullScreen: {
+    position: 'absolute',
+    right: spacing.sm,
+    bottom: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: radii.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  fullScreenText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  mapLegend: {
+    position: 'absolute',
+    left: spacing.sm,
+    bottom: spacing.sm,
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: radii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  mapLegendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  mapLegendSwatch: { width: 9, height: 9, borderRadius: 5 },
+  mapLegendText: { color: '#fff', fontSize: 10, fontWeight: '700' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
   action: {
     flexDirection: 'row',
