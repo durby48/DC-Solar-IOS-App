@@ -439,7 +439,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm + 2,
     paddingVertical: 6,
   },
-  searchInput: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: '500', paddingVertical: 2 },
+  // minWidth 0 lets the box shrink on a narrow screen, so the round buttons
+  // (new, filter, map, import) always fit — the map one was getting cut off.
+  searchInput: { flex: 1, minWidth: 0, color: colors.ink, fontSize: 14, fontWeight: '500', paddingVertical: 2 },
   filters: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -456,7 +458,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   lensText: { fontSize: 12, fontWeight: '700' },
-  newLead: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: hubColors.crm.bg },
+  newLead: { width: 26, height: 26, flexShrink: 0, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: hubColors.crm.bg },
   kbd: {
     color: colors.inkSoft,
     fontSize: 10,
