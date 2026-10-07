@@ -7,6 +7,7 @@ import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatPhone } from '@/lib/comms';
 import { type RecordFilter, type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { zipOf } from '@/lib/crmFilters';
+import { TEMPERATURE_META } from '@/lib/leadTemperature';
 import { type LeadStatus } from '@/lib/sales';
 
 /**
@@ -22,7 +23,7 @@ const LEAD_PILL: Record<LeadStatus, { label: string; bg: string; fg: string }> =
   visit_done: { label: 'VISIT DONE', bg: colors.violetSoft, fg: colors.violet },
   estimating: { label: 'ESTIMATING', bg: colors.tan, fg: colors.inkSoft },
   won: { label: 'WON', bg: colors.oliveSoft, fg: colors.success },
-  lost: { label: 'LOST', bg: colors.coralSoft, fg: colors.coral },
+  lost: { label: 'NOT INTERESTED', bg: colors.dangerSoft, fg: colors.danger },
 };
 
 /** "4521 Troost Ave · 64110" — the street line and the ZIP, for a lead row. */
@@ -144,7 +145,7 @@ export function RecordList({
 }: {
   records: WorkspaceRecord[];
   /** `prospects` / `working` split `leads` for the sales view. */
-  total: { customers: number; leads: number; prospects: number; working: number };
+  total: { customers: number; leads: number; prospects: number; working: number; notInterested: number };
   selectedKey: string | null;
   onSelect: (record: WorkspaceRecord) => void;
   search: string;
@@ -245,6 +246,14 @@ export function RecordList({
                   {(LEAD_PILL[item.lead?.status ?? 'new'] ?? LEAD_PILL.new).label}
                 </Text>
               </View>
+            ) : null}
+            {item.lead?.temperature && TEMPERATURE_META[item.lead.temperature] ? (
+              <Ionicons
+                name={TEMPERATURE_META[item.lead.temperature].icon}
+                size={13}
+                color={TEMPERATURE_META[item.lead.temperature].color}
+                accessibilityLabel={TEMPERATURE_META[item.lead.temperature].label}
+              />
             ) : null}
             {ownerOf && ownerOf(item) ? (
               <View style={[styles.ownerPill, { borderColor: ownerOf(item)!.color }]}>
@@ -363,6 +372,13 @@ export function RecordList({
             ) : null}
           </>
         )}
+        {total.notInterested > 0 || kind === 'not_interested' ? (
+          <LensChip
+            label={`Not interested ${total.notInterested}`}
+            selected={kind === 'not_interested'}
+            onPress={() => onKind('not_interested')}
+          />
+        ) : null}
         {tasksPane ? (
           <LensChip
             label={taskBadge ? `Tasks ${taskBadge}` : 'Tasks'}

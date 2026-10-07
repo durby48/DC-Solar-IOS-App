@@ -76,6 +76,7 @@ import { useRole } from '@/lib/role';
 import { labelForJob, stageOrDefault, stagesForJob, type Stage } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
 import { type Customer } from '@/lib/types';
+import { personName } from '@/lib/staffNames';
 
 /**
  * The customer record — seven segments over one person.
@@ -134,12 +135,9 @@ function relativeTime(iso: string): string {
   return formatShortDate(iso.slice(0, 10));
 }
 
-/** "devonsd311@gmail.com" → "Devonsd311". Good enough to attribute a note. */
+/** "ke4ting@gmail.com" → "Carson" (lib/staffNames.ts, 2026-10-08). */
 function authorName(email: string): string {
-  const local = (email ?? '').split('@')[0] ?? '';
-  const first = local.split(/[._-]/)[0] ?? local;
-  if (!first) return 'Someone';
-  return first.charAt(0).toUpperCase() + first.slice(1);
+  return personName(email) ?? 'Someone';
 }
 
 function notify(

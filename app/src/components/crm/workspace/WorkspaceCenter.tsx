@@ -22,6 +22,7 @@ import { useRole } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 import { useMyBrochureLink } from '@/lib/brochure';
 import { inAppCallingSupported } from '@/lib/voice';
+import { personName } from '@/lib/staffNames';
 
 /**
  * The middle column: the relationship's communication, three ways.
@@ -66,10 +67,9 @@ function noteTime(iso: string): string {
   return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
+/** "ke4ting@gmail.com" → "Carson" (lib/staffNames.ts, 2026-10-08). */
 function authorName(email: string): string {
-  const local = email.split('@')[0] ?? '';
-  const first = local.split(/[._-]/)[0] ?? local;
-  return first ? first.charAt(0).toUpperCase() + first.slice(1) : 'Someone';
+  return personName(email) ?? 'Someone';
 }
 
 export function WorkspaceCenter({

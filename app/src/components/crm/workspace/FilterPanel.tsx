@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
+import { TEMPERATURE_META, TEMPERATURES } from '@/lib/leadTemperature';
 import {
   activeCount,
   CONTACT_LABEL,
@@ -165,6 +166,18 @@ export function FilterPanel({
           ))}
         </View>
 
+        <Text style={styles.section}>Temperature</Text>
+        <View style={styles.wrap}>
+          {TEMPERATURES.map((t) => (
+            <Pill
+              key={t}
+              label={TEMPERATURE_META[t].label}
+              on={(filters.temps ?? []).includes(t)}
+              onPress={() => set({ temps: toggle(filters.temps ?? [], t) })}
+            />
+          ))}
+        </View>
+
         <Text style={styles.section}>Contact</Text>
         <View style={styles.wrap}>
           {CONTACT_ORDER.map((c) => (
@@ -253,6 +266,7 @@ export function ActiveFilters({
     ...filters.sources.map((s) => ({ key: `o:${s}`, label: s, remove: () => onChange({ ...filters, sources: filters.sources.filter((x) => x !== s) }) })),
     ...filters.installers.map((s) => ({ key: `i:${s}`, label: s, remove: () => onChange({ ...filters, installers: filters.installers.filter((x) => x !== s) }) })),
     ...filters.reps.map((r) => ({ key: `r:${r}`, label: repName(r), remove: () => onChange({ ...filters, reps: filters.reps.filter((x) => x !== r) }) })),
+    ...(filters.temps ?? []).map((t) => ({ key: `t:${t}`, label: TEMPERATURE_META[t].label, remove: () => onChange({ ...filters, temps: filters.temps.filter((x) => x !== t) }) })),
     ...filters.has.map((h) => ({ key: `h:${h}`, label: HAS_LABEL[h], remove: () => onChange({ ...filters, has: filters.has.filter((x) => x !== h) }) })),
   ];
   if (filters.sort !== 'activity') {

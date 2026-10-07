@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 
 import '@/lib/devView';
 import { getDevView } from '@/lib/devViewState';
+import { clearStaffNames, loadStaffNames } from '@/lib/staffNames';
 import { supabase } from '@/lib/supabase';
 
 /**
@@ -47,6 +48,7 @@ let cache: { email: string; info: RoleInfo | null } | null = null;
 /** Drop the cached role (e.g. after sign-out). */
 export function clearRoleCache() {
   cache = null;
+  clearStaffNames();
 }
 
 /**
@@ -92,6 +94,8 @@ export async function getRole(): Promise<RoleInfo | null> {
       payRate: row.pay_rate != null ? Number(row.pay_rate) : null,
     };
     cache = { email, info };
+    // Names for "who did it" labels in the CRM (lib/staffNames.ts).
+    void loadStaffNames();
     return info;
   } catch {
     return null;

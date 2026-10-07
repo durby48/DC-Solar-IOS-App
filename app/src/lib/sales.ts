@@ -17,6 +17,7 @@
  */
 
 import { supabase } from '@/lib/supabase';
+import { type LeadTemperature } from '@/lib/leadTemperature';
 import { type Job } from '@/lib/types';
 
 const COMPANY = 'dc-solar';
@@ -68,6 +69,8 @@ export interface Lead {
   geocode_status?: string | null;
   /** The company that originally installed the solar here (imported, 2026-10-07). */
   installer?: string | null;
+  /** Hot / Warm / Cold, set by the rep (2026-10-08). */
+  temperature?: LeadTemperature | null;
 }
 
 export interface SalesRep {
@@ -146,7 +149,7 @@ export async function fetchSalesData(): Promise<SalesData | null> {
       supabase
         .from('leads')
         .select(
-          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer',
+          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature',
         )
         .eq('company', COMPANY)
         .order('created_at', { ascending: false }),
@@ -295,7 +298,7 @@ export async function fetchOpenLeads(): Promise<Lead[]> {
     const { data, error } = await supabase
       .from('leads')
       .select(
-        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer',
+        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature',
       )
       .eq('company', COMPANY)
       .or('converted_job_id.is.null,status.in.(scheduled,visit_done)')
@@ -344,9 +347,20 @@ export async function assignLead(
 
 /**
  * Move a lead along the funnel. A rep may do this on their own leads.
- * `lostReason` is written only with `status: 'lost'` (the sales view's
- * "Closed out" asks why); omit it to leave the column alone.
+ * `lostReason` is written only with `status: 'lost'` ("Not interested" since
+ * 2026-10-08 — one tap, so it is no longer asked); omit it to leave the
+ * column alone.
  */
+/** Hot / Warm / Cold, or null to clear (2026-10-08). A rep may on their own leads. */
+export async function setLeadTemperature(
+  leadId: string,
+  temperature: LeadTemperature | null,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { error } = await supabase.from('leads').update({ temperature }).eq('id', leadId);
+  if (error) return { ok: false, message: error.message };
+  return { ok: true };
+}
+
 export async function setLeadStatus(
   leadId: string,
   status: LeadStatus,

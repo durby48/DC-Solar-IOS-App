@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 
 import { type WorkspaceRecord } from '@/lib/crmWorkspace';
+import { type LeadTemperature } from '@/lib/leadTemperature';
 import { taskBucket, type Task } from '@/lib/tasks';
 
 /**
@@ -11,7 +12,8 @@ import { taskBucket, type Task } from '@/lib/tasks';
  *
  *   ZIP            one or several, from the ZIPs in the caller's own records
  *   Stage          Prospect · Contacted · Interested · Visit booked ·
- *                  Customer · Closed out (several at once)
+ *                  Customer · Not interested (several at once)
+ *   Temperature    Hot · Warm · Cold (2026-10-08)
  *   Contact        never contacted · no contact in 7+ days · follow-up
  *                  overdue · call first (no text consent)
  *   Source         the lead's source / import batch ("KC Commercial Solar …")
@@ -38,6 +40,7 @@ export interface CrmFilters {
   installers: string[];
   reps: string[];
   has: HasFilter[];
+  temps: LeadTemperature[];
   sort: SortKey;
 }
 
@@ -49,6 +52,7 @@ export const EMPTY_FILTERS: CrmFilters = {
   installers: [],
   reps: [],
   has: [],
+  temps: [],
   sort: 'activity',
 };
 
@@ -58,9 +62,9 @@ export const STAGE_LABEL: Record<Stage, string> = {
   interested: 'Interested',
   booked: 'Visit booked',
   customer: 'Customer',
-  closed: 'Closed out',
+  closed: 'Not interested',
 };
-export const STAGE_ORDER: Stage[] = ['prospect', 'contacted', 'interested', 'booked', 'customer', 'closed'];
+export const STAGE_ORDER: Stage[] = ['prospect', 'contacted', 'closed', 'interested', 'booked', 'customer'];
 
 export const CONTACT_LABEL: Record<ContactFilter, string> = {
   never: 'Never contacted',
@@ -124,7 +128,10 @@ function sourceOf(r: WorkspaceRecord): string | null {
 }
 
 export function activeCount(f: CrmFilters): number {
-  return f.zips.length + f.stages.length + f.contact.length + f.sources.length + f.installers.length + f.reps.length + f.has.length;
+  return (
+    f.zips.length + f.stages.length + f.contact.length + f.sources.length + f.installers.length + f.reps.length + f.has.length +
+    (f.temps?.length ?? 0)
+  );
 }
 
 /** What the panel offers: only values that occur in these records, with counts. */
@@ -163,6 +170,7 @@ export function applyFilters(records: WorkspaceRecord[], f: CrmFilters, tasks: T
       const rep = r.lead?.assigned_to?.toLowerCase() ?? '';
       if (!f.reps.includes(rep)) return false;
     }
+    if (f.temps?.length && !(r.lead?.temperature && f.temps.includes(r.lead.temperature))) return false;
     if (f.has.includes('phone') && !r.phoneE164 && !r.phone) return false;
     if (f.has.includes('email') && !r.email) return false;
     // Contact filters: a record must match EVERY one ticked.

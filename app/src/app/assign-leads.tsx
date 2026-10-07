@@ -10,6 +10,7 @@ import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { applyFilters, EMPTY_FILTERS, filterOptions, STAGE_LABEL, zipOf, type CrmFilters, type Stage } from '@/lib/crmFilters';
 import { fetchWorkspaceRecords, type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { assignLeads } from '@/lib/leadImport';
+import { TEMPERATURE_META, TEMPERATURES, type LeadTemperature } from '@/lib/leadTemperature';
 import { useRoleGate } from '@/lib/role';
 import { fetchSalesTeam } from '@/lib/sales';
 
@@ -37,7 +38,7 @@ import { fetchSalesTeam } from '@/lib/sales';
 
 type From = 'all' | 'unassigned' | string;
 type Order = 'oldest' | 'newest' | 'zip';
-const STAGES: Stage[] = ['prospect', 'contacted', 'interested', 'booked'];
+const STAGES: Stage[] = ['prospect', 'contacted', 'closed', 'interested', 'booked'];
 const ORDER_LABEL: Record<Order, string> = { oldest: 'Oldest first', newest: 'Newest first', zip: 'By ZIP' };
 const OWNER_COLORS = ['#7C5CFF', '#2E9E6A', '#D9822B', '#2F7FD1', '#C2416B', '#8A6D3B'];
 
@@ -94,6 +95,7 @@ function AssignLeads({ myEmail }: { myEmail: string }) {
   const [installers, setInstallers] = useState<string[]>([]);
   const [neverContacted, setNeverContacted] = useState(false);
   const [hasPhone, setHasPhone] = useState(false);
+  const [temps, setTemps] = useState<LeadTemperature[]>([]);
   const [order, setOrder] = useState<Order>('oldest');
   // Selection + the panel
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -156,16 +158,17 @@ function AssignLeads({ myEmail }: { myEmail: string }) {
       installers,
       contact: neverContacted ? ['never'] : [],
       has: hasPhone ? ['phone'] : [],
+      temps,
       sort: order,
     };
     const q = search.trim().toLowerCase();
     return applyFilters(fromPool, f, []).filter(
       (r) => !q || r.name.toLowerCase().includes(q) || (r.address ?? '').toLowerCase().includes(q),
     );
-  }, [fromPool, zips, stages, installers, neverContacted, hasPhone, order, search]);
+  }, [fromPool, zips, stages, installers, neverContacted, hasPhone, temps, order, search]);
 
   const filterCount =
-    (from && from !== 'all' ? 1 : 0) + zips.length + stages.length + installers.length + (neverContacted ? 1 : 0) + (hasPhone ? 1 : 0);
+    (from && from !== 'all' ? 1 : 0) + zips.length + stages.length + installers.length + temps.length + (neverContacted ? 1 : 0) + (hasPhone ? 1 : 0);
 
   // What the panel will hand out: the ticked leads (in list order), or the
   // first N of the list. Leads a chosen rep already has are left out.
@@ -301,6 +304,19 @@ function AssignLeads({ myEmail }: { myEmail: string }) {
             ))}
           </View>
 
+          <Text style={styles.label}>Temperature</Text>
+          <View style={styles.chips}>
+            {TEMPERATURES.map((t) => (
+              <Chip
+                key={t}
+                label={TEMPERATURE_META[t].label}
+                icon={TEMPERATURE_META[t].icon}
+                selected={temps.includes(t)}
+                onPress={() => setTemps((l) => toggle(l, t))}
+              />
+            ))}
+          </View>
+
           {options.installers.length > 0 ? (
             <>
               <Text style={styles.label}>Original installer</Text>
@@ -340,6 +356,7 @@ function AssignLeads({ myEmail }: { myEmail: string }) {
                   setInstallers([]);
                   setNeverContacted(false);
                   setHasPhone(false);
+                  setTemps([]);
                 }}
                 hitSlop={8}>
                 <Text style={styles.link}>Clear filters</Text>

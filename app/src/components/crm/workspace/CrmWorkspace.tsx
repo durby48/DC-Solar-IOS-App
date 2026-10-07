@@ -53,6 +53,7 @@ import { useRole } from '@/lib/role';
 import { isCompanyJob, stageOrDefault } from '@/lib/stages';
 import { countDueNow, fetchTasks, type Task } from '@/lib/tasks';
 import { type Job } from '@/lib/types';
+import { loadStaffNames } from '@/lib/staffNames';
 
 /**
  * The CRM workspace: list · conversation/activity · details, on one screen.
@@ -97,7 +98,7 @@ import { type Job } from '@/lib/types';
 
 const WIDE = 1100;
 const OWNER_COLORS = ['#7FB3E6', '#E0B25C', '#C58AD6', '#5FB3A6', '#E58A7B', '#9CC46F', '#D69CC0'];
-const LENSES: ListMode[] = ['all', 'customer', 'lead', 'prospect', 'working', 'unassigned', 'tasks', 'jobs'];
+const LENSES: ListMode[] = ['all', 'customer', 'lead', 'prospect', 'working', 'unassigned', 'not_interested', 'tasks', 'jobs'];
 const MEDIUM = 760;
 
 /**
@@ -196,6 +197,7 @@ export function CrmWorkspace() {
       fetchAssignmentsByJob(),
       fetchCustomerDocuments(),
       loadTasks(),
+      loadStaffNames(),
     ]);
     setRecords(result.records);
     setHasMoney(result.hasMoney);
@@ -472,7 +474,8 @@ export function CrmWorkspace() {
       customers: roleRecords.filter((r) => r.kind === 'customer').length,
       leads: roleRecords.filter((r) => r.kind === 'lead').length,
       prospects: roleRecords.filter(isProspect).length,
-      working: roleRecords.filter((r) => r.kind === 'lead' && !isProspect(r)).length,
+      working: roleRecords.filter((r) => r.kind === 'lead' && !isProspect(r) && r.lead?.status !== 'lost').length,
+      notInterested: roleRecords.filter((r) => r.kind === 'lead' && r.lead?.status === 'lost').length,
     }),
     [roleRecords],
   );

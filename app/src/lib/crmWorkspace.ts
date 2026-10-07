@@ -34,6 +34,7 @@ import { isServiceJob } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
 import { type Task } from '@/lib/tasks';
 import { type Customer } from '@/lib/types';
+import { personName } from '@/lib/staffNames';
 
 const COMPANY = 'dc-solar';
 
@@ -99,7 +100,9 @@ export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
   visit_done: 'Visit done',
   estimating: 'Estimating',
   won: 'Won',
-  lost: 'Lost',
+  // "Not interested" (2026-10-08, Carson) — was Lost / Closed out. They stay
+  // in the CRM (the Not interested lens); the stored value is still 'lost'.
+  lost: 'Not interested',
 };
 
 export const LEAD_STATUS_ORDER: LeadStatus[] = [
@@ -263,7 +266,12 @@ export async function fetchWorkspaceRecords(): Promise<WorkspaceRecordsResult> {
  * The sales view splits leads in two (2026-10-05): PROSPECTS are leads nobody
  * has contacted yet (`new`), WORKING leads are everything after that.
  */
-export type RecordFilter = RecordKind | 'all' | 'prospect' | 'working' | 'unassigned';
+export type RecordFilter = RecordKind | 'all' | 'prospect' | 'working' | 'unassigned' | 'not_interested';
+
+/** A lead marked Not interested (status 'lost'). */
+export function isNotInterested(r: WorkspaceRecord): boolean {
+  return r.kind === 'lead' && r.lead?.status === 'lost';
+}
 
 /** The admins' pool (2026-10-07): open leads nobody has been given yet. */
 export function isUnassigned(r: WorkspaceRecord): boolean {
@@ -285,7 +293,9 @@ export function filterRecords(
     if (kind === 'prospect') {
       if (!isProspect(r)) return false;
     } else if (kind === 'working') {
-      if (r.kind !== 'lead' || isProspect(r)) return false;
+      if (r.kind !== 'lead' || isProspect(r) || isNotInterested(r)) return false;
+    } else if (kind === 'not_interested') {
+      if (!isNotInterested(r)) return false;
     } else if (kind === 'unassigned') {
       if (!isUnassigned(r)) return false;
     } else if (kind !== 'all' && r.kind !== kind) return false;
@@ -392,12 +402,9 @@ export interface ActivityEvent {
   emailThreadId?: string;
 }
 
-/** "devonsd311@gmail.com" → "Devonsd311", "test-crew@…" → "Test": the first name-ish token, capitalised. */
+/** "ke4ting@gmail.com" → "Carson": the person's first name (lib/staffNames.ts, 2026-10-08). */
 export function authorName(email: string | null | undefined): string | null {
-  if (!email) return null;
-  const local = email.split('@')[0] ?? '';
-  const first = local.split(/[._-]/)[0] ?? local;
-  return first ? first.charAt(0).toUpperCase() + first.slice(1) : null;
+  return personName(email);
 }
 
 function money(amount: number): string {

@@ -33,6 +33,7 @@ import {
   type TemplateVars,
 } from '@/lib/comms';
 import { formatShortDate } from '@/lib/dates';
+import { personName } from '@/lib/staffNames';
 
 /**
  * One conversation, the way a phone shows one: bubbles newest at the bottom,
@@ -83,12 +84,9 @@ function messageTime(iso: string): string {
   return `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${clock}`;
 }
 
-/** "devonsd311@gmail.com" → "Devonsd311". Good enough to attribute a call. */
+/** "ke4ting@gmail.com" → "Carson" (lib/staffNames.ts, 2026-10-08). */
 function authorName(email: string): string {
-  const local = (email ?? '').split('@')[0] ?? '';
-  const first = local.split(/[._-]/)[0] ?? local;
-  if (!first) return 'Someone';
-  return first.charAt(0).toUpperCase() + first.slice(1);
+  return personName(email) ?? 'Someone';
 }
 
 export function Conversation({

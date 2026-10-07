@@ -13,14 +13,15 @@ import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { type Assignment } from '@/lib/assignments';
 import { formatPhone } from '@/lib/comms';
 import { updateCustomer, type CustomerFinanceRow, type CustomerJob } from '@/lib/crm';
-import { LEAD_STATUS_LABEL, LEAD_STATUS_ORDER, type WorkspaceRecord } from '@/lib/crmWorkspace';
+import { LEAD_STATUS_LABEL, type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { planSummary } from '@/lib/servicePlans';
 import { type CustomerDocument } from '@/lib/customers';
 import { todayISO } from '@/lib/dates';
 import { isUpcoming, type LeadAppointment } from '@/lib/leadAppointments';
 import { updateLead } from '@/lib/leads';
 import { useRole } from '@/lib/role';
-import { assignLead, setLeadStatus, VISIT_DRIVEN_STATUSES, type LeadStatus } from '@/lib/sales';
+import { TEMPERATURE_META, TEMPERATURES, type LeadTemperature } from '@/lib/leadTemperature';
+import { assignLead, setLeadStatus, setLeadTemperature, VISIT_DRIVEN_STATUSES, type LeadStatus } from '@/lib/sales';
 import { type Task } from '@/lib/tasks';
 
 /**
@@ -29,10 +30,12 @@ import { type Task } from '@/lib/tasks';
  * admins' side (projections, conversion into a customer and a job). The
  * four contact fields are what a visit cannot be booked without.
  */
-const SALES_STATUSES: LeadStatus[] = ['new', 'contacted', 'interested', 'scheduled', 'visit_done', 'lost'];
+// Not interested sits left of Interested, in red (Carson, 2026-10-08).
+const SALES_STATUSES: LeadStatus[] = ['new', 'contacted', 'lost', 'interested', 'scheduled', 'visit_done'];
+const ADMIN_STATUSES: LeadStatus[] = ['new', 'contacted', 'lost', 'interested', 'scheduled', 'visit_done', 'estimating', 'won'];
 /** A lead in one of these can be booked (B1); the database re-checks. */
 const BOOKABLE: readonly LeadStatus[] = ['new', 'contacted', 'interested'];
-const SALES_STATUS_LABEL: Partial<Record<LeadStatus, string>> = { new: 'Prospect', lost: 'Closed out' };
+const SALES_STATUS_LABEL: Partial<Record<LeadStatus, string>> = { new: 'Prospect', lost: 'Not interested' };
 const REQUIRED_FIELDS = [
   ['name', 'Name'],
   ['phone', 'Phone'],
@@ -138,8 +141,7 @@ export function DetailPanel({
   const role = useRole();
   const isSales = role?.isSales === true;
   const [editing, setEditing] = useState(false);
-  const [closingOut, setClosingOut] = useState(false);
-  const [closeReason, setCloseReason] = useState('');
+  const [tempBusy, setTempBusy] = useState<LeadTemperature | null>(null);
   const [booking, setBooking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '' });
@@ -156,8 +158,6 @@ export function DetailPanel({
   useEffect(() => {
     setEditing(false);
     setError(null);
-    setClosingOut(false);
-    setCloseReason('');
     setBooking(false);
     setNotice(null);
     setAddingTask(false);
@@ -211,18 +211,15 @@ export function DetailPanel({
     else setError(result.message);
   };
 
-  const closeOut = async () => {
+  // Hot / Warm / Cold (2026-10-08): one tap sets it, tapping it again clears.
+  const setTemperature = async (t: LeadTemperature) => {
     if (!record.lead) return;
-    setStatusBusy('lost');
-    const result = await setLeadStatus(record.id, 'lost', closeReason);
-    setStatusBusy(null);
-    if (result.ok) {
-      setClosingOut(false);
-      setCloseReason('');
-      onChanged();
-    } else {
-      setError(result.message);
-    }
+    const next = record.lead.temperature === t ? null : t;
+    setTempBusy(t);
+    const result = await setLeadTemperature(record.id, next);
+    setTempBusy(null);
+    if (result.ok) onChanged();
+    else setError(result.message);
   };
 
   const assign = async (email: string | null) => {
@@ -344,22 +341,24 @@ export function DetailPanel({
       {record.kind === 'lead' && record.lead ? (
         <Section title="Lead">
           <View style={styles.statusRow}>
-            {(isSales ? SALES_STATUSES : LEAD_STATUS_ORDER).map((s) => {
+            {(isSales ? SALES_STATUSES : ADMIN_STATUSES).map((s) => {
               const active = record.lead?.status === s;
               const visitDriven = VISIT_DRIVEN_STATUSES.includes(s);
               return (
                 <Pressable
                   key={s}
-                  onPress={() => {
-                    if (isSales && s === 'lost' && !active) setClosingOut(true);
-                    else void moveLead(s);
-                  }}
+                  onPress={() => void moveLead(s)}
                   disabled={statusBusy !== null || visitDriven}
-                  style={({ pressed }) => [styles.statusChip, active && styles.statusChipActive, pressed && styles.pressed]}>
+                  style={({ pressed }) => [
+                    styles.statusChip,
+                    s === 'lost' && styles.statusChipNo,
+                    active && (s === 'lost' ? styles.statusChipNoActive : styles.statusChipActive),
+                    pressed && styles.pressed,
+                  ]}>
                   {statusBusy === s ? (
                     <ActivityIndicator size="small" color={colors.ink} />
                   ) : (
-                    <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>
+                    <Text style={[styles.statusChipText, s === 'lost' && styles.statusChipNoText, active && styles.statusChipTextActive]}>
                       {(isSales ? SALES_STATUS_LABEL[s] : undefined) ?? LEAD_STATUS_LABEL[s]}
                     </Text>
                   )}
@@ -367,29 +366,35 @@ export function DetailPanel({
               );
             })}
           </View>
-          {closingOut ? (
-            <View style={styles.form}>
-              <TextInput
-                value={closeReason}
-                onChangeText={setCloseReason}
-                placeholder="Why? (not interested, has a service company, wrong number…)"
-                placeholderTextColor={colors.inkSoft}
-                style={styles.input}
-                autoFocus
-              />
-              <View style={styles.formButtons}>
-                <Pressable onPress={() => setClosingOut(false)} style={({ pressed }) => [styles.cancel, pressed && styles.pressed]}>
-                  <Text style={styles.cancelText}>Cancel</Text>
-                </Pressable>
+          <View style={styles.tempRow}>
+            <Text style={styles.factLabel}>Temperature</Text>
+            {TEMPERATURES.map((t) => {
+              const on = record.lead?.temperature === t;
+              const meta = TEMPERATURE_META[t];
+              return (
                 <Pressable
-                  onPress={() => void closeOut()}
-                  disabled={statusBusy !== null}
-                  style={({ pressed }) => [styles.save, (pressed || statusBusy !== null) && styles.pressed]}>
-                  {statusBusy === 'lost' ? <ActivityIndicator color={colors.textOnAction} size="small" /> : <Text style={styles.saveText}>Close out</Text>}
+                  key={t}
+                  onPress={() => void setTemperature(t)}
+                  disabled={tempBusy !== null}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                  style={({ pressed }) => [
+                    styles.tempChip,
+                    on && { backgroundColor: meta.color, borderColor: meta.color },
+                    pressed && styles.pressed,
+                  ]}>
+                  {tempBusy === t ? (
+                    <ActivityIndicator size="small" color={colors.ink} />
+                  ) : (
+                    <>
+                      <Ionicons name={meta.icon} size={13} color={on ? colors.textInverse : meta.color} />
+                      <Text style={[styles.tempChipText, on && { color: colors.textInverse }]}>{meta.label}</Text>
+                    </>
+                  )}
                 </Pressable>
-              </View>
-            </View>
-          ) : null}
+              );
+            })}
+          </View>
           {isSales ? (
             <View style={styles.required}>
               {REQUIRED_FIELDS.map(([key, label]) => {
@@ -467,7 +472,7 @@ export function DetailPanel({
           </View>
           )}
           {record.lead.lost_reason ? (
-            <Fact label={isSales ? 'Closed out because' : 'Lost because'} value={record.lead.lost_reason} />
+            <Fact label="Not interested because" value={record.lead.lost_reason} />
           ) : null}
           {record.lead.sms_opt_in_at ? (
             <Fact label="SMS consent" value={`Opted in ${shortDate(record.lead.sms_opt_in_at)} · ${record.lead.sms_opt_in_source?.split('@')[0] ?? 'form'}`} />
@@ -704,6 +709,19 @@ const styles = StyleSheet.create({
   save: { backgroundColor: colors.sun, paddingHorizontal: spacing.lg, paddingVertical: 6, borderRadius: radii.pill, minWidth: 70, alignItems: 'center' },
   saveText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
   statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  tempRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm },
+  tempChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 5,
+    borderRadius: radii.pill,
+    backgroundColor: colors.canvas,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  tempChipText: { color: colors.inkSoft, fontSize: 12, fontWeight: '700' },
   required: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
   requiredItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   requiredText: { color: colors.ink, fontSize: 12, fontWeight: '700' },
@@ -723,6 +741,9 @@ const styles = StyleSheet.create({
   notice: { color: colors.olive, fontSize: 12, fontWeight: '700' },
   statusChip: { paddingHorizontal: spacing.sm + 2, paddingVertical: 5, borderRadius: radii.pill, backgroundColor: colors.canvas, borderWidth: 1, borderColor: colors.line },
   statusChipActive: { backgroundColor: colors.olive, borderColor: colors.olive },
+  statusChipNo: { borderColor: colors.danger },
+  statusChipNoActive: { backgroundColor: colors.danger, borderColor: colors.danger },
+  statusChipNoText: { color: colors.danger },
   statusChipText: { color: colors.inkSoft, fontSize: 12, fontWeight: '700' },
   statusChipTextActive: { color: colors.textInverse },
   repButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
