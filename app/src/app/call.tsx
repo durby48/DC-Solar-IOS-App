@@ -1,18 +1,30 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { ResourceText } from '@/components/resources/ResourceText';
 import { PulseRing } from '@/components/ui';
 import { colors, fonts, radii, spacing } from '@/constants/theme';
-import { fetchCallStatus, formatDuration, formatPhone, placeBridgeCall } from '@/lib/comms';
+import {
+  adoptIncomingCall,
+  dismissCallSession,
+  getCallSession,
+  hangUpCall,
+  isLive,
+  muteCall,
+  sendCallDigits,
+  setCallSpeaker,
+  startCall,
+  useCallSession,
+  type SessionState,
+} from '@/lib/callSession';
+import { formatDuration, formatPhone, placeBridgeCall } from '@/lib/comms';
 import { takeIncomingCall } from '@/lib/incomingCall';
-import { playRingbackTone } from '@/lib/ringback';
 import { fetchResources } from '@/lib/salesResources';
-import { inAppCallingSupported, startInAppCall, type ActiveCall, type CallState } from '@/lib/voice';
+import { inAppCallingSupported } from '@/lib/voice';
 
 /**
  * `/call` — the active-call screen, the way a phone shows one: who, how long,
@@ -32,15 +44,6 @@ import { inAppCallingSupported, startInAppCall, type ActiveCall, type CallState 
 
 const DTMF_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'] as const;
 
-/**
- * How long we'll wait for real progress (the far end audibly ringing, or the
- * call ending one way or another) before giving up. A hung WebRTC/SDK
- * handshake never fires an event at all — no 'error', nothing — and without
- * this a person is left staring at "Calling…" forever with no way back to a
- * call that could actually go through (the bridge).
- */
-const CALL_SETUP_TIMEOUT_MS = 30_000;
-
 export default function CallScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -51,24 +54,43 @@ export default function CallScreen() {
     /** '1' when CallKit just answered an incoming call (lib/incomingCall.ts). */
     incoming?: string;
   }>();
-  // An answered incoming call is taken once, on first render, and then owns
-  // this screen; everything below reads the same fields either way.
-  const [incoming] = useState(() => (params.incoming === '1' ? takeIncomingCall() : null));
-  const isIncoming = params.incoming === '1';
-  const to = incoming ? incoming.phone : typeof params.to === 'string' ? params.to : '';
-  const name = incoming
-    ? incoming.name
-    : typeof params.name === 'string' && params.name
-      ? params.name
-      : formatPhone(to);
-  const customerId = incoming ? incoming.customerId : typeof params.customerId === 'string' ? params.customerId : null;
-  const contactId = incoming ? incoming.contactId : typeof params.contactId === 'string' ? params.contactId : null;
 
-  const [state, setState] = useState<CallState | 'starting'>('starting');
-  const [detail, setDetail] = useState<string | null>(null);
-  const [muted, setMuted] = useState(false);
-  const [speaker, setSpeaker] = useState(false);
-  const [speakerSupported, setSpeakerSupported] = useState(false);
+  // THE CALL LIVES IN lib/callSession.ts (2026-10-09), so this screen can be
+  // left mid-call and come back. On mount: adopt the call CallKit answered,
+  // else come back to the live call, else place the one this screen was
+  // opened for. (A strict-mode second run finds the call live and attaches.)
+  const [sessionId] = useState<number | null>(() => {
+    const existing = getCallSession();
+    if (params.incoming === '1') {
+      const incoming = takeIncomingCall();
+      if (incoming) return adoptIncomingCall(incoming).id;
+      return existing?.incoming ? existing.id : null;
+    }
+    if (isLive(existing)) return existing?.id ?? null;
+    const dial = typeof params.to === 'string' ? params.to : '';
+    // No number: the bottom-right button bringing back a call that just ended.
+    if (!dial) return existing?.id ?? null;
+    return startCall({
+      to: dial,
+      name: typeof params.name === 'string' && params.name ? params.name : formatPhone(dial),
+      customerId: typeof params.customerId === 'string' ? params.customerId : null,
+      contactId: typeof params.contactId === 'string' ? params.contactId : null,
+    }).id;
+  });
+  const latest = useCallSession();
+  const session = latest && latest.id === sessionId ? latest : null;
+
+  const isIncoming = session?.incoming ?? params.incoming === '1';
+  const to = session?.to ?? (typeof params.to === 'string' ? params.to : '');
+  const name = session?.name ?? formatPhone(to);
+  const customerId = session?.customerId ?? null;
+  const contactId = session?.contactId ?? null;
+  const state: SessionState = session?.state ?? 'ended';
+  const detail = session ? session.detail : 'That call has already ended.';
+  const muted = session?.muted ?? false;
+  const speaker = session?.speaker ?? false;
+  const speakerSupported = session?.speakerSupported ?? false;
+
   const [showKeys, setShowKeys] = useState(false);
   // The call script, on the call screen itself (2026-10-07): reading it never
   // leaves the call. Loaded the first time it is opened.
@@ -87,201 +109,44 @@ export default function CallScreen() {
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [bridgeNote, setBridgeNote] = useState<string | null>(null);
 
-  const callRef = useRef<ActiveCall | null>(null);
-  const startedAt = useRef<number | null>(null);
-  const endedSeconds = useRef<number | null>(null);
-  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // An incoming call is already live when this screen appears: adopt it,
-  // follow its state, never dial.
-  useEffect(() => {
-    if (!isIncoming) return;
-    if (!incoming) {
-      setState('ended');
-      setDetail('That call has already ended.');
-      return;
-    }
-    callRef.current = incoming.call;
-    setSpeakerSupported(incoming.call.speakerSupported);
-    startedAt.current = Date.now();
-    setState(incoming.state);
-    setDetail(incoming.detail);
-    const unsubscribe = incoming.subscribe((next, info) => {
-      if ((next === 'ended' || next === 'failed') && startedAt.current !== null) {
-        endedSeconds.current = Math.round((Date.now() - startedAt.current) / 1000);
-      }
-      setState(next);
-      setDetail(info ?? null);
-    });
-    return () => {
-      unsubscribe();
-      callRef.current?.hangUp();
-    };
-  }, [isIncoming, incoming]);
-
-  // Place the call once, on mount. Strict-mode double mount is not a concern
-  // in production; in dev the second Device simply replaces the first.
-  useEffect(() => {
-    if (isIncoming) return;
-    if (!to) {
-      setState('failed');
-      setDetail('No number to dial.');
-      return;
-    }
-    let cancelled = false;
-
-    const clearWatchdog = () => {
-      if (watchdogRef.current) {
-        clearTimeout(watchdogRef.current);
-        watchdogRef.current = null;
-      }
-    };
-
-    watchdogRef.current = setTimeout(() => {
-      if (cancelled) return;
-      callRef.current?.hangUp();
-      callRef.current = null;
-      setState('failed');
-      setDetail(
-        'Taking too long to connect. Check your connection and try again, or ring their cell directly.',
-      );
-    }, CALL_SETUP_TIMEOUT_MS);
-
-    void (async () => {
-      const result = await startInAppCall({
-        to,
-        name,
-        customerId,
-        contactId,
-        onState: (next, info) => {
-          if (cancelled) return;
-          if (next === 'active' && startedAt.current === null) startedAt.current = Date.now();
-          if ((next === 'ended' || next === 'failed') && startedAt.current !== null) {
-            endedSeconds.current = Math.round((Date.now() - startedAt.current) / 1000);
-          }
-          // The far end audibly ringing (or the call being over one way or
-          // another) is real proof of life — that's the watchdog's job done.
-          // 'connecting' alone is not: the SDK reports it immediately, before
-          // anything has actually reached the other side.
-          if (next === 'ringing' || next === 'active' || next === 'ended' || next === 'failed') {
-            clearWatchdog();
-          }
-          setState(next);
-          setDetail(info ?? null);
-        },
-      });
-      if (cancelled) return;
-      if (result.ok) {
-        callRef.current = result.call;
-        setSpeakerSupported(result.call.speakerSupported);
-      } else {
-        clearWatchdog();
-        setState('failed');
-        setDetail(result.message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      clearWatchdog();
-      callRef.current?.hangUp();
-    };
-  }, [to, name, customerId, contactId, isIncoming]);
-
-  // Sound like a phone: a ringback tone while we're dialing or the far end
-  // is ringing, so "Calling…" never sounds like the app has frozen. Web
-  // only — on the phone Twilio plays the ringback into the call itself
-  // (answerOnBridge=false, see twilio-voice-outbound).
-  useEffect(() => {
-    if (state !== 'connecting' && state !== 'ringing') return undefined;
-    return playRingbackTone();
-  }, [state]);
-
-  // PHONE, OUTGOING: our leg is answered by Twilio before the other person
-  // picks up (that is how the ringback gets to us), so the SDK cannot tell us
-  // when they actually answer. The far leg's `answered` callback moves the
-  // messages row to in-progress; poll it while ringing and promote to
-  // 'active' then. A hang-up / no-answer still arrives through the SDK.
-  useEffect(() => {
-    if (Platform.OS === 'web' || isIncoming || state !== 'ringing') return undefined;
-    let stopped = false;
-    const tick = async () => {
-      const sid = callRef.current?.sid;
-      if (!sid) return;
-      const status = await fetchCallStatus(sid);
-      if (stopped) return;
-      if (status === 'in-progress') {
-        if (startedAt.current === null) startedAt.current = Date.now();
-        setState('active');
-      }
-    };
-    void tick();
-    const id = setInterval(() => void tick(), 2000);
-    return () => {
-      stopped = true;
-      clearInterval(id);
-    };
-  }, [state, isIncoming]);
-
-  // Ended without ever connecting: say why, from the row's final status.
-  useEffect(() => {
-    if (Platform.OS === 'web' || isIncoming || state !== 'ended' || startedAt.current !== null) return undefined;
-    let stopped = false;
-    const sid = callRef.current?.sid;
-    if (!sid) return undefined;
-    // The far leg's completed callback can land a moment after our leg ends.
-    const timer = setTimeout(() => {
-      void fetchCallStatus(sid).then((status) => {
-        if (stopped) return;
-        if (status === 'no-answer') setDetail('No answer.');
-        else if (status === 'busy') setDetail('Line busy.');
-        else if (status === 'failed' || status === 'canceled') setDetail('The call could not be completed.');
-      });
-    }, 1500);
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-    };
-  }, [state, isIncoming]);
-
   // The timer.
+  const startedAt = session?.startedAt ?? null;
   useEffect(() => {
-    if (state !== 'active') return;
-    const id = setInterval(() => {
-      if (startedAt.current !== null) setSeconds(Math.round((Date.now() - startedAt.current) / 1000));
-    }, 500);
+    if (state !== 'active' || startedAt === null) return;
+    const tick = () => setSeconds(Math.round((Date.now() - startedAt) / 1000));
+    tick();
+    const id = setInterval(tick, 500);
     return () => clearInterval(id);
-  }, [state]);
+  }, [state, startedAt]);
 
-  const hangUp = () => {
-    callRef.current?.hangUp();
-    callRef.current = null;
-    if (state !== 'ended' && state !== 'failed') {
-      if (startedAt.current !== null) {
-        endedSeconds.current = Math.round((Date.now() - startedAt.current) / 1000);
-      }
-      setState('ended');
-    }
-  };
+  // Leaving the "Call ended" screen forgets the call (a live one carries on).
+  useEffect(
+    () => () => {
+      if (sessionId !== null) dismissCallSession(sessionId);
+    },
+    [sessionId],
+  );
+
+  const hangUp = () => hangUpCall();
 
   const leave = () => {
+    if (sessionId !== null) dismissCallSession(sessionId);
     if (router.canGoBack()) router.back();
     else router.replace('/phone' as never);
   };
 
-  const toggleMute = () => {
-    const next = !muted;
-    callRef.current?.mute(next);
-    setMuted(next);
+  /** Keep talking, use the app; the green bottom-right button comes back here. */
+  const minimize = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/' as never);
   };
 
-  const toggleSpeaker = () => {
-    const next = !speaker;
-    setSpeaker(next);
-    void callRef.current?.setSpeaker(next);
-  };
+  const toggleMute = () => muteCall(!muted);
+
+  const toggleSpeaker = () => setCallSpeaker(!speaker);
 
   const pressKey = (key: string) => {
-    callRef.current?.sendDigits(key);
+    sendCallDigits(key);
     setDialed((d) => (d + key).slice(-24));
   };
 
@@ -298,6 +163,7 @@ export default function CallScreen() {
     setBridgeNote(result.ok ? 'Pick up your phone — we are dialling them next.' : result.message);
   };
 
+  const endedSeconds = session?.endedSeconds ?? null;
   const statusLine =
     state === 'starting'
       ? inAppCallingSupported()
@@ -310,7 +176,7 @@ export default function CallScreen() {
           : state === 'active'
             ? formatDuration(seconds)
             : state === 'ended'
-              ? `Call ended${endedSeconds.current ? ` · ${formatDuration(endedSeconds.current)}` : ''}`
+              ? `Call ended${endedSeconds ? ` · ${formatDuration(endedSeconds)}` : ''}`
               : 'Call failed';
 
   const live = state === 'connecting' || state === 'ringing' || state === 'active';
@@ -321,6 +187,17 @@ export default function CallScreen() {
       <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
       <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
         <View style={styles.top}>
+          {live ? (
+            <Pressable
+              onPress={minimize}
+              accessibilityRole="button"
+              accessibilityLabel="Leave the call screen; the call stays on"
+              hitSlop={8}
+              style={({ pressed }) => [styles.minimize, pressed && styles.pressed]}>
+              <Ionicons name="chevron-down" size={18} color={colors.textOnDark} />
+              <Text style={styles.minimizeText}>Use the app</Text>
+            </Pressable>
+          ) : null}
           <Text style={styles.from}>
             {isIncoming ? 'Incoming · DC Solar KC (816) 744-6473' : 'DC Solar KC · (816) 744-6473'}
           </Text>
@@ -476,7 +353,19 @@ function Control({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surfaceInverse, justifyContent: 'space-between' },
-  top: { alignItems: 'center', paddingTop: spacing.md },
+  top: { alignItems: 'center', paddingTop: spacing.md, gap: spacing.sm },
+  minimize: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    marginLeft: spacing.md,
+    backgroundColor: 'rgba(255,243,230,0.16)',
+    borderRadius: radii.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  minimizeText: { color: colors.textOnDark, fontFamily: fonts.bold, fontSize: 13 },
   from: { color: colors.oliveDeep, fontFamily: fonts.medium, fontSize: 13, letterSpacing: 0.3 },
   who: { alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg },
   avatarWrap: { width: 104, height: 104, alignItems: 'center', justifyContent: 'center' },

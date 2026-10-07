@@ -3,7 +3,6 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { CustomerAvatar } from '@/components/CustomerAvatar';
-import { KEYPAD_FAB_GUTTER } from '@/components/KeypadFab';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatPhone } from '@/lib/comms';
 import { type RecordFilter, type WorkspaceRecord } from '@/lib/crmWorkspace';
@@ -299,7 +298,7 @@ export function RecordList({
 
   return (
     <View style={styles.column}>
-      <View style={[styles.searchRow, salesView && { marginRight: KEYPAD_FAB_GUTTER }]}>
+      <View style={styles.searchRow}>
         <Ionicons name="search" size={15} color={colors.inkSoft} />
         <TextInput
           ref={searchRef}
@@ -426,7 +425,8 @@ export function RecordList({
           }}
           renderItem={renderRow}
           style={styles.list}
-          contentContainerStyle={styles.listContent}
+          // Sales: room at the end so the bottom-right keypad button never covers the last row.
+          contentContainerStyle={[styles.listContent, salesView && { paddingBottom: 80 }]}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
             <Text style={styles.empty}>

@@ -244,8 +244,9 @@ export default function RootLayout() {
                 screens (the person's name). */}
             <Stack.Screen name="messages/thread" options={{ title: 'Conversation' }} />
             <Stack.Screen name="messages/compose" options={{ title: 'New Message' }} />
-            {/* The active-call screen. Full-bleed olive, no header; End is the
-                only way out while a call is live. */}
+            {/* The active-call screen. Full-bleed olive, no header. "Use the
+                app" leaves it while the call carries on (lib/callSession.ts);
+                the green bottom-right button comes back. */}
             <Stack.Screen
               name="call"
               options={{ headerShown: false, presentation: 'modal', gestureEnabled: false }}
@@ -259,7 +260,8 @@ export default function RootLayout() {
             <Stack.Screen name="hub/[key]" options={{ title: '' }} />
             <Stack.Screen name="inbox/compose" options={{ title: 'New Email' }} />
           </Stack>
-          {/* Sales: the Keypad button, top-right on every screen (2026-10-09). */}
+          {/* Sales: the Keypad button + window, bottom-right on every screen; for
+              anyone, the green way back to a live call (2026-10-09). */}
           <KeypadFab />
         </DevViewFrame>
       </ThemeProvider>

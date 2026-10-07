@@ -360,7 +360,7 @@ export function LeadMapBody({
       </View>
 
       {stormsOn && stormReports.length > 0 && !selected && compact ? (
-        <View style={styles.legendBar}>
+        <View style={[styles.legendBar, isSales && styles.legendClearFab]}>
           {stormKind === 'hail' ? (
             ZONE_LEGEND.map((l) => (
               <View key={l.label} style={styles.legendItem}>
@@ -378,7 +378,7 @@ export function LeadMapBody({
       ) : null}
 
       {stormsOn && stormReports.length > 0 && !selected && !compact ? (
-        <Card style={styles.card}>
+        <Card style={[styles.card, isSales && styles.cardClearFab]}>
           <View style={styles.legendRow}>
             {stormKind === 'hail' ? (
               ZONE_LEGEND.map((l) => (
@@ -465,7 +465,7 @@ export function LeadMapBody({
       />
 
       {selected ? (
-        <Card style={styles.card}>
+        <Card style={[styles.card, isSales && styles.cardClearFab]}>
           <View style={styles.cardHead}>
             <View style={[styles.dot, styles.dotBig, { backgroundColor: STAGE_COLOR[selected.stage] }]} />
             <View style={styles.flex}>
@@ -548,10 +548,12 @@ const styles = StyleSheet.create({
   legendSwatch: { width: 12, height: 12, borderRadius: 6, opacity: 0.85 },
   legendText: { color: colors.inkSoft, fontSize: 11, fontWeight: '700' },
   mapWrap: { flex: 1, padding: spacing.md },
+  // Top-right of the map (2026-10-09): the keypad button owns the bottom-right
+  // corner. On the web it sits under Leaflet's Map / Satellite control.
   expand: {
     position: 'absolute',
     right: spacing.md + spacing.sm,
-    bottom: spacing.md + spacing.sm,
+    top: spacing.md + (Platform.OS === 'web' ? 58 : spacing.sm),
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -574,6 +576,9 @@ const styles = StyleSheet.create({
   fullCardLink: { color: colors.ocean, fontSize: 13, fontWeight: '800' },
   loading: { marginTop: spacing.xl },
   card: { marginHorizontal: spacing.md, marginBottom: spacing.md, gap: spacing.sm },
+  // Sales: the keypad button sits bottom-right; keep the card's buttons clear of it.
+  cardClearFab: { marginBottom: spacing.md + 66 },
+  legendClearFab: { paddingRight: 70 },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   cardButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   flex: { flex: 1 },

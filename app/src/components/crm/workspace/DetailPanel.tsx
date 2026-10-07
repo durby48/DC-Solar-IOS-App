@@ -7,7 +7,6 @@ import { CustomerContacts } from '@/components/contacts/CustomerContacts';
 import { AppointmentComposer, AppointmentItem } from '@/components/crm/workspace/Appointments';
 import { CurrentJobCard, StagePillControl } from '@/components/crm/workspace/CurrentJobCard';
 import { BookVisitForm, VisitCard } from '@/components/crm/workspace/ServiceVisit';
-import { KEYPAD_FAB_GUTTER } from '@/components/KeypadFab';
 import { RecordMiniMap } from '@/components/map/RecordMiniMap';
 import { TaskComposer } from '@/components/crm/workspace/TaskComposer';
 import { TaskItem } from '@/components/crm/workspace/TaskItem';
@@ -275,9 +274,8 @@ export function DetailPanel({
   return (
     <ScrollView
       style={styles.column}
-      // Sales: the Keypad button floats top-right (KeypadFab), so the first
-      // card starts below it.
-      contentContainerStyle={[styles.content, isSales && { paddingTop: KEYPAD_FAB_GUTTER }]}
+      // Sales: room at the end for the bottom-right keypad button.
+      contentContainerStyle={[styles.content, isSales && { paddingBottom: 80 }]}
       keyboardShouldPersistTaps="handled"
       automaticallyAdjustKeyboardInsets>
       {onClose ? (

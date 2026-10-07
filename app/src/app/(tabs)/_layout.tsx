@@ -153,7 +153,7 @@ function useStaffGate() {
  *
  * SALES (2026-10-06): a `sales` login gets its own bar — Home (the Sales
  * Home, `components/sales/SalesHome`), CRM, Calendar (`schedule`), Lead map
- * (`map`, 2026-10-09 — the Keypad moved to a top-right button), Settings. Every crew/admin tab is `href: null` for them, and
+ * (`map`, 2026-10-09 — the Keypad moved to a bottom-right button that opens a window), Settings. Every crew/admin tab is `href: null` for them, and
  * `lib/salesConfinement.ts` moves them off any path they have no screen on.
  */
 export default function TabsLayout() {
@@ -271,8 +271,9 @@ export default function TabsLayout() {
         }}
       />
       {/* Sales only (2026-10-09): the Lead map took the Keypad's place in the
-          bar. The keypad is still a route (`/keypad`), opened by the round
-          button top-right on every sales screen (components/KeypadFab). */}
+          bar. The keypad is a WINDOW opened by the round button
+          bottom-right on every sales screen (components/KeypadFab); `/keypad`
+          stays as a route for links. */}
       <Tabs.Screen
         name="map"
         options={{

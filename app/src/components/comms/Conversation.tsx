@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useIsFocused } from 'expo-router';
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
@@ -14,6 +14,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -33,6 +34,7 @@ import {
   type TemplateVars,
 } from '@/lib/comms';
 import { formatShortDate } from '@/lib/dates';
+import { useHideKeypadButton } from '@/lib/dialerWindow';
 import { personName } from '@/lib/staffNames';
 
 /**
@@ -128,6 +130,12 @@ export function Conversation({
 }) {
   const [messages, setMessages] = useState<CommsMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  // On a phone-sized screen the thread fills it, and the keypad button would
+  // sit on the composer: hide it while this thread's screen is showing. On a
+  // wide CRM (3 columns) the thread is the middle column and the button clears it.
+  const { width } = useWindowDimensions();
+  const focused = useIsFocused();
+  useHideKeypadButton(focused && (Platform.OS !== 'web' || width < 1100));
   const [refreshing, setRefreshing] = useState(false);
   const [composer, setComposer] = useState('');
   const [attachments, setAttachments] = useState<{ path: string; uri: string }[]>([]);
