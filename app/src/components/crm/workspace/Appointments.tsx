@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Chip } from '@/components/ui';
@@ -7,6 +7,7 @@ import { colors, radii, spacing } from '@/constants/theme';
 import { authorName } from '@/lib/crmWorkspace';
 import { TimeChips } from '@/components/TimeChips';
 import {
+  fetchAppointmentStaff,
   APPOINTMENT_KINDS,
   appointmentWhen,
   createLeadAppointment,
@@ -133,6 +134,17 @@ export function AppointmentComposer({
   onCancel?: () => void;
 }) {
   const [kind, setKind] = useState<AppointmentKind>('site_visit');
+  // Who can be going: the sales team or Devon (appointment_staff, 2026-10-08).
+  const [people, setPeople] = useState(reps);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAppointmentStaff().then((list) => {
+      if (!cancelled && list.length > 0) setPeople(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [date, setDate] = useState(isoPlusDays(1));
   const [time, setTime] = useState('');
   const [assignee, setAssignee] = useState<string | null>(defaultAssignee ?? myEmail);
@@ -140,7 +152,7 @@ export function AppointmentComposer({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const others = reps.filter((r) => r.email.toLowerCase() !== myEmail?.toLowerCase());
+  const others = people.filter((r) => r.email.toLowerCase() !== myEmail?.toLowerCase());
 
   const submit = async () => {
     setSaving(true);

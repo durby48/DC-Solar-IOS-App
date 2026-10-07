@@ -209,3 +209,18 @@ export function appointmentInstant(a: Pick<LeadAppointment, 'appt_date' | 'start
 export function isUpcoming(a: LeadAppointment, todayISO: string): boolean {
   return a.outcome == null && a.appt_date >= todayISO;
 }
+
+/**
+ * Who an appointment can be for (2026-10-08, Carson): the sales team and the
+ * owner (Devon) — `appointment_staff()`, readable by any employee. Empty on
+ * any problem; the composer then falls back to the list it was given.
+ */
+export async function fetchAppointmentStaff(): Promise<{ email: string; name: string }[]> {
+  try {
+    const { data, error } = await supabase.rpc('appointment_staff');
+    if (error || !data) return [];
+    return (data as { email: string; display_name: string }[]).map((r) => ({ email: r.email, name: r.display_name }));
+  } catch {
+    return [];
+  }
+}
