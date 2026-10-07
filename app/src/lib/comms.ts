@@ -1482,6 +1482,26 @@ export interface TemplateVars {
 }
 
 /**
+ * The fields a saved text can use, in plain words, for the field search in
+ * the saved-text editor (2026-10-09). `token` goes in as `{{token}}`.
+ */
+export const TEMPLATE_FIELDS: { token: keyof TemplateVars; label: string; example: string; keywords?: string }[] = [
+  { token: 'customer_first', label: 'First name', example: 'Sarah', keywords: 'customer person name' },
+  { token: 'customer_name', label: 'Full name', example: 'Sarah Miller', keywords: 'customer person name last' },
+  { token: 'address', label: 'Address', example: '123 Main St', keywords: 'street house home location' },
+  { token: 'tech', label: 'Your name', example: 'Ken', keywords: 'me sender rep tech' },
+  { token: 'date', label: 'Appointment date', example: 'Tue, Oct 14', keywords: 'day visit schedule when' },
+  { token: 'time', label: 'Appointment time', example: 'at 2:00 PM', keywords: 'hour visit schedule when' },
+  { token: 'eta', label: 'Arrival time', example: '15 minutes', keywords: 'eta on the way arriving' },
+  { token: 'job_number', label: 'Job number', example: 'SV-26014', keywords: 'project number' },
+  { token: 'amount', label: 'Amount', example: '$499', keywords: 'price money total cost' },
+  { token: 'document_number', label: 'Estimate / invoice #', example: 'EST-1042', keywords: 'document quote invoice estimate' },
+  { token: 'brochure_link', label: 'Your brochure link', example: 'app.dcsolarkc.com/brochure?rep=ken', keywords: 'service plans link brochure' },
+  { token: 'review_link', label: 'Review link', example: 'g.page/…', keywords: 'google review link' },
+  { token: 'company_phone', label: 'Company phone', example: '(816) 744-6473', keywords: 'number office dc solar' },
+];
+
+/**
  * Fill a template's `{{merge_fields}}`.
  *
  * ANY TOKEN WE CANNOT RESOLVE IS REMOVED, not left as literal braces. A text
@@ -1501,6 +1521,8 @@ export function renderTemplate(body: string, vars: TemplateVars): string {
   if (!lookup.customer_name && lookup.customer) lookup.customer_name = lookup.customer;
   if (!lookup.time && lookup.time_suffix) lookup.time = lookup.time_suffix;
   if (!lookup.time_suffix && lookup.time) lookup.time_suffix = lookup.time;
+  // The rep Saved texts screen once said {{first_name}} (2026-10-09).
+  if (!lookup.first_name && lookup.customer_first) lookup.first_name = lookup.customer_first;
 
   const filled = body.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, token: string) => {
     const value = lookup[token.toLowerCase()];

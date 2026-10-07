@@ -15,7 +15,7 @@ import { ZONE_METERS, zoneColor, type MapViewState, type StormLayers } from '@/l
  * screen shows its card); tap the map to clear.
  *
  * Moves on its own only when asked: `focusKey` at first load (zoomed in on
- * that pin), otherwise it fits every pin once; `storms.fitKey` changing (a
+ * that pin), otherwise it opens over Kansas City; `storms.fitKey` changing (a
  * storm picked) zooms to that storm; `roof` flies to a pin at roof level.
  *
  * STORMS: each report's 3-mile zone (coloured by hail size; wind orange),
@@ -28,26 +28,6 @@ export const NATIVE_MAP = true;
 
 const KANSAS_CITY: Region = { latitude: 39.0997, longitude: -94.5786, latitudeDelta: 0.5, longitudeDelta: 0.5 };
 const ROOF_DELTA = 0.0025;
-
-function fitRegion(points: MapPoint[]): Region {
-  if (points.length === 0) return KANSAS_CITY;
-  let minLat = Infinity;
-  let maxLat = -Infinity;
-  let minLng = Infinity;
-  let maxLng = -Infinity;
-  for (const p of points) {
-    minLat = Math.min(minLat, p.lat);
-    maxLat = Math.max(maxLat, p.lat);
-    minLng = Math.min(minLng, p.lng);
-    maxLng = Math.max(maxLng, p.lng);
-  }
-  return {
-    latitude: (minLat + maxLat) / 2,
-    longitude: (minLng + maxLng) / 2,
-    latitudeDelta: Math.max(0.02, (maxLat - minLat) * 1.3),
-    longitudeDelta: Math.max(0.02, (maxLng - minLng) * 1.3),
-  };
-}
 
 /** One pin; memoised so a selection change re-renders only the pins it touches. */
 const Pin = memo(function Pin({
@@ -117,7 +97,9 @@ export function LeadMapView({
     }
     const f = focusKey ? points.find((p) => p.key === focusKey) : undefined;
     if (f) return { latitude: f.lat, longitude: f.lng, latitudeDelta: ROOF_DELTA, longitudeDelta: ROOF_DELTA };
-    return fitRegion(points);
+    // Default: over Kansas City (2026-10-09, Carson) — fitting every pin
+    // zoomed out across the whole region.
+    return KANSAS_CITY;
     // Only the first render's points decide where the map starts.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

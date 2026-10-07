@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DialerWindow, LIVE_GREEN } from '@/components/phone/DialerWindow';
+import { tabBarHeight } from '@/constants/layout';
 import { colors } from '@/constants/theme';
 import { isLive, useCallSession } from '@/lib/callSession';
 import { formatDuration, useCommsRealtime } from '@/lib/comms';
@@ -29,9 +30,8 @@ import { useRoleGate } from '@/lib/role';
  */
 
 const HIDDEN = ['/keypad', '/call', '/brochure', '/join', '/card-saved', '/set-password', '/sign-up'];
-/** Routes inside app/(tabs): the tab bar (62 tall) is under them. */
+/** Routes inside app/(tabs): the tab bar (constants/layout) is under them. */
 const TAB_ROUTES = ['/', '/workspace', '/schedule', '/calendar', '/map', '/settings', '/more', '/pipeline', '/customers'];
-const TAB_BAR = 62;
 /** Screens with their own bar along the bottom: sit above it. */
 const BOTTOM_BARS: Record<string, number> = { '/assign-leads': 64 };
 const SIZE = 52;
@@ -58,7 +58,7 @@ export function KeypadFab() {
   if (hidden && !open) return null;
 
   const bottom =
-    (TAB_ROUTES.includes(pathname) ? TAB_BAR : insets.bottom + (BOTTOM_BARS[pathname] ?? 0)) + 14 + lift;
+    (TAB_ROUTES.includes(pathname) ? tabBarHeight(insets.bottom) : insets.bottom + (BOTTOM_BARS[pathname] ?? 0)) + 14 + lift;
 
   return (
     <>

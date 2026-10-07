@@ -1,8 +1,10 @@
 import { Tabs, useNavigation, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TabIcon } from '@/components/ui';
+import { tabBarHeight } from '@/constants/layout';
 import { colors, fonts, hubColors } from '@/constants/theme';
 import { getAccountInfo } from '@/lib/account';
 import {
@@ -160,6 +162,7 @@ export default function TabsLayout() {
   const gate = useStaffGate();
   const role = useRoleGate();
   const salesOnly = role.role?.isSales === true;
+  const insets = useSafeAreaInsets();
   const [unread, setUnread] = useState(0);
 
   /**
@@ -199,9 +202,13 @@ export default function TabsLayout() {
         tabBarStyle: {
           backgroundColor: colors.surfaceAlt,
           borderTopColor: colors.border,
-          height: 62,
+          // Content height PLUS the home-bar inset (constants/layout.ts) —
+          // a flat 62 squeezed icons and labels into 28 pt on an iPhone.
+          height: tabBarHeight(insets.bottom),
+          paddingTop: 6,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 6,
         },
-        tabBarLabelStyle: { fontFamily: fonts.bold, fontSize: 11 },
+        tabBarLabelStyle: { fontFamily: fonts.bold, fontSize: 11, marginTop: 2 },
       }}>
       <Tabs.Screen
         name="index"

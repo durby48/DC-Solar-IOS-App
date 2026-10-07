@@ -580,7 +580,6 @@ export function CrmWorkspace() {
       jobCount={openJobCount}
       salesView={isSales}
       onImport={role?.isAdmin ? () => router.push('/crm/import' as never) : undefined}
-      onMap={role?.isAdmin || isSales ? () => router.push('/lead-map' as never) : undefined}
       onFilter={() => setFilterOpen((v) => !v)}
       filterCount={activeCount(filters) + (filters.sort !== 'activity' ? 1 : 0)}
       replaceList={

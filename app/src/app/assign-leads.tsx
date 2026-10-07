@@ -563,7 +563,7 @@ function AssignLeads({ myEmail, canRestore }: { myEmail: string; canRestore: boo
           <Pressable
             onPress={() => void runRemove()}
             disabled={busy}
-            style={({ pressed }) => [styles.mainButton, styles.removeConfirm, (pressed || busy) && styles.pressed]}>
+            style={({ pressed }) => [styles.mainButton, styles.sheetButton, styles.removeConfirm, (pressed || busy) && styles.pressed]}>
             {busy ? (
               <ActivityIndicator color="#fff" />
             ) : (
@@ -639,6 +639,7 @@ function AssignLeads({ myEmail, canRestore }: { myEmail: string; canRestore: boo
             disabled={busy || to.length === 0 || take === 0}
             style={({ pressed }) => [
               styles.mainButton,
+              styles.sheetButton,
               (to.length === 0 || take === 0) && styles.off,
               (pressed || busy) && styles.pressed,
             ]}>
@@ -738,6 +739,9 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   mainText: { color: colors.textOnAction, fontSize: 14, fontWeight: '800', textAlign: 'center' },
+  // In a dialog (a column) the bottom bar's flex: 1 squashed the button to
+  // nothing — a blank pill (2026-10-09). Full width, natural height.
+  sheetButton: { flex: 0, alignSelf: 'stretch', maxWidth: undefined },
   bottomRow: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm },
   removeButton: {
     width: 46,

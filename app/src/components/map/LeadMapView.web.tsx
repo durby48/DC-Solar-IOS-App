@@ -250,12 +250,9 @@ export function LeadMapView({
     if (!firstView.current && points.length > 0) {
       firstView.current = true;
       const focus = focusKey ? points.find((p) => p.key === focusKey) : undefined;
-      if (focus) {
-        whenSized(() => m.setView([focus.lat, focus.lng], 18));
-      } else if (!storms?.fitKey) {
-        const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng] as Leaflet.LatLngTuple));
-        whenSized(() => m.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 }));
-      }
+      // Otherwise it stays where it opened: over Kansas City (2026-10-09,
+      // Carson — fitting every pin zoomed out across the whole region).
+      if (focus) whenSized(() => m.setView([focus.lat, focus.lng], 18));
     }
   }, [L, points]); // eslint-disable-line react-hooks/exhaustive-deps
 

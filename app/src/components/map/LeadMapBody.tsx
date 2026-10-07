@@ -98,9 +98,9 @@ export function LeadMapBody({
   const [stormKind, setStormKind] = useState<StormKind>('hail');
   /** A storm key (`hail:YYYY-MM-DD`) or an overview window. */
   const [stormPick, setStormPick] = useState<string | null>(stormDay ? `hail:${stormDay}` : null);
-  // The storm the USER tapped (or the one a link opened). Only that zooms the
-  // map — the automatic pick when Storms turns on never moves it (Carson,
-  // 2026-10-09: turning Storms on zoomed him out across the region).
+  // The storm a Storm report link opened: the only time storms move the map.
+  // Turning Storms on, switching storms or windows never does (Carson,
+  // 2026-10-09: "selecting different storms ... should stay fixed").
   const [fitPick, setFitPick] = useState<string | null>(stormDay ? `hail:${stormDay}` : null);
   const [radar, setRadar] = useState(false);
   const [warningsOn, setWarningsOn] = useState(false);
@@ -192,8 +192,7 @@ export function LeadMapBody({
       warnings: warningsOn ? warnings : [],
       reports: stormReports,
       highlight,
-      // Only TAPPING one storm moves the map; turning Storms on, overviews and
-      // filters never do.
+      // Only the storm a link opened moves the map (once).
       fitKey: pickedStorm && fitPick === stormPick ? stormPick : null,
     };
   }, [stormsOn, radar, warningsOn, warnings, stormReports, highlight, stormPick, pickedStorm, fitPick]);
@@ -305,10 +304,7 @@ export function LeadMapBody({
                   return (
                     <Pressable
                       key={st.key}
-                      onPress={() => {
-                        setStormPick(st.key);
-                        setFitPick(st.key);
-                      }}
+                      onPress={() => setStormPick(st.key)}
                       style={[styles.stormChip, on && styles.stormChipOn]}>
                       <Text style={[styles.stormChipTitle, on && styles.stormChipTextOn]}>
                         {stormDayLabel(st.day)}

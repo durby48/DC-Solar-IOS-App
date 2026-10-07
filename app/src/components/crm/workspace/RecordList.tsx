@@ -299,7 +299,7 @@ export function RecordList({
   return (
     <View style={styles.column}>
       <View style={styles.searchRow}>
-        <Ionicons name="search" size={15} color={colors.inkSoft} />
+        <Ionicons name="search" size={18} color={colors.inkSoft} />
         <TextInput
           ref={searchRef}
           value={search}
@@ -313,7 +313,7 @@ export function RecordList({
         />
         {search ? (
           <Pressable onPress={() => onSearch('')} hitSlop={8} accessibilityLabel="Clear search">
-            <Ionicons name="close-circle" size={15} color={colors.inkSoft} />
+            <Ionicons name="close-circle" size={18} color={colors.inkSoft} />
           </Pressable>
         ) : Platform.OS === 'web' ? (
           <Text style={styles.kbd}>/</Text>
@@ -324,7 +324,7 @@ export function RecordList({
             hitSlop={6}
             accessibilityLabel={salesView ? 'New prospect' : 'New lead'}
             style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
-            <Ionicons name="person-add-outline" size={15} color={hubColors.crm.fg} />
+            <Ionicons name="person-add-outline" size={19} color={hubColors.crm.fg} />
           </Pressable>
         ) : null}
         {onFilter ? (
@@ -333,17 +333,8 @@ export function RecordList({
             hitSlop={6}
             accessibilityLabel={filterCount ? `Filter and sort, ${filterCount} on` : 'Filter and sort'}
             style={({ pressed }) => [styles.newLead, filterCount > 0 && styles.filterOn, pressed && styles.pressed]}>
-            <Ionicons name="options-outline" size={15} color={filterCount > 0 ? colors.white : hubColors.crm.fg} />
+            <Ionicons name="options-outline" size={19} color={filterCount > 0 ? colors.white : hubColors.crm.fg} />
             {filterCount > 0 ? <Text style={styles.filterBadge}>{filterCount}</Text> : null}
-          </Pressable>
-        ) : null}
-        {onMap ? (
-          <Pressable
-            onPress={onMap}
-            hitSlop={6}
-            accessibilityLabel="Lead map"
-            style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
-            <Ionicons name="map-outline" size={15} color={hubColors.crm.fg} />
           </Pressable>
         ) : null}
         {onImport ? (
@@ -352,7 +343,7 @@ export function RecordList({
             hitSlop={6}
             accessibilityLabel="Import leads"
             style={({ pressed }) => [styles.newLead, pressed && styles.pressed]}>
-            <Ionicons name="cloud-upload-outline" size={15} color={hubColors.crm.fg} />
+            <Ionicons name="cloud-upload-outline" size={19} color={hubColors.crm.fg} />
           </Pressable>
         ) : null}
       </View>
@@ -451,29 +442,29 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.line,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
   },
   // minWidth 0 lets the box shrink on a narrow screen, so the round buttons
-  // (new, filter, map, import) always fit — the map one was getting cut off.
-  searchInput: { flex: 1, minWidth: 0, color: colors.ink, fontSize: 14, fontWeight: '500', paddingVertical: 2 },
+  // (new, filter, import) always fit. Bigger touch targets (2026-10-09).
+  searchInput: { flex: 1, minWidth: 0, color: colors.ink, fontSize: 16, fontWeight: '500', paddingVertical: 4 },
   filters: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: spacing.sm,
     paddingHorizontal: spacing.sm,
-    paddingBottom: spacing.xs,
+    paddingBottom: spacing.sm,
   },
   lens: {
-    height: 28,
-    paddingHorizontal: spacing.sm + 2,
+    height: 36,
+    paddingHorizontal: spacing.md,
     borderRadius: radii.pill,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  lensText: { fontSize: 12, fontWeight: '700' },
-  newLead: { width: 26, height: 26, flexShrink: 0, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: hubColors.crm.bg },
+  lensText: { fontSize: 14, fontWeight: '700' },
+  newLead: { width: 36, height: 36, flexShrink: 0, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: hubColors.crm.bg },
   kbd: {
     color: colors.inkSoft,
     fontSize: 10,
@@ -526,8 +517,8 @@ const styles = StyleSheet.create({
   empty: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center', padding: spacing.lg },
   pressed: { opacity: 0.6 },
   // Filter button lit up while filters are on, with their count (2026-10-07).
-  filterOn: { backgroundColor: hubColors.crm.fg, flexDirection: 'row', gap: 2, width: undefined, paddingHorizontal: 8 },
-  filterBadge: { color: colors.white, fontSize: 11, fontWeight: '800' },
+  filterOn: { backgroundColor: hubColors.crm.fg, flexDirection: 'row', gap: 3, width: undefined, paddingHorizontal: 10 },
+  filterBadge: { color: colors.white, fontSize: 13, fontWeight: '800' },
   // Lead owner chip (admins + sales managers, 2026-10-07).
   ownerPill: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1, maxWidth: 90 },
   ownerPillText: { fontSize: 9, fontWeight: '800' },

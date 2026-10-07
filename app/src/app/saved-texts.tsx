@@ -1,7 +1,8 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 
+import { MergeFieldPicker } from '@/components/comms/MergeFieldPicker';
 import { AppText, Button, Card, ListRow, Screen } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { useRole } from '@/lib/role';
@@ -12,7 +13,9 @@ import { deleteMyText, fetchSavedTexts, saveMyText, type SavedText } from '@/lib
  * (admins write those in CRM Settings) and the rep's OWN, which they add,
  * edit and delete here. Both show up in the "Saved texts" picker when texting
  * someone from the CRM — tapping one fills the message box, never sends.
- * `{{first_name}}`-style blanks fill in the same way company texts do.
+ * `{{customer_first}}`-style fields fill in the same way company texts do;
+ * the editor's field search (components/comms/MergeFieldPicker, 2026-10-09)
+ * drops one in at the cursor.
  */
 export default function SavedTextsScreen() {
   const role = useRole();
@@ -22,6 +25,22 @@ export default function SavedTextsScreen() {
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Where the cursor is in the message, so a picked field lands there.
+  const selection = useRef<{ start: number; end: number } | null>(null);
+
+  const insertField = (token: string) => {
+    if (!editing) return;
+    const body = editing.body;
+    const at = selection.current ?? { start: body.length, end: body.length };
+    const before = body.slice(0, at.start);
+    const after = body.slice(at.end);
+    const pad = before && !/\s$/.test(before) ? ' ' : '';
+    const space = after && !/^\s/.test(after) ? ' ' : '';
+    const next = `${before}${pad}${token}${space}${after}`;
+    const cursor = before.length + pad.length + token.length + space.length;
+    selection.current = { start: cursor, end: cursor };
+    setEditing({ ...editing, body: next });
+  };
 
   const load = useCallback(async () => setTexts(await fetchSavedTexts()), []);
   useFocusEffect(
@@ -80,14 +99,18 @@ export default function SavedTextsScreen() {
           <TextInput
             value={editing.body}
             onChangeText={(body) => setEditing({ ...editing, body })}
-            placeholder="Hi {{first_name}}, just checking in…"
+            onSelectionChange={(e) => {
+              selection.current = e.nativeEvent.selection;
+            }}
+            placeholder="Hi {{customer_first}}, just checking in…"
             placeholderTextColor={colors.textMuted}
             multiline
             style={[styles.input, styles.body]}
           />
           <AppText variant="caption" color={colors.textSecondary}>
-            {'{{first_name}}'} fills in the person&apos;s first name.
+            Add a field — it fills in for each person when you use the text.
           </AppText>
+          <MergeFieldPicker onPick={insertField} />
           <View style={styles.buttons}>
             {editing.id ? (
               <Button label="Delete" variant="ghost" size="sm" disabled={busy} onPress={() => void remove(editing.id as string)} />
@@ -107,11 +130,17 @@ export default function SavedTextsScreen() {
               iconBackground={hubColors.crm.bg}
               title={t.title}
               subtitle={t.body}
-              onPress={() => setEditing({ id: t.id, title: t.title, body: t.body })}
+              onPress={() => {
+                selection.current = null;
+                setEditing({ id: t.id, title: t.title, body: t.body });
+              }}
               divider
             />
           ))}
-          <ListRow icon="add" title="Add a saved text" chevron={false} onPress={() => setEditing({ title: '', body: '' })} />
+          <ListRow icon="add" title="Add a saved text" chevron={false} onPress={() => {
+              selection.current = null;
+              setEditing({ title: '', body: '' });
+            }} />
         </Card>
       )}
 
