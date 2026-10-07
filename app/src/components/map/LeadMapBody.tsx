@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LeadMapView, NATIVE_MAP } from '@/components/map/LeadMapView';
@@ -64,6 +64,9 @@ export function LeadMapBody({
 }) {
   const router = useRouter();
   const gate = useRoleGate();
+  // Phones (the app, or a narrow browser): just the hail colour legend, no storm card (Carson, 2026-10-09).
+  const { width } = useWindowDimensions();
+  const compact = Platform.OS !== 'web' || width < 768;
   const isSales = gate.role?.isSales === true;
   // Admins and sales managers see the whole team, and filter by rep.
   const isAdmin = gate.role?.isAdmin === true || gate.role?.isSalesManager === true;
@@ -320,7 +323,25 @@ export function LeadMapBody({
         )}
       </View>
 
-      {stormsOn && stormReports.length > 0 && !selected ? (
+      {stormsOn && stormReports.length > 0 && !selected && compact ? (
+        <View style={styles.legendBar}>
+          {stormKind === 'hail' ? (
+            ZONE_LEGEND.map((l) => (
+              <View key={l.label} style={styles.legendItem}>
+                <View style={[styles.legendSwatch, { backgroundColor: l.color }]} />
+                <Text style={styles.legendText}>{l.label}</Text>
+              </View>
+            ))
+          ) : (
+            <View style={styles.legendItem}>
+              <View style={[styles.legendSwatch, { backgroundColor: '#FF8C1A' }]} />
+              <Text style={styles.legendText}>Damaging wind</Text>
+            </View>
+          )}
+        </View>
+      ) : null}
+
+      {stormsOn && stormReports.length > 0 && !selected && !compact ? (
         <Card style={styles.card}>
           <View style={styles.legendRow}>
             {stormKind === 'hail' ? (
@@ -446,6 +467,7 @@ const styles = StyleSheet.create({
   stormChipTextOn: { color: colors.textInverse },
   overviewLabel: { color: colors.inkSoft, fontSize: 12, fontWeight: '700', alignSelf: 'center' },
   legendRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+  legendBar: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   legendSwatch: { width: 12, height: 12, borderRadius: 6, opacity: 0.85 },
   legendText: { color: colors.inkSoft, fontSize: 11, fontWeight: '700' },
