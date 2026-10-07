@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 
 import { STAGE_COLOR, type MapPoint } from '@/lib/leadMap';
-import { ZONE_METERS, zoneColor, type StormLayers } from '@/lib/stormLayers';
+import { ZONE_METERS, zoneColor, type MapViewState, type StormLayers } from '@/lib/stormLayers';
 
 /**
  * The Lead map on the WEB (2026-10-07; smoothed + storm zones 2026-10-09).
@@ -72,6 +72,8 @@ export function LeadMapView({
   focusKey,
   storms,
   labels = true,
+  initialView = null,
+  onViewChange,
 }: {
   points: MapPoint[];
   selectedKey: string | null;
@@ -83,6 +85,10 @@ export function LeadMapView({
   storms?: StormLayers | null;
   /** Esri place-name labels over the satellite (zoomed out only). */
   labels?: boolean;
+  /** Start exactly here (the full-screen map opening where the small one was). */
+  initialView?: MapViewState | null;
+  /** Reports where the map is looking after every move. */
+  onViewChange?: (view: MapViewState) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [L, setL] = useState<typeof Leaflet | null>(null);
@@ -99,6 +105,8 @@ export function LeadMapView({
   const lastFit = useRef<string | null>(null);
   const select = useRef(onSelect);
   select.current = onSelect;
+  const viewChange = useRef(onViewChange);
+  viewChange.current = onViewChange;
   const latest = useRef({ selectedKey, highlight: storms?.highlight ?? null });
   latest.current = { selectedKey, highlight: storms?.highlight ?? null };
 
@@ -133,7 +141,16 @@ export function LeadMapView({
       wheelPxPerZoomLevel: 110,
       wheelDebounceTime: 30,
       maxZoom: 20,
-    }).setView(KANSAS_CITY, 10);
+    }).setView(initialView ? [initialView.lat, initialView.lng] : KANSAS_CITY, initialView?.zoom ?? 10);
+    if (initialView) {
+      // Opening where another map was: no automatic zoom on top of that.
+      firstView.current = true;
+      lastFit.current = storms?.fitKey ?? null;
+    }
+    m.on('moveend', () => {
+      const c = m.getCenter();
+      viewChange.current?.({ lat: c.lat, lng: c.lng, zoom: m.getZoom() });
+    });
     canvas.current = L.canvas({ padding: 0.5, tolerance: 6 });
     if (!document.getElementById(DARK_TILES_STYLE)) {
       const style = document.createElement('style');

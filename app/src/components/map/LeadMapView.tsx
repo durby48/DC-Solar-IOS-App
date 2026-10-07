@@ -4,7 +4,7 @@ import MapView, { Circle, Marker, Polygon, UrlTile, type Region } from 'react-na
 
 import { colors, radii, spacing } from '@/constants/theme';
 import { STAGE_COLOR, type MapPoint } from '@/lib/leadMap';
-import { ZONE_METERS, zoneColor, type StormLayers } from '@/lib/stormLayers';
+import { ZONE_METERS, zoneColor, type MapViewState, type StormLayers } from '@/lib/stormLayers';
 
 /**
  * The Lead map on the PHONE (runtime 6, 2026-10-09): Apple Maps through
@@ -90,6 +90,8 @@ export function LeadMapView({
   focusKey,
   storms,
   labels = true,
+  initialView = null,
+  onViewChange,
 }: {
   points: MapPoint[];
   selectedKey: string | null;
@@ -98,12 +100,21 @@ export function LeadMapView({
   focusKey?: string | null;
   storms?: StormLayers | null;
   labels?: boolean;
+  /** Start exactly here (the full-screen map opening where the small one was). */
+  initialView?: MapViewState | null;
+  /** Reports where the map is looking after every move. */
+  onViewChange?: (view: MapViewState) => void;
 }) {
   const map = useRef<MapView>(null);
   const [satellite, setSatellite] = useState(true);
-  const lastFit = useRef<string | null>(null);
+  // Opening where another map was: the storm is already in view, no re-zoom.
+  const lastFit = useRef<string | null>(initialView ? (storms?.fitKey ?? null) : null);
 
   const initialRegion = useMemo<Region>(() => {
+    if (initialView) {
+      const delta = 360 / 2 ** initialView.zoom;
+      return { latitude: initialView.lat, longitude: initialView.lng, latitudeDelta: delta, longitudeDelta: delta };
+    }
     const f = focusKey ? points.find((p) => p.key === focusKey) : undefined;
     if (f) return { latitude: f.lat, longitude: f.lng, latitudeDelta: ROOF_DELTA, longitudeDelta: ROOF_DELTA };
     return fitRegion(points);
@@ -152,6 +163,9 @@ export function LeadMapView({
         showsUserLocation={false}
         rotateEnabled={false}
         pitchEnabled={false}
+        onRegionChangeComplete={(r) =>
+          onViewChange?.({ lat: r.latitude, lng: r.longitude, zoom: Math.log2(360 / Math.max(r.longitudeDelta, 1e-6)) })
+        }
         onPress={(e) => {
           if (e.nativeEvent.action !== 'marker-press') onSelect(null);
         }}>

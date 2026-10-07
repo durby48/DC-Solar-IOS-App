@@ -24,6 +24,13 @@ export const MIN_HAIL = 1;
 
 export type StormKind = 'hail' | 'wind';
 
+/** Where a map is looking — passed to the full-screen map so it opens right there. */
+export interface MapViewState {
+  lat: number;
+  lng: number;
+  zoom: number;
+}
+
 export interface StormWarning {
   id: string;
   label: string;

@@ -3,7 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import Ionicons from '@expo/vector-icons/Ionicons';
+
 import { LeadMapView, NATIVE_MAP } from '@/components/map/LeadMapView';
+import { MapFullScreen } from '@/components/map/MapFullScreen';
 import { AppText, Button, Card } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import {
@@ -27,6 +30,7 @@ import {
   STORM_WINDOWS,
   ZONE_LEGEND,
   type MapStorm,
+  type MapViewState,
   type StormKind,
   type StormLayers,
   type StormReportPoint,
@@ -78,6 +82,9 @@ export function LeadMapBody({
   const [selectedKey, setSelectedKey] = useState<string | null>(focusKey);
   const [roof, setRoof] = useState<{ key: string; n: number } | null>(null);
   const placing = useRef(false);
+  // Full screen (2026-10-09): opens exactly where the map is looking.
+  const [full, setFull] = useState(false);
+  const view = useRef<MapViewState | null>(null);
 
   // Storms (2026-10-09, reworked): OFF until turned on; then a list of storms
   // in two categories (Hail / Wind), the most recent one that hit someone
@@ -177,9 +184,10 @@ export function LeadMapBody({
       warnings: warningsOn ? warnings : [],
       reports: stormReports,
       highlight,
-      fitKey: stormPick,
+      // Only picking ONE storm moves the map; overviews and filters never do.
+      fitKey: pickedStorm ? stormPick : null,
     };
-  }, [stormsOn, radar, warningsOn, warnings, stormReports, highlight, stormPick]);
+  }, [stormsOn, radar, warningsOn, warnings, stormReports, highlight, stormPick, pickedStorm]);
   const hitLeads = highlight ? shown.filter((p) => highlight.has(p.key) && p.stage !== 'customer').length : 0;
   const hitCustomers = highlight ? shown.filter((p) => highlight.has(p.key) && p.stage === 'customer').length : 0;
 
@@ -319,8 +327,21 @@ export function LeadMapBody({
             focusKey={focusKey}
             storms={storms}
             labels={labels}
+            onViewChange={(v) => {
+              view.current = v;
+            }}
           />
         )}
+        {points !== null ? (
+          <Pressable
+            onPress={() => setFull(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Full-screen map"
+            hitSlop={6}
+            style={({ pressed }) => [styles.expand, pressed && styles.expandPressed]}>
+            <Ionicons name="expand" size={18} color="#fff" />
+          </Pressable>
+        ) : null}
       </View>
 
       {stormsOn && stormReports.length > 0 && !selected && compact ? (
@@ -387,6 +408,46 @@ export function LeadMapBody({
           ) : null}
         </Card>
       ) : null}
+
+      <MapFullScreen
+        visible={full}
+        onClose={() => setFull(false)}
+        title={
+          pickedStorm
+            ? `${stormDayLabel(pickedStorm.day)} ${pickedStorm.kind}`
+            : stormsOn && stormPick?.startsWith('window:')
+              ? `All ${stormKind} storms · ${STORM_WINDOWS.find((w) => `window:${w.key}` === stormPick)?.label ?? ''}`
+              : null
+        }
+        windLegend={stormKind === 'wind'}
+        points={shown}
+        selectedKey={selectedKey}
+        onSelect={setSelectedKey}
+        storms={storms}
+        labels={labels}
+        initialView={view.current}
+        onViewChange={(v) => {
+          view.current = v;
+        }}
+        footer={
+          selected ? (
+            <View style={styles.fullCard}>
+              <View style={[styles.dot, { backgroundColor: STAGE_COLOR[selected.stage] }]} />
+              <Text style={styles.fullCardText} numberOfLines={1}>
+                {selected.name}
+              </Text>
+              <Pressable
+                onPress={() => {
+                  setFull(false);
+                  router.navigate({ pathname: '/workspace', params: { open: selected.key } } as never);
+                }}
+                hitSlop={6}>
+                <Text style={styles.fullCardLink}>Open in CRM</Text>
+              </Pressable>
+            </View>
+          ) : null
+        }
+      />
 
       {selected ? (
         <Card style={styles.card}>
@@ -472,6 +533,30 @@ const styles = StyleSheet.create({
   legendSwatch: { width: 12, height: 12, borderRadius: 6, opacity: 0.85 },
   legendText: { color: colors.inkSoft, fontSize: 11, fontWeight: '700' },
   mapWrap: { flex: 1, padding: spacing.md },
+  expand: {
+    position: 'absolute',
+    right: spacing.md + spacing.sm,
+    bottom: spacing.md + spacing.sm,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  expandPressed: { opacity: 0.6 },
+  fullCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    maxWidth: 520,
+    backgroundColor: colors.surface,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  fullCardText: { flexShrink: 1, color: colors.ink, fontSize: 14, fontWeight: '800' },
+  fullCardLink: { color: colors.ocean, fontSize: 13, fontWeight: '800' },
   loading: { marginTop: spacing.xl },
   card: { marginHorizontal: spacing.md, marginBottom: spacing.md, gap: spacing.sm },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

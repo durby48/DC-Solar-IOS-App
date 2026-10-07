@@ -1,15 +1,16 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LeadMapView } from '@/components/map/LeadMapView';
+import { MapFullScreen } from '@/components/map/MapFullScreen';
 import { AppText, Card, Screen, SectionHeader } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { sendSms } from '@/lib/comms';
 import { fetchMapPoints, type MapPoint } from '@/lib/leadMap';
-import { inPath, loadAllReports, MIN_HAIL, ZONE_LEGEND, type StormLayers, type StormReportPoint } from '@/lib/stormLayers';
+import { inPath, loadAllReports, MIN_HAIL, ZONE_LEGEND, type MapViewState, type StormLayers, type StormReportPoint } from '@/lib/stormLayers';
 import { useRoleGate } from '@/lib/role';
 import { personName } from '@/lib/staffNames';
 import {
@@ -55,6 +56,8 @@ export default function StormDetailScreen() {
   // the Lead map on this storm.
   const [mapPoints, setMapPoints] = useState<MapPoint[] | null>(null);
   const [dayReports, setDayReports] = useState<StormReportPoint[]>([]);
+  const [full, setFull] = useState(false);
+  const view = useRef<MapViewState | null>(null);
 
   const load = useCallback(async () => {
     if (!day) return;
@@ -161,9 +164,18 @@ export default function StormDetailScreen() {
 
       {mapPoints && mapLayers ? (
         <View style={styles.mapBox}>
-          <LeadMapView points={mapPoints} selectedKey={null} onSelect={() => {}} storms={mapLayers} labels />
+          <LeadMapView
+            points={mapPoints}
+            selectedKey={null}
+            onSelect={() => {}}
+            storms={mapLayers}
+            labels
+            onViewChange={(v) => {
+              view.current = v;
+            }}
+          />
           <Pressable
-            onPress={() => router.push({ pathname: '/lead-map', params: { storm: day } } as never)}
+            onPress={() => setFull(true)}
             style={({ pressed }) => [styles.fullScreen, pressed && styles.pressed]}
             accessibilityRole="button"
             accessibilityLabel="Open the map full screen">
@@ -228,6 +240,20 @@ export default function StormDetailScreen() {
           ) : null}
         </View>
       </Card>
+
+      {mapPoints && mapLayers ? (
+        <MapFullScreen
+          visible={full}
+          onClose={() => setFull(false)}
+          title={`${stormDayLabel(day)} hail · up to ${hailLabel(storm?.maxHail ?? null)}`}
+          points={mapPoints}
+          selectedKey={null}
+          onSelect={() => {}}
+          storms={mapLayers}
+          labels
+          initialView={view.current}
+        />
+      ) : null}
 
       {note ? <Text style={[styles.note, !note.ok && styles.noteBad]}>{note.text}</Text> : null}
 
