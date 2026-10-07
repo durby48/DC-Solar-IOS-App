@@ -18,7 +18,7 @@ import { signOutAndLeave } from '@/lib/signOut';
  *
  *   Me        · name, email, their DC Solar number (read-only — an admin
  *               assigns numbers)
- *   Selling   · Sales resources, My commission, Lead map, Plans & prices,
+ *   Selling   · (manager: Assign leads), Sales resources, My commission, Lead map, Plans & prices,
  *               Saved texts
  *   Phone     · Recent calls, Do not disturb, Notifications, Calling check
  *   Account   · Security (password, two-step sign-in), Sign out
@@ -84,6 +84,10 @@ function SalesSettings() {
       <View>
         <SectionHeader title="Selling" accent={hubColors.crm.fg} />
         <Card padded={false}>
+          {/* The sales manager hands out leads in bulk (2026-10-08). */}
+          {me?.isSalesManager || me?.isDeveloper ? (
+            <ListRow icon="people" title="Assign leads" subtitle="Filter leads and hand them out to the team" onPress={() => go('/assign-leads')} divider />
+          ) : null}
           <ListRow icon="library" title="Sales resources" subtitle="Brochure, call script, objections" onPress={() => go('/resources')} divider />
           <ListRow icon="cash" title="My commission" subtitle="This pay period and past ones" onPress={() => go('/commission')} divider />
           <ListRow icon="map" title="Lead map" subtitle="Your prospects and customers, pinned" onPress={() => go('/lead-map')} divider />

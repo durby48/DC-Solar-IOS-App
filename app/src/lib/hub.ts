@@ -118,6 +118,7 @@ export const HUB_ITEMS: readonly HubItem[] = [
   { key: 'customers', title: 'Customers', icon: 'people', href: '/customers', hub: 'crm', tone: 'crm', gate: 'all', badge: 'unread', subtitle: 'Every customer record' },
   { key: 'contacts', title: 'Contacts', icon: 'person-circle', href: '/phone/contacts' as never, hub: 'crm', tone: 'crm', gate: 'all', subtitle: 'Company directory' },
   { key: 'leads', title: 'Leads', icon: 'person-add', href: '/leads' as never, hub: 'crm', tone: 3, gate: 'admin', subtitle: 'New inquiries and projections' },
+  { key: 'assign-leads', title: 'Assign leads', icon: 'people', href: '/assign-leads' as never, hub: 'crm', tone: 2, gate: 'admin', subtitle: 'Filter leads and hand them out' },
   { key: 'sales-resources', title: 'Sales resources', icon: 'library', href: '/resources' as never, hub: 'crm', tone: 5, gate: 'admin', subtitle: 'Brochure, script, objections' },
   { key: 'lead-map', title: 'Lead map', icon: 'map', href: '/lead-map' as never, hub: 'crm', tone: 1, gate: 'admin', subtitle: 'Every lead and customer, pinned' },
   { key: 'sales', title: 'Sales', icon: 'trending-up', href: '/sales', hub: 'crm', tone: 5, gate: 'admin', subtitle: 'Pipeline money and marketing' },

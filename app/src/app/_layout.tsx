@@ -217,6 +217,8 @@ export default function RootLayout() {
             <Stack.Screen name="recents" options={{ title: 'Recent calls' }} />
             {/* Developer Tools (2026-10-08) — developers only; the screen checks. */}
             <Stack.Screen name="dev-tools" options={{ title: 'Developer Tools' }} />
+            {/* Bulk lead assignment (2026-10-08) — sales manager + admins; the screen checks. */}
+            <Stack.Screen name="assign-leads" options={{ title: 'Assign leads' }} />
             <Stack.Screen name="resources/index" options={{ title: 'Sales resources' }} />
             <Stack.Screen name="resources/[id]" options={{ title: 'Sales resources' }} />
             {/* Public: where a customer lands from the Stripe card page (B2). */}

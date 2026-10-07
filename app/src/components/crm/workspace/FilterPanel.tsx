@@ -49,7 +49,7 @@ function toggle<T>(list: T[], value: T): T[] {
  * records each), instead of every ZIP in the list as a wall of chips. Picked
  * ZIPs stay shown above the box; tap one to remove it.
  */
-function ZipPicker({
+export function ZipPicker({
   zips,
   selected,
   onToggle,
