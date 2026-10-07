@@ -1,4 +1,4 @@
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useIsFocused, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,6 +18,7 @@ import {
   type MapPoint,
   type MapStage,
 } from '@/lib/leadMap';
+import { useKeypadLift } from '@/lib/dialerWindow';
 import { fetchEmployeeOptions } from '@/lib/myhours';
 import { fetchSalesTeam } from '@/lib/sales';
 import { useRoleGate } from '@/lib/role';
@@ -84,6 +85,9 @@ export function LeadMapBody({
   const placing = useRef(false);
   // Full screen (2026-10-09): opens exactly where the map is looking.
   const [full, setFull] = useState(false);
+  // The card along the bottom (a tapped pin, or the desktop storm card): the
+  // keypad button lifts above it rather than the card leaving room for it.
+  const [cardHeight, setCardHeight] = useState(0);
   const view = useRef<MapViewState | null>(null);
 
   // Storms (2026-10-09, reworked): OFF until turned on; then a list of storms
@@ -193,6 +197,9 @@ export function LeadMapBody({
       fitKey: pickedStorm && fitPick === stormPick ? stormPick : null,
     };
   }, [stormsOn, radar, warningsOn, warnings, stormReports, highlight, stormPick, pickedStorm, fitPick]);
+  const focused = useIsFocused();
+  const cardShown = selected !== null || (stormsOn && stormReports.length > 0 && !compact);
+  useKeypadLift(isSales && focused && cardShown && cardHeight > 0 ? Math.round(cardHeight) + spacing.md : 0);
   const hitLeads = highlight ? shown.filter((p) => highlight.has(p.key) && p.stage !== 'customer').length : 0;
   const hitCustomers = highlight ? shown.filter((p) => highlight.has(p.key) && p.stage === 'customer').length : 0;
 
@@ -378,7 +385,7 @@ export function LeadMapBody({
       ) : null}
 
       {stormsOn && stormReports.length > 0 && !selected && !compact ? (
-        <Card style={[styles.card, isSales && styles.cardClearFab]}>
+        <Card style={styles.card} onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}>
           <View style={styles.legendRow}>
             {stormKind === 'hail' ? (
               ZONE_LEGEND.map((l) => (
@@ -465,7 +472,7 @@ export function LeadMapBody({
       />
 
       {selected ? (
-        <Card style={[styles.card, isSales && styles.cardClearFab]}>
+        <Card style={styles.card} onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}>
           <View style={styles.cardHead}>
             <View style={[styles.dot, styles.dotBig, { backgroundColor: STAGE_COLOR[selected.stage] }]} />
             <View style={styles.flex}>
@@ -576,8 +583,6 @@ const styles = StyleSheet.create({
   fullCardLink: { color: colors.ocean, fontSize: 13, fontWeight: '800' },
   loading: { marginTop: spacing.xl },
   card: { marginHorizontal: spacing.md, marginBottom: spacing.md, gap: spacing.sm },
-  // Sales: the keypad button sits bottom-right; keep the card's buttons clear of it.
-  cardClearFab: { marginBottom: spacing.md + 66 },
   legendClearFab: { paddingRight: 70 },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   cardButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },

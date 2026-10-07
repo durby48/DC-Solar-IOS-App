@@ -869,13 +869,18 @@ export function CrmWorkspace() {
     );
   }
   if (!selected) return <View style={styles.single}>{listColumn}</View>;
+  // In the details, its own "Back to conversation" is the one way back
+  // (Carson, 2026-10-09: two back buttons stacked read as clutter).
+  const inDetail = detailOpen && detail !== null;
   return (
     <View style={styles.single}>
-      <Pressable onPress={() => setSelectedKey(null)} style={({ pressed }) => [styles.back, pressed && styles.pressed]}>
-        <Ionicons name="chevron-back" size={16} color={hubColors.crm.fg} />
-        <Text style={styles.backText}>All records</Text>
-      </Pressable>
-      <View style={styles.single}>{detailOpen && detail ? detail : center}</View>
+      {inDetail ? null : (
+        <Pressable onPress={() => setSelectedKey(null)} style={({ pressed }) => [styles.back, pressed && styles.pressed]}>
+          <Ionicons name="chevron-back" size={16} color={hubColors.crm.fg} />
+          <Text style={styles.backText}>All records</Text>
+        </Pressable>
+      )}
+      <View style={styles.single}>{inDetail ? detail : center}</View>
     </View>
   );
 }

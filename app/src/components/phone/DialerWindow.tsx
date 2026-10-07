@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Modal, PanResponder, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Animated, Modal, PanResponder, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RecentCallsList } from '@/components/phone/RecentCallsList';
@@ -40,13 +40,32 @@ export function DialerWindow({ anchorBottom }: { /** Desktop: the panel sits thi
     if (open && tab === 'recents') void markCallsSeen();
   }, [open, tab]);
 
-  // Swipe the sheet's top bar down to close it.
+  // SWIPE DOWN TO CLOSE (fixed 2026-10-09: the tabs' Pressables took the
+  // touch first, so the old handler never fired). The top of the sheet —
+  // grabber, tabs, close row — CAPTURES a downward drag even when it starts
+  // on a tab; the sheet follows the finger, and a long or fast pull closes it.
+  const drag = useRef(new Animated.Value(0)).current;
+  const sheetHeight = Math.round(height * 0.85);
+  const heightRef = useRef(sheetHeight);
+  heightRef.current = sheetHeight;
+  useEffect(() => {
+    if (open) drag.setValue(0);
+  }, [open, drag]);
   const pan = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_e, g) => g.dy > 8 && Math.abs(g.dy) > Math.abs(g.dx),
+      onMoveShouldSetPanResponderCapture: (_e, g) => g.dy > 6 && Math.abs(g.dy) > Math.abs(g.dx),
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderMove: (_e, g) => drag.setValue(Math.max(0, g.dy)),
       onPanResponderRelease: (_e, g) => {
-        if (g.dy > 60) closeDialer();
+        if (g.dy > 80 || g.vy > 0.8) {
+          Animated.timing(drag, { toValue: heightRef.current, duration: 160, useNativeDriver: true }).start(() =>
+            closeDialer(),
+          );
+        } else {
+          Animated.spring(drag, { toValue: 0, useNativeDriver: true }).start();
+        }
       },
+      onPanResponderTerminate: () => Animated.spring(drag, { toValue: 0, useNativeDriver: true }).start(),
     }),
   ).current;
 
@@ -106,7 +125,10 @@ export function DialerWindow({ anchorBottom }: { /** Desktop: the panel sits thi
     <Modal visible={open} transparent animationType="slide" onRequestClose={closeDialer}>
       <View style={styles.backdrop}>
         <Pressable style={styles.backdropTap} onPress={closeDialer} accessibilityLabel="Close the keypad" />
-        <View style={[styles.sheet, { height: Math.round(height * 0.85), paddingBottom: insets.bottom }]}>{body}</View>
+        <Animated.View
+          style={[styles.sheet, { height: sheetHeight, paddingBottom: insets.bottom, transform: [{ translateY: drag }] }]}>
+          {body}
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -170,7 +192,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 12,
   },
-  head: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, gap: spacing.sm },
+  head: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.xs, gap: spacing.sm },
   grabber: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: colors.line },
   headRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   tabs: { flex: 1, flexDirection: 'row', backgroundColor: colors.surface, borderRadius: radii.pill, padding: 3 },

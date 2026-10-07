@@ -24,12 +24,14 @@ export interface DialerState {
   missed: number;
   /** A message thread fills the phone screen: the button steps aside. */
   hidden: boolean;
+  /** Extra height to sit above something along the bottom (the Lead map's pin card). */
+  lift: number;
 }
 
 const COMPANY = 'dc-solar';
 const MISSED_STATUSES = ['failed', 'busy', 'no-answer', 'canceled'];
 
-let state: DialerState = { open: false, tab: 'keypad', preset: null, missed: 0, hidden: false };
+let state: DialerState = { open: false, tab: 'keypad', preset: null, missed: 0, hidden: false, lift: 0 };
 let presetN = 0;
 const listeners = new Set<() => void>();
 
@@ -76,6 +78,15 @@ export function useHideKeypadButton(active: boolean): void {
       set({ hidden: hiders > 0 });
     };
   }, [active]);
+}
+
+/** Lift the keypad button by `px` while this is mounted (0 = no lift). */
+export function useKeypadLift(px: number): void {
+  useEffect(() => {
+    if (px <= 0) return;
+    set({ lift: px });
+    return () => set({ lift: 0 });
+  }, [px]);
 }
 
 async function myEmail(): Promise<string | null> {

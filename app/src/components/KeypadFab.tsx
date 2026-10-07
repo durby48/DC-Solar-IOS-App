@@ -22,7 +22,8 @@ import { useRoleGate } from '@/lib/role';
  * app (lib/callSession.ts).
  *
  * Where it sits: above the tab bar on tab screens, above the bottom bar on
- * Assign leads, otherwise just above the bottom edge. Hidden on the call
+ * Assign leads, above the Lead map's pin card (useKeypadLift), otherwise just
+ * above the bottom edge. Hidden on the call
  * screen, the public pages and — on a phone-sized screen — inside a CRM
  * message thread, where it would cover the composer (Conversation hides it).
  */
@@ -39,7 +40,7 @@ export function KeypadFab() {
   const gate = useRoleGate();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
-  const { open, missed, hidden } = useDialerWindow();
+  const { open, missed, hidden, lift } = useDialerWindow();
   const session = useCallSession();
   const live = isLive(session);
   const isSales = gate.phase === 'ready' && gate.role?.isSales === true;
@@ -57,7 +58,7 @@ export function KeypadFab() {
   if (hidden && !open) return null;
 
   const bottom =
-    (TAB_ROUTES.includes(pathname) ? TAB_BAR : insets.bottom + (BOTTOM_BARS[pathname] ?? 0)) + 14;
+    (TAB_ROUTES.includes(pathname) ? TAB_BAR : insets.bottom + (BOTTOM_BARS[pathname] ?? 0)) + 14 + lift;
 
   return (
     <>
