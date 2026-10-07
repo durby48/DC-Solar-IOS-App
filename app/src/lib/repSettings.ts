@@ -23,6 +23,8 @@ export interface MyPrefs {
   notifyTexts: boolean;
   notifyMissedCalls: boolean;
   notifyNewProspects: boolean;
+  /** Hail near my leads / customers (2026-10-09). */
+  notifyStorms: boolean;
 }
 
 export const DEFAULT_PREFS: MyPrefs = {
@@ -32,6 +34,7 @@ export const DEFAULT_PREFS: MyPrefs = {
   notifyTexts: true,
   notifyMissedCalls: true,
   notifyNewProspects: true,
+  notifyStorms: true,
 };
 
 async function myEmail(): Promise<string | null> {
@@ -45,7 +48,7 @@ export async function fetchMyPrefs(): Promise<MyPrefs> {
     if (!email) return DEFAULT_PREFS;
     const { data } = await supabase
       .from('staff_profiles')
-      .select('dnd_enabled, work_start, work_end, notify_texts, notify_missed_calls, notify_new_prospects')
+      .select('dnd_enabled, work_start, work_end, notify_texts, notify_missed_calls, notify_new_prospects, notify_storms')
       .eq('company', COMPANY)
       .eq('email', email)
       .maybeSingle();
@@ -58,6 +61,7 @@ export async function fetchMyPrefs(): Promise<MyPrefs> {
       notifyTexts: r.notify_texts !== false,
       notifyMissedCalls: r.notify_missed_calls !== false,
       notifyNewProspects: r.notify_new_prospects !== false,
+      notifyStorms: r.notify_storms !== false,
     };
   } catch {
     return DEFAULT_PREFS;
@@ -75,6 +79,7 @@ export async function saveMyPrefs(patch: Partial<MyPrefs>): Promise<{ ok: true }
     if (patch.notifyTexts !== undefined) row.notify_texts = patch.notifyTexts;
     if (patch.notifyMissedCalls !== undefined) row.notify_missed_calls = patch.notifyMissedCalls;
     if (patch.notifyNewProspects !== undefined) row.notify_new_prospects = patch.notifyNewProspects;
+    if (patch.notifyStorms !== undefined) row.notify_storms = patch.notifyStorms;
     const { error } = await supabase.from('staff_profiles').upsert(row, { onConflict: 'company,email' });
     return error ? { ok: false, message: error.message } : { ok: true };
   } catch (e) {

@@ -46,6 +46,7 @@ const ALLOWED = [
   '/more/paystubs',
   '/more/time-off',
   '/map',
+  '/storm-reports',
 ];
 
 function allowed(pathname: string): boolean {

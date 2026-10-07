@@ -89,6 +89,8 @@ function SalesSettings() {
           {me?.isSalesManager ? (
             <ListRow icon="people" title="Assign leads" subtitle="Filter leads and hand them out to the team" onPress={() => go('/assign-leads')} divider />
           ) : null}
+          {/* Hail after-care (2026-10-09): storms that hit your leads / customers. */}
+          <ListRow icon="thunderstorm" title="Storm reports" subtitle="Hail that hit your leads and customers" onPress={() => go('/storm-reports')} divider />
           <ListRow icon="library" title="Sales resources" subtitle="Brochure, call script, objections" onPress={() => go('/resources')} divider />
           <ListRow icon="cash" title="My commission" subtitle="This pay period and past ones" onPress={() => go('/commission')} divider />
           <ListRow icon="map" title="Lead map" subtitle="Your prospects and customers, pinned" onPress={() => go('/lead-map')} divider />

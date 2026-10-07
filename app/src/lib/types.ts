@@ -56,6 +56,10 @@ export interface Customer {
   lat?: number | null;
   lng?: number | null;
   geocode_status?: string | null;
+  /** Most recent hail ≥ 1 in within 3 mi (storm coverage, 2026-10-09). */
+  last_hail_at?: string | null;
+  last_hail_size?: number | null;
+  last_hail_miles?: number | null;
 }
 
 /** A scheduled work day for a job (mirrors the job_schedule_dates table). */

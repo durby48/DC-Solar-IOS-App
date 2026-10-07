@@ -73,6 +73,10 @@ export interface Lead {
   temperature?: LeadTemperature | null;
   /** Who added it (an import: the importer). A rep may remove leads they added by hand. */
   created_by?: string | null;
+  /** Most recent hail ≥ 1 in within 3 mi (storm coverage, 2026-10-09). */
+  last_hail_at?: string | null;
+  last_hail_size?: number | null;
+  last_hail_miles?: number | null;
 }
 
 export interface SalesRep {
@@ -151,7 +155,7 @@ export async function fetchSalesData(): Promise<SalesData | null> {
       supabase
         .from('leads')
         .select(
-          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by',
+          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by, last_hail_at, last_hail_size, last_hail_miles',
         )
         .eq('company', COMPANY)
         .is('removed_at', null)
@@ -301,7 +305,7 @@ export async function fetchOpenLeads(): Promise<Lead[]> {
     const { data, error } = await supabase
       .from('leads')
       .select(
-        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by',
+        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by, last_hail_at, last_hail_size, last_hail_miles',
       )
       .eq('company', COMPANY)
       .is('removed_at', null)

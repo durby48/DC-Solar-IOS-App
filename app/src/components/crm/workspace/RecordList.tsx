@@ -10,6 +10,7 @@ import { type RecordFilter, type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { zipOf } from '@/lib/crmFilters';
 import { TEMPERATURE_META } from '@/lib/leadTemperature';
 import { type LeadStatus } from '@/lib/sales';
+import { hailWithin } from '@/lib/storms';
 
 /**
  * A lead row's status bubble (2026-10-08). One bubble says both "this is a
@@ -256,6 +257,19 @@ export function RecordList({
                 accessibilityLabel={TEMPERATURE_META[item.lead.temperature].label}
               />
             ) : null}
+            {(() => {
+              // Hail in the last 90 days (storm coverage, 2026-10-09).
+              const at = item.lead?.last_hail_at ?? item.customer?.last_hail_at ?? null;
+              if (!hailWithin(at, 90)) return null;
+              return (
+                <View style={styles.hailPill}>
+                  <Ionicons name="thunderstorm" size={10} color={colors.ocean} />
+                  <Text style={styles.hailPillText}>
+                    Hail {new Date(at as string).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </Text>
+                </View>
+              );
+            })()}
             {ownerOf && ownerOf(item) ? (
               <View style={[styles.ownerPill, { borderColor: ownerOf(item)!.color }]}>
                 <Text style={[styles.ownerPillText, { color: ownerOf(item)!.color }]} numberOfLines={1}>
@@ -493,6 +507,8 @@ const styles = StyleSheet.create({
   time: { color: colors.inkSoft, fontSize: 11, fontWeight: '600' },
   rowBottom: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   subtitle: { flex: 1, color: colors.inkSoft, fontSize: 12, fontWeight: '500' },
+  hailPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: colors.skySoft, borderRadius: radii.pill, paddingHorizontal: 6, paddingVertical: 1 },
+  hailPillText: { color: colors.ocean, fontSize: 9, fontWeight: '800', letterSpacing: 0.3 },
   leadPill: { backgroundColor: colors.amberSoft, borderRadius: radii.pill, paddingHorizontal: 6, paddingVertical: 1 },
   leadPillText: { color: colors.amberDeep, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   stopPill: { backgroundColor: colors.coralSoft, borderRadius: radii.pill, paddingHorizontal: 6, paddingVertical: 1 },

@@ -20,7 +20,9 @@ export type NotificationTarget =
   | { type: 'customer'; customerId: string }
   | { type: 'job'; jobId: string }
   | { type: 'task'; taskId: string; leadId?: string; customerId?: string }
-  | { type: 'appointment'; appointmentId: string; leadId?: string };
+  | { type: 'appointment'; appointmentId: string; leadId?: string }
+  // A hail storm (2026-10-09) → its Storm report.
+  | { type: 'storm'; day: string };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -67,6 +69,10 @@ export function parseNotificationTarget(data: unknown): NotificationTarget | nul
     case 'appointment': {
       const appointmentId = id(d.appointmentId);
       return appointmentId ? { type: 'appointment', appointmentId, leadId: id(d.leadId) } : null;
+    }
+    case 'storm': {
+      const day = str(d.day);
+      return day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? { type: 'storm', day } : null;
     }
     default:
       return null;

@@ -119,6 +119,7 @@ export const HUB_ITEMS: readonly HubItem[] = [
   { key: 'contacts', title: 'Contacts', icon: 'person-circle', href: '/phone/contacts' as never, hub: 'crm', tone: 'crm', gate: 'all', subtitle: 'Company directory' },
   { key: 'leads', title: 'Leads', icon: 'person-add', href: '/leads' as never, hub: 'crm', tone: 3, gate: 'admin', subtitle: 'New inquiries and projections' },
   { key: 'assign-leads', title: 'Assign leads', icon: 'people', href: '/assign-leads' as never, hub: 'crm', tone: 2, gate: 'admin', subtitle: 'Filter leads and hand them out' },
+  { key: 'storm-reports', title: 'Storm reports', icon: 'thunderstorm', href: '/storm-reports' as never, hub: 'crm', tone: 2, gate: 'admin', subtitle: 'Hail that hit leads and customers' },
   { key: 'removed-leads', title: 'Removed leads', icon: 'trash', href: '/removed-leads' as never, hub: 'crm', tone: 6, gate: 'admin', subtitle: 'Restore or delete for good' },
   { key: 'sales-resources', title: 'Sales resources', icon: 'library', href: '/resources' as never, hub: 'crm', tone: 5, gate: 'admin', subtitle: 'Brochure, script, objections' },
   { key: 'lead-map', title: 'Lead map', icon: 'map', href: '/lead-map' as never, hub: 'crm', tone: 1, gate: 'admin', subtitle: 'Every lead and customer, pinned' },

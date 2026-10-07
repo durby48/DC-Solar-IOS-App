@@ -13,10 +13,11 @@ import { fetchMyPrefs, saveMyPrefs, type MyPrefs } from '@/lib/repSettings';
  * anything in the app — texts and missed calls still show on Home and in the
  * CRM.
  */
-const ROWS: { key: 'notifyTexts' | 'notifyMissedCalls' | 'notifyNewProspects'; title: string; detail: string }[] = [
+const ROWS: { key: 'notifyTexts' | 'notifyMissedCalls' | 'notifyNewProspects' | 'notifyStorms'; title: string; detail: string }[] = [
   { key: 'notifyTexts', title: 'New texts', detail: 'When someone texts your DC Solar number' },
   { key: 'notifyMissedCalls', title: 'Missed calls', detail: 'When a call to your number is not answered' },
   { key: 'notifyNewProspects', title: 'New prospects', detail: 'When an admin assigns a prospect to you' },
+  { key: 'notifyStorms', title: 'Hail near my leads', detail: 'When hail of 1 inch or more hits near your leads or customers' },
 ];
 
 export default function NotificationsScreen() {

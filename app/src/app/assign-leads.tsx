@@ -1,13 +1,14 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { router, Stack, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ZipPicker } from '@/components/crm/workspace/FilterPanel';
 import { AppText, Chip, Screen } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
-import { applyFilters, EMPTY_FILTERS, filterOptions, STAGE_LABEL, zipOf, type CrmFilters, type Stage } from '@/lib/crmFilters';
+import { applyFilters, EMPTY_FILTERS, filterOptions, HAIL_WINDOWS, STAGE_LABEL, zipOf, type CrmFilters, type Stage } from '@/lib/crmFilters';
+import { fetchStormHits, stormDayLabel } from '@/lib/storms';
 import { fetchWorkspaceRecords, type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { assignLeads } from '@/lib/leadImport';
 import { TEMPERATURE_META, TEMPERATURES, type LeadTemperature } from '@/lib/leadTemperature';
@@ -38,9 +39,9 @@ import { firstName } from '@/lib/staffNames';
  */
 
 type From = 'all' | 'unassigned' | string;
-type Order = 'oldest' | 'newest' | 'zip';
+type Order = 'oldest' | 'newest' | 'zip' | 'hail';
 const STAGES: Stage[] = ['prospect', 'contacted', 'interested', 'closed', 'booked'];
-const ORDER_LABEL: Record<Order, string> = { oldest: 'Oldest first', newest: 'Newest first', zip: 'By ZIP' };
+const ORDER_LABEL: Record<Order, string> = { oldest: 'Oldest first', newest: 'Newest first', zip: 'By ZIP', hail: 'Most recent hail' };
 const OWNER_COLORS = ['#7C5CFF', '#2E9E6A', '#D9822B', '#2F7FD1', '#C2416B', '#8A6D3B'];
 
 function first(name: string): string {
@@ -103,6 +104,24 @@ function AssignLeads({ myEmail, canRestore }: { myEmail: string; canRestore: boo
   const [neverContacted, setNeverContacted] = useState(false);
   const [hasPhone, setHasPhone] = useState(false);
   const [temps, setTemps] = useState<LeadTemperature[]>([]);
+  const [hail, setHail] = useState<number | null>(null);
+  // Opened from a Storm report (2026-10-09): only that storm's leads.
+  const { storm: stormParam } = useLocalSearchParams<{ storm?: string }>();
+  const [storm, setStorm] = useState<string | null>(typeof stormParam === 'string' && stormParam ? stormParam : null);
+  const [stormIds, setStormIds] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (!storm) {
+      setStormIds(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchStormHits(storm).then((hits) => {
+      if (!cancelled) setStormIds(new Set(hits.filter((h) => h.kind === 'lead').map((h) => h.recordId)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [storm]);
   const [order, setOrder] = useState<Order>('oldest');
   // Selection + the panel
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -153,11 +172,11 @@ function AssignLeads({ myEmail, canRestore }: { myEmail: string; canRestore: boo
   }, [team, counts, nameOf]);
 
   const fromPool = useMemo(() => {
-    const all = leads ?? [];
+    const all = (leads ?? []).filter((r) => !stormIds || stormIds.has(r.id));
     if (from === 'unassigned') return all.filter((r) => !r.lead?.assigned_to);
     if (from && from !== 'all') return all.filter((r) => r.lead?.assigned_to?.toLowerCase() === from);
     return all;
-  }, [leads, from]);
+  }, [leads, from, stormIds]);
   const options = useMemo(() => filterOptions(fromPool), [fromPool]);
   const matches = useMemo(() => {
     const f: CrmFilters = {
@@ -168,16 +187,17 @@ function AssignLeads({ myEmail, canRestore }: { myEmail: string; canRestore: boo
       contact: neverContacted ? ['never'] : [],
       has: hasPhone ? ['phone'] : [],
       temps,
+      hail,
       sort: order,
     };
     const q = search.trim().toLowerCase();
     return applyFilters(fromPool, f, []).filter(
       (r) => !q || r.name.toLowerCase().includes(q) || (r.address ?? '').toLowerCase().includes(q),
     );
-  }, [fromPool, zips, stages, installers, neverContacted, hasPhone, temps, order, search]);
+  }, [fromPool, zips, stages, installers, neverContacted, hasPhone, temps, hail, order, search]);
 
   const filterCount =
-    (from && from !== 'all' ? 1 : 0) + zips.length + stages.length + installers.length + temps.length + (neverContacted ? 1 : 0) + (hasPhone ? 1 : 0);
+    (from && from !== 'all' ? 1 : 0) + zips.length + stages.length + installers.length + temps.length + (hail ? 1 : 0) + (neverContacted ? 1 : 0) + (hasPhone ? 1 : 0);
 
   // What the panel will hand out: the ticked leads (in list order), or the
   // first N of the list. Leads a chosen rep already has are left out.
@@ -329,6 +349,13 @@ function AssignLeads({ myEmail, canRestore }: { myEmail: string; canRestore: boo
             ))}
           </View>
 
+          <Text style={styles.label}>Hail within</Text>
+          <View style={styles.chips}>
+            {HAIL_WINDOWS.map((w) => (
+              <Chip key={w.days} label={w.label} selected={hail === w.days} onPress={() => setHail(hail === w.days ? null : w.days)} />
+            ))}
+          </View>
+
           <Text style={styles.label}>Temperature</Text>
           <View style={styles.chips}>
             {TEMPERATURES.map((t) => (
@@ -382,6 +409,7 @@ function AssignLeads({ myEmail, canRestore }: { myEmail: string; canRestore: boo
                   setNeverContacted(false);
                   setHasPhone(false);
                   setTemps([]);
+                  setHail(null);
                 }}
                 hitSlop={8}>
                 <Text style={styles.link}>Clear filters</Text>
@@ -393,6 +421,18 @@ function AssignLeads({ myEmail, canRestore }: { myEmail: string; canRestore: boo
               <Text style={styles.doneText}>Show {matches.length}</Text>
             </Pressable>
           </View>
+        </View>
+      ) : null}
+
+      {storm ? (
+        <View style={styles.stormBanner}>
+          <Ionicons name="thunderstorm" size={14} color={colors.ocean} />
+          <Text style={styles.stormBannerText}>
+            Leads in the {stormDayLabel(storm, false)} hail{stormIds ? ` · ${stormIds.size}` : ''}
+          </Text>
+          <Pressable onPress={() => setStorm(null)} hitSlop={8}>
+            <Text style={styles.link}>Show all</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -647,6 +687,8 @@ const styles = StyleSheet.create({
   doneButton: { backgroundColor: colors.sun, borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: 8 },
   doneText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
   note: { color: colors.success, fontSize: 13, fontWeight: '800' },
+  stormBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.skySoft, borderRadius: radii.sm, paddingHorizontal: spacing.sm + 2, paddingVertical: 7 },
+  stormBannerText: { flex: 1, color: colors.ocean, fontSize: 13, fontWeight: '800' },
   noteBad: { color: colors.danger },
   countRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.xs },
   countText: { color: colors.ink, fontSize: 14, fontWeight: '800' },

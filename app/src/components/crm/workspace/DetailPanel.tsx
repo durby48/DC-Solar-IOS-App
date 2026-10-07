@@ -26,6 +26,7 @@ import { TEMPERATURE_META, TEMPERATURES, type LeadTemperature } from '@/lib/lead
 import { assignLead, removeLeads, removeSummary, setLeadStatus, setLeadTemperature, VISIT_DRIVEN_STATUSES, type LeadStatus } from '@/lib/sales';
 import { type Task } from '@/lib/tasks';
 import { firstName } from '@/lib/staffNames';
+import { lastHailLabel } from '@/lib/storms';
 
 /**
  * SALES VIEW (2026-10-05). A sales rep works a lead New → Contacted →
@@ -734,6 +735,14 @@ export function DetailPanel({
         if (lat == null || lng == null) return null;
         return (
           <Section title="Map">
+            {(() => {
+              const hail = lastHailLabel(
+                (src as { last_hail_at?: string | null } | null)?.last_hail_at,
+                (src as { last_hail_size?: number | null } | null)?.last_hail_size,
+                (src as { last_hail_miles?: number | null } | null)?.last_hail_miles,
+              );
+              return <Fact label="Last hail" value={hail ?? 'None in the last 2 years'} muted={!hail} />;
+            })()}
             <RecordMiniMap
               lat={lat}
               lng={lng}

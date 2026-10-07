@@ -15,6 +15,7 @@ import {
   SORT_ORDER,
   STAGE_LABEL,
   STAGE_ORDER,
+  HAIL_WINDOWS,
   type CrmFilters,
   type filterOptions,
   type HasFilter,
@@ -167,6 +168,18 @@ export function FilterPanel({
           ))}
         </View>
 
+        <Text style={styles.section}>Hail within</Text>
+        <View style={styles.wrap}>
+          {HAIL_WINDOWS.map((w) => (
+            <Pill
+              key={w.days}
+              label={w.label}
+              on={filters.hail === w.days}
+              onPress={() => set({ hail: filters.hail === w.days ? null : w.days })}
+            />
+          ))}
+        </View>
+
         <Text style={styles.section}>Temperature</Text>
         <View style={styles.wrap}>
           {TEMPERATURES.map((t) => (
@@ -267,6 +280,9 @@ export function ActiveFilters({
     ...filters.sources.map((s) => ({ key: `o:${s}`, label: s, remove: () => onChange({ ...filters, sources: filters.sources.filter((x) => x !== s) }) })),
     ...filters.installers.map((s) => ({ key: `i:${s}`, label: s, remove: () => onChange({ ...filters, installers: filters.installers.filter((x) => x !== s) }) })),
     ...filters.reps.map((r) => ({ key: `r:${r}`, label: repName(r), remove: () => onChange({ ...filters, reps: filters.reps.filter((x) => x !== r) }) })),
+    ...(filters.hail
+      ? [{ key: 'hail', label: `Hail · ${HAIL_WINDOWS.find((w) => w.days === filters.hail)?.label ?? `${filters.hail} days`}`, remove: () => onChange({ ...filters, hail: null }) }]
+      : []),
     ...(filters.temps ?? []).map((t) => ({ key: `t:${t}`, label: TEMPERATURE_META[t].label, remove: () => onChange({ ...filters, temps: filters.temps.filter((x) => x !== t) }) })),
     ...filters.has.map((h) => ({ key: `h:${h}`, label: HAS_LABEL[h], remove: () => onChange({ ...filters, has: filters.has.filter((x) => x !== h) }) })),
   ];

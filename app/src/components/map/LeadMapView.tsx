@@ -4,6 +4,7 @@ import { Linking, StyleSheet, View } from 'react-native';
 import { AppText, Button } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
 import { type MapPoint } from '@/lib/leadMap';
+import { type StormLayers } from '@/lib/stormLayers';
 
 /**
  * The Lead map on the PHONE (2026-10-07) — not yet. A native map
@@ -24,6 +25,7 @@ export function LeadMapView({
   onSelect: (key: string | null) => void;
   roof?: { key: string; n: number } | null;
   focusKey?: string | null;
+  storms?: StormLayers | null;
 }) {
   return (
     <View style={styles.card}>

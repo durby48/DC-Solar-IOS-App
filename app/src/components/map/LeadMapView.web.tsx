@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 
 import { STAGE_COLOR, type MapPoint } from '@/lib/leadMap';
+import { type StormLayers } from '@/lib/stormLayers';
 
 /**
  * The Lead map on the WEB (2026-10-07): Leaflet over OpenStreetMap's own
@@ -51,6 +52,7 @@ export function LeadMapView({
   onSelect,
   roof,
   focusKey,
+  storms,
 }: {
   points: MapPoint[];
   selectedKey: string | null;
@@ -59,6 +61,8 @@ export function LeadMapView({
   roof?: { key: string; n: number } | null;
   /** Start zoomed in on this pin, on Satellite (opened from a record's panel map). */
   focusKey?: string | null;
+  /** Storm coverage (2026-10-09): radar, NWS warnings, hail / wind reports. */
+  storms?: StormLayers | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [L, setL] = useState<typeof Leaflet | null>(null);
@@ -199,6 +203,55 @@ export function LeadMapView({
     }
     m.flyTo([p.lat, p.lng], 19, { duration: 1.2 });
   }, [roof]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Storms (2026-10-09): live radar tiles (Iowa Environmental Mesonet's NEXRAD
+  // mosaic), active NWS severe-thunderstorm / tornado warnings, and NOAA
+  // hail / wind reports sized by hail size. Fits to the reports when asked.
+  const stormGroup = useRef<Leaflet.LayerGroup | null>(null);
+  const radarLayer = useRef<Leaflet.TileLayer | null>(null);
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !L) return;
+    if (!stormGroup.current) stormGroup.current = L.layerGroup().addTo(m);
+    const g = stormGroup.current;
+    g.clearLayers();
+    if (storms?.radar) {
+      if (!radarLayer.current) {
+        radarLayer.current = L.tileLayer(
+          'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png',
+          { opacity: 0.6, maxZoom: 19, attribution: 'Radar &copy; Iowa Environmental Mesonet' },
+        );
+      }
+      radarLayer.current.addTo(m);
+    } else if (radarLayer.current) {
+      m.removeLayer(radarLayer.current);
+    }
+    for (const w of storms?.warnings ?? []) {
+      L.polygon(w.rings, { color: w.tornado ? '#FF4D4D' : '#FFB020', weight: 2, fillOpacity: 0.12 })
+        .bindTooltip(w.label)
+        .addTo(g);
+    }
+    for (const r of storms?.reports ?? []) {
+      const hail = r.kind === 'hail';
+      const radius = hail ? 4 + Math.min(10, (r.size ?? 1) * 3) : 4;
+      L.circleMarker([r.lat, r.lng], {
+        radius,
+        color: hail ? '#BFE3FF' : '#FFB020',
+        weight: 1.5,
+        fillColor: hail ? '#3FA9F5' : '#FF8C1A',
+        fillOpacity: 0.55,
+      })
+        .bindTooltip(r.label, { direction: 'top' })
+        .addTo(g);
+    }
+    if (storms?.fitTo && storms.fitTo.length > 0) {
+      const b = L.latLngBounds(storms.fitTo.map((x) => [x.lat, x.lng] as Leaflet.LatLngTuple));
+      m.invalidateSize();
+      if (m.getSize().x > 0) m.fitBounds(b.pad(0.4), { maxZoom: 13 });
+      else pendingFit.current = b.pad(0.4);
+      fitted.current = true;
+    }
+  }, [L, storms]);
 
   // A plain <div>, absolutely filling the View: drawing into the React Native
   // View itself left Leaflet measuring a 0-wide box.

@@ -222,6 +222,9 @@ export default function RootLayout() {
             <Stack.Screen name="assign-leads" options={{ title: 'Assign leads' }} />
             {/* Removed leads (2026-10-08) — admins restore or delete for good. */}
             <Stack.Screen name="removed-leads" options={{ title: 'Removed leads' }} />
+            {/* Storm reports (2026-10-09) — hail that hit leads / customers. */}
+            <Stack.Screen name="storm-reports/index" options={{ title: 'Storm reports' }} />
+            <Stack.Screen name="storm-reports/[day]" options={{ title: 'Storm' }} />
             <Stack.Screen name="resources/index" options={{ title: 'Sales resources' }} />
             <Stack.Screen name="resources/[id]" options={{ title: 'Sales resources' }} />
             {/* Public: where a customer lands from the Stripe card page (B2). */}

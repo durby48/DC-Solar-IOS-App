@@ -29,7 +29,7 @@ import { taskBucket, type Task } from '@/lib/tasks';
 
 export type Stage = 'prospect' | 'contacted' | 'interested' | 'booked' | 'customer' | 'closed';
 export type ContactFilter = 'never' | 'stale' | 'overdue' | 'call_first';
-export type SortKey = 'activity' | 'newest' | 'oldest' | 'name' | 'zip' | 'stale';
+export type SortKey = 'activity' | 'newest' | 'oldest' | 'name' | 'zip' | 'stale' | 'hail';
 export type HasFilter = 'phone' | 'email';
 
 export interface CrmFilters {
@@ -41,6 +41,8 @@ export interface CrmFilters {
   reps: string[];
   has: HasFilter[];
   temps: LeadTemperature[];
+  /** Hail within this many days (2026-10-09); null = any. */
+  hail: number | null;
   sort: SortKey;
 }
 
@@ -53,6 +55,7 @@ export const EMPTY_FILTERS: CrmFilters = {
   reps: [],
   has: [],
   temps: [],
+  hail: null,
   sort: 'activity',
 };
 
@@ -81,8 +84,22 @@ export const SORT_LABEL: Record<SortKey, string> = {
   name: 'Name A–Z',
   zip: 'ZIP',
   stale: 'Longest since contact',
+  hail: 'Most recent hail',
 };
-export const SORT_ORDER: SortKey[] = ['activity', 'newest', 'oldest', 'name', 'zip', 'stale'];
+export const SORT_ORDER: SortKey[] = ['activity', 'newest', 'oldest', 'name', 'zip', 'stale', 'hail'];
+
+/** Hail windows (2026-10-09). */
+export const HAIL_WINDOWS: { days: number; label: string }[] = [
+  { days: 30, label: '30 days' },
+  { days: 182, label: '6 months' },
+  { days: 365, label: '1 year' },
+  { days: 730, label: '2 years' },
+];
+
+/** A record's most recent hail (lead or customer). */
+export function lastHailAt(r: WorkspaceRecord): string | null {
+  return r.lead?.last_hail_at ?? r.customer?.last_hail_at ?? null;
+}
 
 export const HAS_LABEL: Record<HasFilter, string> = { phone: 'Has phone', email: 'Has email' };
 
@@ -130,7 +147,7 @@ function sourceOf(r: WorkspaceRecord): string | null {
 export function activeCount(f: CrmFilters): number {
   return (
     f.zips.length + f.stages.length + f.contact.length + f.sources.length + f.installers.length + f.reps.length + f.has.length +
-    (f.temps?.length ?? 0)
+    (f.temps?.length ?? 0) + (f.hail ? 1 : 0)
   );
 }
 
@@ -171,6 +188,10 @@ export function applyFilters(records: WorkspaceRecord[], f: CrmFilters, tasks: T
       if (!f.reps.includes(rep)) return false;
     }
     if (f.temps?.length && !(r.lead?.temperature && f.temps.includes(r.lead.temperature))) return false;
+    if (f.hail) {
+      const at = lastHailAt(r);
+      if (!at || now - new Date(at).getTime() > f.hail * 86400000) return false;
+    }
     if (f.has.includes('phone') && !r.phoneE164 && !r.phone) return false;
     if (f.has.includes('email') && !r.email) return false;
     // Contact filters: a record must match EVERY one ticked.
@@ -196,6 +217,8 @@ export function applyFilters(records: WorkspaceRecord[], f: CrmFilters, tasks: T
       return out.sort(byName);
     case 'zip':
       return out.sort((a, b) => (zipOf(a) ?? '99999').localeCompare(zipOf(b) ?? '99999') || byName(a, b));
+    case 'hail':
+      return out.sort((a, b) => (lastHailAt(b) ?? '').localeCompare(lastHailAt(a) ?? '') || byName(a, b));
     case 'stale':
       return out.sort((a, b) => (a.lastActivityAt ?? '').localeCompare(b.lastActivityAt ?? ''));
     default:

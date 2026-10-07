@@ -82,6 +82,8 @@ export function routeForTarget(target: NotificationTarget): Route {
     case 'appointment':
       if (target.leadId) return { pathname: '/leads/[id]', params: { id: target.leadId } };
       return { pathname: '/(tabs)/calendar' };
+    case 'storm':
+      return { pathname: '/storm-reports/[day]', params: { day: target.day } };
   }
 }
 

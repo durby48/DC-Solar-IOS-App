@@ -49,12 +49,13 @@ const COMPANY = 'dc-solar';
  * Values are strings only (Expo delivers `data` as JSON; iOS keeps it small).
  * Nothing else goes in here: no notes, no bodies, no secrets.
  */
-type TargetType = 'sms_thread' | 'call' | 'lead' | 'customer' | 'job' | 'task' | 'appointment';
+// 'storm' (2026-10-09): { day } — opens that storm's report.
+type TargetType = 'sms_thread' | 'call' | 'lead' | 'customer' | 'job' | 'task' | 'appointment' | 'storm';
 type Target = { type: TargetType } & Record<string, string>;
 
-const TARGET_TYPES = new Set<string>(['sms_thread', 'call', 'lead', 'customer', 'job', 'task', 'appointment']);
+const TARGET_TYPES = new Set<string>(['sms_thread', 'call', 'lead', 'customer', 'job', 'task', 'appointment', 'storm']);
 const TARGET_KEYS = new Set<string>([
-  'type', 'customerId', 'leadId', 'contactId', 'phone', 'name', 'jobId', 'taskId', 'appointmentId',
+  'type', 'customerId', 'leadId', 'contactId', 'phone', 'name', 'jobId', 'taskId', 'appointmentId', 'day',
 ]);
 
 /** Accept a caller-supplied target only if it is exactly the contract. */
@@ -312,7 +313,7 @@ interface OutboundMessage {
    * Notifications): staff_profiles.notify_<pref>. Anyone in `emails` who turned
    * it off is dropped. Admin-audience pushes ignore it.
    */
-  pref?: 'texts' | 'missed_calls' | 'new_prospects';
+  pref?: 'texts' | 'missed_calls' | 'new_prospects' | 'storms';
 }
 
 /** Normalize any accepted body shape into {title, body, emails?, audience, target?}. */
@@ -356,7 +357,7 @@ function normalize(payload: Record<string, unknown>): OutboundMessage | null {
         ? (payload.emails as string[])
         : null;
     const pref =
-      payload.pref === 'texts' || payload.pref === 'missed_calls' || payload.pref === 'new_prospects'
+      payload.pref === 'texts' || payload.pref === 'missed_calls' || payload.pref === 'new_prospects' || payload.pref === 'storms'
         ? payload.pref
         : undefined;
     return {

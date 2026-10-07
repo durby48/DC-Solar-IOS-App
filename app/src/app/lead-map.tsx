@@ -10,6 +10,12 @@ import { LeadMapBody } from '@/components/map/LeadMapBody';
  * a tab (`(tabs)/map.tsx`). The body is components/map/LeadMapBody.tsx.
  */
 export default function LeadMapScreen() {
-  const { focus } = useLocalSearchParams<{ focus?: string }>();
-  return <LeadMapBody focusKey={typeof focus === 'string' && focus ? focus : null} />;
+  const { focus, storm } = useLocalSearchParams<{ focus?: string; storm?: string }>();
+  return (
+    <LeadMapBody
+      focusKey={typeof focus === 'string' && focus ? focus : null}
+      // From a Storm report (2026-10-09): Storms on, that day, zoomed to it.
+      stormDay={typeof storm === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(storm) ? storm : null}
+    />
+  );
 }
