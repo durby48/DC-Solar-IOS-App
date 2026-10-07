@@ -6,6 +6,33 @@ import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatPhone } from '@/lib/comms';
 import { type RecordFilter, type WorkspaceRecord } from '@/lib/crmWorkspace';
+import { zipOf } from '@/lib/crmFilters';
+import { type LeadStatus } from '@/lib/sales';
+
+/**
+ * A lead row's status bubble (2026-10-08). One bubble says both "this is a
+ * lead" and where it stands — it replaced a LEAD pill plus "Lead · New lead ·
+ * <list name>" in the line, which repeated itself and got cut off.
+ */
+const LEAD_PILL: Record<LeadStatus, { label: string; bg: string; fg: string }> = {
+  new: { label: 'NEW', bg: colors.amberSoft, fg: colors.amberDeep },
+  contacted: { label: 'CONTACTED', bg: colors.skySoft, fg: colors.ocean },
+  interested: { label: 'INTERESTED', bg: colors.oliveSoft, fg: colors.olive },
+  scheduled: { label: 'BOOKED', bg: colors.violetSoft, fg: colors.violet },
+  visit_done: { label: 'VISIT DONE', bg: colors.violetSoft, fg: colors.violet },
+  estimating: { label: 'ESTIMATING', bg: colors.tan, fg: colors.inkSoft },
+  won: { label: 'WON', bg: colors.oliveSoft, fg: colors.success },
+  lost: { label: 'LOST', bg: colors.coralSoft, fg: colors.coral },
+};
+
+/** "4521 Troost Ave · 64110" — the street line and the ZIP, for a lead row. */
+function shortAddress(r: WorkspaceRecord): string | null {
+  const a = r.address?.trim();
+  if (!a) return null;
+  const street = a.split(',')[0].trim();
+  const zip = zipOf(r);
+  return zip && !street.endsWith(zip) ? `${street} · ${zip}` : street;
+}
 
 /**
  * The left column: everyone, most recent contact first, with search and a
@@ -213,8 +240,10 @@ export function RecordList({
           </View>
           <View style={styles.rowBottom}>
             {item.kind === 'lead' ? (
-              <View style={styles.leadPill}>
-                <Text style={styles.leadPillText}>LEAD</Text>
+              <View style={[styles.leadPill, { backgroundColor: (LEAD_PILL[item.lead?.status ?? 'new'] ?? LEAD_PILL.new).bg }]}>
+                <Text style={[styles.leadPillText, { color: (LEAD_PILL[item.lead?.status ?? 'new'] ?? LEAD_PILL.new).fg }]}>
+                  {(LEAD_PILL[item.lead?.status ?? 'new'] ?? LEAD_PILL.new).label}
+                </Text>
               </View>
             ) : null}
             {ownerOf && ownerOf(item) ? (
@@ -225,7 +254,8 @@ export function RecordList({
               </View>
             ) : null}
             <Text style={styles.subtitle} numberOfLines={1}>
-              {item.subtitle ?? item.address ?? (item.phoneE164 ? formatPhone(item.phoneE164) : '')}
+              {(item.kind === 'lead' ? shortAddress(item) : item.subtitle ?? item.address) ??
+                (item.phoneE164 ? formatPhone(item.phoneE164) : '')}
             </Text>
             {item.optedOut ? (
               <View style={styles.stopPill}>
