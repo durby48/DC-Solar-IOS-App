@@ -11,7 +11,7 @@ import { createTask, dueFromPick } from '@/lib/tasks';
  * none), who (you by default). No modal, no type picker — Atomic CRM's
  * AddTask dialog reduced to the three things the crew actually fills in.
  * Defaults are the useful ones: due today at 9, assigned to you. A time
- * (2026-10-08): one tap on 8 AM – 5 PM or "Other…"; the task then sits at that
+ * (2026-10-08): typed in one box ("2:30 pm"); the task then sits at that
  * time on the rep's Calendar.
  */
 type Due = 'today' | 'tomorrow' | 'nextWeek' | 'date' | 'none';

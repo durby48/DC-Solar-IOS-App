@@ -184,7 +184,7 @@ export function AppointmentComposer({
         />
       </View>
       <Text style={styles.label}>Time</Text>
-      <TimeChips value={time || null} onChange={(t) => setTime(t ?? '')} noneLabel="No time" />
+      <TimeChips value={time || null} onChange={(t) => setTime(t ?? '')} optional />
       <Text style={styles.label}>Who is going</Text>
       <View style={styles.chips}>
         {myEmail ? <Chip label="Me" tone="olive" selected={assignee?.toLowerCase() === myEmail.toLowerCase()} onPress={() => setAssignee(myEmail)} /> : null}
