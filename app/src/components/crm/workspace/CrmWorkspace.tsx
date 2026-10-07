@@ -53,7 +53,7 @@ import { useRole } from '@/lib/role';
 import { isCompanyJob, stageOrDefault } from '@/lib/stages';
 import { countDueNow, fetchTasks, type Task } from '@/lib/tasks';
 import { type Job } from '@/lib/types';
-import { loadStaffNames } from '@/lib/staffNames';
+import { firstName, loadStaffNames } from '@/lib/staffNames';
 
 /**
  * The CRM workspace: list · conversation/activity · details, on one screen.
@@ -625,7 +625,7 @@ export function CrmWorkspace() {
                   key={r.email}
                   onPress={() => setAssignTo(r.email)}
                   style={[styles.assignChip, assignTo === r.email && styles.assignChipOn]}>
-                  <Text style={[styles.assignChipText, assignTo === r.email && styles.assignChipTextOn]}>{r.name}</Text>
+                  <Text style={[styles.assignChipText, assignTo === r.email && styles.assignChipTextOn]}>{firstName(r.name)}</Text>
                 </Pressable>
               ))}
             </View>

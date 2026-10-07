@@ -23,6 +23,7 @@ import { useRole } from '@/lib/role';
 import { TEMPERATURE_META, TEMPERATURES, type LeadTemperature } from '@/lib/leadTemperature';
 import { assignLead, setLeadStatus, setLeadTemperature, VISIT_DRIVEN_STATUSES, type LeadStatus } from '@/lib/sales';
 import { type Task } from '@/lib/tasks';
+import { firstName } from '@/lib/staffNames';
 
 /**
  * SALES VIEW (2026-10-05). A sales rep works a lead New → Contacted →
@@ -436,7 +437,7 @@ export function DetailPanel({
             <Fact label="Estimated value" value={record.lead.estimated_value != null ? money(record.lead.estimated_value) : null} />
           )}
           {isSales && !canAssign ? (
-            <Fact label="Assigned to" value={repName ?? 'You'} />
+            <Fact label="Assigned to" value={repName ? firstName(repName) : 'You'} />
           ) : (
           <View style={styles.fact}>
             <Text style={styles.factLabel}>Owner</Text>
@@ -446,14 +447,14 @@ export function DetailPanel({
               </Pressable>
             ) : null}
             <Pressable onPress={() => setRepOpen((v) => !v)} style={styles.repButton}>
-              <Text style={[styles.factValue, !repName && styles.factMuted]}>{repName ?? 'Nobody yet'}</Text>
+              <Text style={[styles.factValue, !repName && styles.factMuted]}>{repName ? firstName(repName) : 'Nobody yet'}</Text>
               <Ionicons name={repOpen ? 'chevron-up' : 'chevron-down'} size={14} color={colors.inkSoft} />
             </Pressable>
             {repOpen ? (
               <View style={styles.repList}>
                 {reps.map((r) => (
                   <Pressable key={r.email} onPress={() => void assign(r.email)} style={({ pressed }) => [styles.repRow, pressed && styles.pressed]}>
-                    <Text style={styles.repRowText}>{r.name}</Text>
+                    <Text style={styles.repRowText}>{firstName(r.name)}</Text>
                     {rep?.toLowerCase() === r.email.toLowerCase() ? <Ionicons name="checkmark" size={14} color={colors.olive} /> : null}
                   </Pressable>
                 ))}

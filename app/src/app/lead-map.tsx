@@ -18,6 +18,7 @@ import {
 import { fetchEmployeeOptions } from '@/lib/myhours';
 import { fetchSalesTeam } from '@/lib/sales';
 import { useRoleGate } from '@/lib/role';
+import { firstName } from '@/lib/staffNames';
 
 /**
  * `/lead-map` — Lead map (2026-10-07). Rep Settings → Lead map, and the
@@ -119,7 +120,7 @@ export default function LeadMapScreen() {
               const on = rep === value;
               return (
                 <Pressable key={r.email || 'all'} onPress={() => setRep(value)} style={[styles.repChip, on && styles.repChipOn]}>
-                  <Text style={[styles.repChipText, on && styles.repChipTextOn]}>{r.name}</Text>
+                  <Text style={[styles.repChipText, on && styles.repChipTextOn]}>{firstName(r.name)}</Text>
                 </Pressable>
               );
             })}

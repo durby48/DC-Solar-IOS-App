@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { TEMPERATURE_META, TEMPERATURES } from '@/lib/leadTemperature';
+import { firstName } from '@/lib/staffNames';
 import {
   activeCount,
   CONTACT_LABEL,
@@ -224,7 +225,7 @@ export function FilterPanel({
               {reps.map((r) => (
                 <Pill
                   key={r.email}
-                  label={r.name}
+                  label={firstName(r.name)}
                   on={filters.reps.includes(r.email.toLowerCase())}
                   onPress={() => set({ reps: toggle(filters.reps, r.email.toLowerCase()) })}
                 />

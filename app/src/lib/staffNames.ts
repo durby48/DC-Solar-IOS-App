@@ -52,3 +52,8 @@ export function personName(email: string | null | undefined): string | null {
   if (full && !full.includes('@')) return full.split(' ')[0] || full;
   return nickname(email);
 }
+
+/** "Ken Crum" → "Ken" — person pickers show first names (Carson, 2026-10-08). */
+export function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] || name;
+}

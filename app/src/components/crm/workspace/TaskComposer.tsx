@@ -5,6 +5,7 @@ import { TimeChips } from '@/components/TimeChips';
 import { Chip } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
 import { createTask, dueFromPick } from '@/lib/tasks';
+import { firstName } from '@/lib/staffNames';
 
 /**
  * Add a task inline: title, when (Today / Tomorrow / Next week / a date /
@@ -130,7 +131,7 @@ export function TaskComposer({
       <View style={styles.chips}>
         {myEmail ? <Chip label="Me" tone="olive" selected={assignee?.toLowerCase() === myEmail.toLowerCase()} onPress={() => setAssignee(myEmail)} /> : null}
         {others.map((r) => (
-          <Chip key={r.email} label={r.name} tone="olive" selected={assignee?.toLowerCase() === r.email.toLowerCase()} onPress={() => setAssignee(r.email)} />
+          <Chip key={r.email} label={firstName(r.name)} tone="olive" selected={assignee?.toLowerCase() === r.email.toLowerCase()} onPress={() => setAssignee(r.email)} />
         ))}
         <Chip label="Nobody" tone="neutral" selected={assignee === null} onPress={() => setAssignee(null)} />
       </View>

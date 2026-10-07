@@ -13,6 +13,7 @@ import { assignLeads } from '@/lib/leadImport';
 import { TEMPERATURE_META, TEMPERATURES, type LeadTemperature } from '@/lib/leadTemperature';
 import { useRoleGate } from '@/lib/role';
 import { fetchSalesTeam } from '@/lib/sales';
+import { firstName } from '@/lib/staffNames';
 
 /**
  * `/assign-leads` — hand out leads (2026-10-08). Sales manager: Settings →
@@ -197,7 +198,7 @@ function AssignLeads({ myEmail }: { myEmail: string }) {
       : take === 0
         ? 'Nothing to give'
         : to.length === 1
-          ? `Give ${take} lead${take === 1 ? '' : 's'} to ${nameOf(to[0])}`
+          ? `Give ${take} lead${take === 1 ? '' : 's'} to ${firstName(nameOf(to[0]))}`
           : `Split ${take} leads: ${to.map((e, i) => `${first(nameOf(e))} ${sizes[i]}`).join(', ')}`;
 
   const run = async () => {
@@ -512,7 +513,7 @@ function AssignLeads({ myEmail }: { myEmail: string }) {
               {team.map((t) => (
                 <Chip
                   key={t.email}
-                  label={t.email === myEmail ? `${t.name} (you)` : t.name}
+                  label={t.email === myEmail ? `${firstName(t.name)} (you)` : firstName(t.name)}
                   tone="sun"
                   selected={to.includes(t.email)}
                   onPress={() => setTo((l) => toggle(l, t.email))}

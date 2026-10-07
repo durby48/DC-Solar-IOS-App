@@ -6,6 +6,7 @@ import { Chip } from '@/components/ui';
 import { colors, radii, spacing } from '@/constants/theme';
 import { authorName } from '@/lib/crmWorkspace';
 import { TimeChips } from '@/components/TimeChips';
+import { firstName } from '@/lib/staffNames';
 import {
   fetchAppointmentStaff,
   APPOINTMENT_KINDS,
@@ -201,7 +202,7 @@ export function AppointmentComposer({
       <View style={styles.chips}>
         {myEmail ? <Chip label="Me" tone="olive" selected={assignee?.toLowerCase() === myEmail.toLowerCase()} onPress={() => setAssignee(myEmail)} /> : null}
         {others.map((r) => (
-          <Chip key={r.email} label={r.name.split(' ')[0] || r.name} tone="olive" selected={assignee?.toLowerCase() === r.email.toLowerCase()} onPress={() => setAssignee(r.email)} />
+          <Chip key={r.email} label={firstName(r.name)} tone="olive" selected={assignee?.toLowerCase() === r.email.toLowerCase()} onPress={() => setAssignee(r.email)} />
         ))}
         <Chip label="Nobody yet" tone="neutral" selected={assignee === null} onPress={() => setAssignee(null)} />
       </View>
