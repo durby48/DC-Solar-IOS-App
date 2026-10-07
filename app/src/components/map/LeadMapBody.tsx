@@ -94,6 +94,10 @@ export function LeadMapBody({
   const [stormKind, setStormKind] = useState<StormKind>('hail');
   /** A storm key (`hail:YYYY-MM-DD`) or an overview window. */
   const [stormPick, setStormPick] = useState<string | null>(stormDay ? `hail:${stormDay}` : null);
+  // The storm the USER tapped (or the one a link opened). Only that zooms the
+  // map — the automatic pick when Storms turns on never moves it (Carson,
+  // 2026-10-09: turning Storms on zoomed him out across the region).
+  const [fitPick, setFitPick] = useState<string | null>(stormDay ? `hail:${stormDay}` : null);
   const [radar, setRadar] = useState(false);
   const [warningsOn, setWarningsOn] = useState(false);
   const [labels, setLabels] = useState(true);
@@ -184,10 +188,11 @@ export function LeadMapBody({
       warnings: warningsOn ? warnings : [],
       reports: stormReports,
       highlight,
-      // Only picking ONE storm moves the map; overviews and filters never do.
-      fitKey: pickedStorm ? stormPick : null,
+      // Only TAPPING one storm moves the map; turning Storms on, overviews and
+      // filters never do.
+      fitKey: pickedStorm && fitPick === stormPick ? stormPick : null,
     };
-  }, [stormsOn, radar, warningsOn, warnings, stormReports, highlight, stormPick, pickedStorm]);
+  }, [stormsOn, radar, warningsOn, warnings, stormReports, highlight, stormPick, pickedStorm, fitPick]);
   const hitLeads = highlight ? shown.filter((p) => highlight.has(p.key) && p.stage !== 'customer').length : 0;
   const hitCustomers = highlight ? shown.filter((p) => highlight.has(p.key) && p.stage === 'customer').length : 0;
 
@@ -245,7 +250,10 @@ export function LeadMapBody({
           <Pressable
             onPress={() => {
               setStormsOn((v) => !v);
-              if (stormsOn) setStormPick(null);
+              if (stormsOn) {
+                setStormPick(null);
+                setFitPick(null);
+              }
             }}
             style={[styles.stormsButton, stormsOn && styles.stormsButtonOn]}
             accessibilityRole="switch"
@@ -262,6 +270,7 @@ export function LeadMapBody({
                   onPress={() => {
                     setStormKind(k);
                     setStormPick(null);
+                    setFitPick(null);
                   }}
                   style={[styles.kindChip, stormKind === k && styles.kindChipOn]}>
                   <Text style={[styles.kindChipText, stormKind === k && styles.kindChipTextOn]}>
@@ -287,7 +296,13 @@ export function LeadMapBody({
                 listed.slice(0, 40).map((st) => {
                   const on = stormPick === st.key;
                   return (
-                    <Pressable key={st.key} onPress={() => setStormPick(st.key)} style={[styles.stormChip, on && styles.stormChipOn]}>
+                    <Pressable
+                      key={st.key}
+                      onPress={() => {
+                        setStormPick(st.key);
+                        setFitPick(st.key);
+                      }}
+                      style={[styles.stormChip, on && styles.stormChipOn]}>
                       <Text style={[styles.stormChipTitle, on && styles.stormChipTextOn]}>
                         {stormDayLabel(st.day)}
                         {st.kind === 'hail' ? ` · ${hailLabel(st.maxSize)}` : st.maxSize ? ` · ${st.maxSize} mph` : ''}
