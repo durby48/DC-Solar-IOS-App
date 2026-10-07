@@ -7,6 +7,8 @@ import { CustomerContacts } from '@/components/contacts/CustomerContacts';
 import { AppointmentComposer, AppointmentItem } from '@/components/crm/workspace/Appointments';
 import { CurrentJobCard, StagePillControl } from '@/components/crm/workspace/CurrentJobCard';
 import { BookVisitForm, VisitCard } from '@/components/crm/workspace/ServiceVisit';
+import { KEYPAD_FAB_GUTTER } from '@/components/KeypadFab';
+import { RecordMiniMap } from '@/components/map/RecordMiniMap';
 import { TaskComposer } from '@/components/crm/workspace/TaskComposer';
 import { TaskItem } from '@/components/crm/workspace/TaskItem';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
@@ -272,7 +274,9 @@ export function DetailPanel({
   return (
     <ScrollView
       style={styles.column}
-      contentContainerStyle={styles.content}
+      // Sales: the Keypad button floats top-right (KeypadFab), so the first
+      // card starts below it.
+      contentContainerStyle={[styles.content, isSales && { paddingTop: KEYPAD_FAB_GUTTER }]}
       keyboardShouldPersistTaps="handled"
       automaticallyAdjustKeyboardInsets>
       {onClose ? (
@@ -720,6 +724,25 @@ export function DetailPanel({
           )}
         </Section>
       ) : null}
+
+      {/* Where it is (2026-10-09): a satellite picture with a pin; a tap opens
+          the full Lead map zoomed in on it, every other pin still shown. */}
+      {(() => {
+        const src = record.kind === 'lead' ? record.lead : record.customer;
+        const lat = (src as { lat?: number | null } | null)?.lat;
+        const lng = (src as { lng?: number | null } | null)?.lng;
+        if (lat == null || lng == null) return null;
+        return (
+          <Section title="Map">
+            <RecordMiniMap
+              lat={lat}
+              lng={lng}
+              approx={(src as { geocode_status?: string | null } | null)?.geocode_status === 'approx'}
+              onOpen={() => router.push({ pathname: '/lead-map', params: { focus: record.key } } as never)}
+            />
+          </Section>
+        );
+      })()}
     </ScrollView>
   );
 }

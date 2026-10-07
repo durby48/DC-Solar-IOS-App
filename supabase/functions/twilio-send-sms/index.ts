@@ -429,16 +429,9 @@ Deno.serve(async (req) => {
       if (lead.sms_opt_out_at) {
         return fail(400, 'opted_out', optedOutMessage(who));
       }
-      // Imported without text consent (2026-10-07): call first. Clears by
-      // itself after a connected call or when they text in
-      // (messages_unlock_call_first).
-      if (lead.call_first) {
-        return fail(
-          409,
-          'call_first',
-          `${who} has not agreed to texts yet — call them first. Texting unlocks after a connected call, or once they text you.`,
-        );
-      }
+      // 2026-10-09 (Carson): imported leads are no longer blocked from texts
+      // until a call. `call_first` stays on the lead (the CRM's "Call first"
+      // filter still finds them); it just does not stop a send.
       to = payload.to ? toE164(payload.to) : lead.phone_e164;
       if (!to) {
         return fail(

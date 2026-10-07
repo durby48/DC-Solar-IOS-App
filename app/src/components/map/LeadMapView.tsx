@@ -13,6 +13,9 @@ import { type MapPoint } from '@/lib/leadMap';
  * this says so and opens the web map, where it already works.
  * LeadMapView.web.tsx is the real map.
  */
+/** False until the native build ships react-native-maps; the body hides "See the roof" on false. */
+export const NATIVE_MAP = false;
+
 export function LeadMapView({
   points,
 }: {
@@ -20,6 +23,7 @@ export function LeadMapView({
   selectedKey: string | null;
   onSelect: (key: string | null) => void;
   roof?: { key: string; n: number } | null;
+  focusKey?: string | null;
 }) {
   return (
     <View style={styles.card}>

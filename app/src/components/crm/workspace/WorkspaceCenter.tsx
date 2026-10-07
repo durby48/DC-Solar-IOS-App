@@ -23,6 +23,7 @@ import { supabase } from '@/lib/supabase';
 import { useMyBrochureLink } from '@/lib/brochure';
 import { inAppCallingSupported } from '@/lib/voice';
 import { personName } from '@/lib/staffNames';
+import { KEYPAD_FAB_GUTTER } from '@/components/KeypadFab';
 
 /**
  * The middle column: the relationship's communication, three ways.
@@ -243,7 +244,7 @@ export function WorkspaceCenter({
   };
 
   const header = (
-    <View style={styles.header}>
+    <View style={[styles.header, isSales && { paddingRight: KEYPAD_FAB_GUTTER }]}>
       <View style={styles.headerBody}>
         <Text style={styles.headerName} numberOfLines={1}>
           {record.name}
@@ -355,7 +356,6 @@ export function WorkspaceCenter({
           smsReady={smsReady && Boolean(phone)}
           optedOut={record.optedOut}
           optedOutAt={record.customer?.sms_opt_out_at ?? null}
-          callFirst={record.kind === 'lead' && record.lead?.call_first === true && !bookedCustomerId}
           jobId={record.currentJob?.id ?? null}
           templates={templates}
           templateVars={templateVars}

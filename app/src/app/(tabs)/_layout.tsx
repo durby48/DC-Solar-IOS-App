@@ -152,8 +152,8 @@ function useStaffGate() {
  *                the CRM hub, `/crm`'s redirect and deep links keep working.
  *
  * SALES (2026-10-06): a `sales` login gets its own bar — Home (the Sales
- * Home, `components/sales/SalesHome`), CRM, Calendar (`schedule`), Keypad,
- * Settings. Every crew/admin tab is `href: null` for them, and
+ * Home, `components/sales/SalesHome`), CRM, Calendar (`schedule`), Lead map
+ * (`map`, 2026-10-09 — the Keypad moved to a top-right button), Settings. Every crew/admin tab is `href: null` for them, and
  * `lib/salesConfinement.ts` moves them off any path they have no screen on.
  */
 export default function TabsLayout() {
@@ -270,16 +270,18 @@ export default function TabsLayout() {
           ...(salesOnly ? { href: null } : {}),
         }}
       />
-      {/* Sales only (2026-10-06): their dial pad and their account screen.
-          Everyone else has the Phone app and the Menu tab instead. */}
+      {/* Sales only (2026-10-09): the Lead map took the Keypad's place in the
+          bar. The keypad is still a route (`/keypad`), opened by the round
+          button top-right on every sales screen (components/KeypadFab). */}
       <Tabs.Screen
-        name="keypad"
+        name="map"
         options={{
-          title: 'Keypad',
-          tabBarIcon: ({ focused }) => <TabIcon name="keypad" focused={focused} />,
+          title: 'Lead map',
+          tabBarIcon: ({ focused }) => <TabIcon name="map" focused={focused} />,
           ...(salesOnly ? {} : { href: null }),
         }}
       />
+      <Tabs.Screen name="keypad" options={{ title: 'Keypad', href: null }} />
       <Tabs.Screen
         name="settings"
         options={{

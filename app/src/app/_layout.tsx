@@ -20,6 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ConnectionBanner } from '@/components/ConnectionBanner';
 import { DevViewFrame } from '@/components/DevViewBanner';
+import { KeypadFab } from '@/components/KeypadFab';
 import { colors } from '@/constants/theme';
 import { installProblemCapture, reportAppOpen, reportDiagnostic } from '@/lib/diagnostics';
 import { useNotificationRouting } from '@/lib/notificationRouter';
@@ -255,6 +256,8 @@ export default function RootLayout() {
             <Stack.Screen name="hub/[key]" options={{ title: '' }} />
             <Stack.Screen name="inbox/compose" options={{ title: 'New Email' }} />
           </Stack>
+          {/* Sales: the Keypad button, top-right on every screen (2026-10-09). */}
+          <KeypadFab />
         </DevViewFrame>
       </ThemeProvider>
     </GestureHandlerRootView>

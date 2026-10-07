@@ -33,25 +33,32 @@ const DARK_TILES_STYLE = 'dc-dark-tiles-style';
 const BASEMAP_KEY = 'dcsolar.leadmap.basemap';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
 
+/** Satellite unless the person switched to Map (2026-10-09: satellite first, to see panels). */
 function rememberedBasemap(): 'Map' | 'Satellite' {
   try {
-    return localStorage.getItem(BASEMAP_KEY) === 'Satellite' ? 'Satellite' : 'Map';
+    return localStorage.getItem(BASEMAP_KEY) === 'Map' ? 'Map' : 'Satellite';
   } catch {
-    return 'Map';
+    return 'Satellite';
   }
 }
+
+/** On a native build the map is real (react-native-maps); here it always is. */
+export const NATIVE_MAP = true;
 
 export function LeadMapView({
   points,
   selectedKey,
   onSelect,
   roof,
+  focusKey,
 }: {
   points: MapPoint[];
   selectedKey: string | null;
   onSelect: (key: string | null) => void;
   /** Fly to this pin at roof level on Satellite; `n` changes on every request. */
   roof?: { key: string; n: number } | null;
+  /** Start zoomed in on this pin, on Satellite (opened from a record's panel map). */
+  focusKey?: string | null;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [L, setL] = useState<typeof Leaflet | null>(null);
@@ -60,6 +67,7 @@ export function LeadMapView({
   const fitted = useRef(false);
   // Bounds waiting for the box to have a real size (see the ResizeObserver).
   const pendingFit = useRef<Leaflet.LatLngBounds | null>(null);
+  const pendingCenter = useRef<Leaflet.LatLngTuple | null>(null);
   const basemaps = useRef<{ Map: Leaflet.Layer; Satellite: Leaflet.Layer } | null>(null);
   const select = useRef(onSelect);
   select.current = onSelect;
@@ -98,7 +106,7 @@ export function LeadMapView({
       L.tileLayer(`${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19 }),
     ]);
     basemaps.current = { Map: street, Satellite: satellite };
-    (rememberedBasemap() === 'Satellite' ? satellite : street).addTo(m);
+    (focusKey || rememberedBasemap() === 'Satellite' ? satellite : street).addTo(m);
     L.control.layers({ Map: street, Satellite: satellite }, undefined, { position: 'topright' }).addTo(m);
     m.on('baselayerchange', (e: Leaflet.LayersControlEvent) => {
       try {
@@ -115,6 +123,10 @@ export function LeadMapView({
     // change, and do the first fit-to-pins once there is a real width.
     const observer = new ResizeObserver(() => {
       m.invalidateSize();
+      if (pendingCenter.current && m.getSize().x > 0) {
+        m.setView(pendingCenter.current, 18);
+        pendingCenter.current = null;
+      }
       if (pendingFit.current && m.getSize().x > 0) {
         m.fitBounds(pendingFit.current, { padding: [30, 30], maxZoom: 13 });
         pendingFit.current = null;
@@ -129,8 +141,9 @@ export function LeadMapView({
       basemaps.current = null;
       fitted.current = false;
       pendingFit.current = null;
+      pendingCenter.current = null;
     };
-  }, [L]);
+  }, [L]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const m = map.current;
@@ -154,6 +167,15 @@ export function LeadMapView({
       });
       dot.addTo(group);
     }
+    const focus = focusKey ? points.find((p) => p.key === focusKey) : undefined;
+    if (!fitted.current && focus) {
+      // Opened from a record: start on it at roof level; the rest still show.
+      fitted.current = true;
+      const center: Leaflet.LatLngTuple = [focus.lat, focus.lng];
+      m.invalidateSize();
+      if (m.getSize().x > 0) m.setView(center, 18);
+      else pendingCenter.current = center;
+    }
     if (!fitted.current && points.length > 0) {
       fitted.current = true;
       const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng] as Leaflet.LatLngTuple));
@@ -161,7 +183,7 @@ export function LeadMapView({
       if (m.getSize().x > 0) m.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
       else pendingFit.current = bounds; // the ResizeObserver fits it
     }
-  }, [L, points, selectedKey]);
+  }, [L, points, selectedKey, focusKey]);
 
   // "See the roof": Satellite on, then fly to the pin at roof level.
   useEffect(() => {
