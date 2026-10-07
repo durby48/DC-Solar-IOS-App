@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Stack, useFocusEffect } from 'expo-router';
+import { router, Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,7 +12,7 @@ import { fetchWorkspaceRecords, type WorkspaceRecord } from '@/lib/crmWorkspace'
 import { assignLeads } from '@/lib/leadImport';
 import { TEMPERATURE_META, TEMPERATURES, type LeadTemperature } from '@/lib/leadTemperature';
 import { useRoleGate } from '@/lib/role';
-import { fetchSalesTeam } from '@/lib/sales';
+import { fetchSalesTeam, removeLeads, removeSummary } from '@/lib/sales';
 import { firstName } from '@/lib/staffNames';
 
 /**
@@ -80,10 +80,15 @@ export default function AssignLeadsScreen() {
       </Screen>
     );
   }
-  return <AssignLeads myEmail={gate.role?.email.toLowerCase() ?? ''} />;
+  return (
+    <AssignLeads
+      myEmail={gate.role?.email.toLowerCase() ?? ''}
+      canRestore={gate.role?.isAdmin === true || gate.role?.isDeveloper === true}
+    />
+  );
 }
 
-function AssignLeads({ myEmail }: { myEmail: string }) {
+function AssignLeads({ myEmail, canRestore }: { myEmail: string; canRestore: boolean }) {
   const insets = useSafeAreaInsets();
   const [leads, setLeads] = useState<WorkspaceRecord[] | null>(null);
   const [team, setTeam] = useState<{ email: string; name: string }[]>([]);
@@ -101,6 +106,8 @@ function AssignLeads({ myEmail }: { myEmail: string }) {
   // Selection + the panel
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sheetOpen, setSheetOpen] = useState(false);
+  // Remove the ticked leads (2026-10-08): a confirm sheet, then remove_leads().
+  const [removeOpen, setRemoveOpen] = useState(false);
   const [howMany, setHowMany] = useState<number | 'all'>(25);
   const [typed, setTyped] = useState('');
   const [to, setTo] = useState<string[]>([]);
@@ -227,6 +234,22 @@ function AssignLeads({ myEmail }: { myEmail: string }) {
     setTo([]);
     setTyped('');
     setNote({ ok: true, text: `${done.join(', ')}.` });
+    void load();
+  };
+
+  const runRemove = async () => {
+    const ids = matches.filter((r) => selected.has(r.id)).map((r) => r.id);
+    if (ids.length === 0) return;
+    setBusy(true);
+    const result = await removeLeads(ids);
+    setBusy(false);
+    setRemoveOpen(false);
+    if (result.ok) {
+      setSelected(new Set());
+      setNote({ ok: result.removed > 0, text: removeSummary(result) });
+    } else {
+      setNote({ ok: false, text: result.message });
+    }
     void load();
   };
 
@@ -404,6 +427,14 @@ function AssignLeads({ myEmail }: { myEmail: string }) {
         ListHeaderComponent={header}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[styles.list, { paddingBottom: 96 + insets.bottom }]}
+        ListFooterComponent={
+          canRestore ? (
+            <Pressable onPress={() => router.push('/removed-leads' as never)} style={styles.removedLink} hitSlop={8}>
+              <Ionicons name="trash-outline" size={14} color={colors.inkSoft} />
+              <Text style={styles.removedLinkText}>Removed leads</Text>
+            </Pressable>
+          ) : null
+        }
         ListEmptyComponent={
           <AppText variant="body" color={colors.textSecondary} style={styles.empty}>
             No leads match. Clear a filter or the search.
@@ -450,7 +481,15 @@ function AssignLeads({ myEmail }: { myEmail: string }) {
         }}
       />
 
-      <View style={[styles.bottom, { paddingBottom: spacing.sm + insets.bottom }]}>
+      <View style={[styles.bottom, styles.bottomRow, { paddingBottom: spacing.sm + insets.bottom }]}>
+        {picking ? (
+          <Pressable
+            onPress={() => setRemoveOpen(true)}
+            style={({ pressed }) => [styles.removeButton, pressed && styles.pressed]}
+            accessibilityLabel={`Remove ${selectedInList} selected`}>
+            <Ionicons name="trash-outline" size={16} color={colors.danger} />
+          </Pressable>
+        ) : null}
         <Pressable
           onPress={() => {
             setTo([]);
@@ -464,6 +503,36 @@ function AssignLeads({ myEmail }: { myEmail: string }) {
           </Text>
         </Pressable>
       </View>
+
+      <Modal visible={removeOpen} transparent animationType="slide" onRequestClose={() => setRemoveOpen(false)}>
+        <Pressable style={styles.backdrop} onPress={() => !busy && setRemoveOpen(false)} />
+        <View style={[styles.sheet, { paddingBottom: spacing.md + insets.bottom }]}>
+          <View style={styles.sheetHead}>
+            <Text style={styles.sheetTitle}>
+              Remove {selectedInList} lead{selectedInList === 1 ? '' : 's'}?
+            </Text>
+            <Pressable onPress={() => setRemoveOpen(false)} hitSlop={8} disabled={busy}>
+              <Ionicons name="close" size={20} color={colors.inkSoft} />
+            </Pressable>
+          </View>
+          <AppText variant="body" color={colors.textSecondary}>
+            They disappear from the CRM, the map and every count. Leads with a booked visit are skipped. An admin can
+            restore them from Removed leads.
+          </AppText>
+          <Pressable
+            onPress={() => void runRemove()}
+            disabled={busy}
+            style={({ pressed }) => [styles.mainButton, styles.removeConfirm, (pressed || busy) && styles.pressed]}>
+            {busy ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.removeConfirmText}>
+                Remove {selectedInList} lead{selectedInList === 1 ? '' : 's'}
+              </Text>
+            )}
+          </Pressable>
+        </View>
+      </Modal>
 
       <Modal visible={sheetOpen} transparent animationType="slide" onRequestClose={() => setSheetOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => !busy && setSheetOpen(false)} />
@@ -613,7 +682,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   mainButton: {
-    width: '100%',
+    flex: 1,
     maxWidth: 520,
     flexDirection: 'row',
     alignItems: 'center',
@@ -626,6 +695,19 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   mainText: { color: colors.textOnAction, fontSize: 14, fontWeight: '800', textAlign: 'center' },
+  bottomRow: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm },
+  removeButton: {
+    width: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.danger,
+  },
+  removeConfirm: { backgroundColor: colors.danger },
+  removeConfirmText: { color: '#fff', fontSize: 14, fontWeight: '800', textAlign: 'center' },
+  removedLink: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', padding: spacing.lg },
+  removedLinkText: { color: colors.inkSoft, fontSize: 13, fontWeight: '700' },
   off: { opacity: 0.45 },
   pressed: { opacity: 0.6 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' },

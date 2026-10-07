@@ -71,6 +71,8 @@ export interface Lead {
   installer?: string | null;
   /** Hot / Warm / Cold, set by the rep (2026-10-08). */
   temperature?: LeadTemperature | null;
+  /** Who added it (an import: the importer). A rep may remove leads they added by hand. */
+  created_by?: string | null;
 }
 
 export interface SalesRep {
@@ -149,9 +151,10 @@ export async function fetchSalesData(): Promise<SalesData | null> {
       supabase
         .from('leads')
         .select(
-          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature',
+          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by',
         )
         .eq('company', COMPANY)
+        .is('removed_at', null)
         .order('created_at', { ascending: false }),
       supabase
         .from('jobs')
@@ -298,9 +301,10 @@ export async function fetchOpenLeads(): Promise<Lead[]> {
     const { data, error } = await supabase
       .from('leads')
       .select(
-        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature',
+        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by',
       )
       .eq('company', COMPANY)
+      .is('removed_at', null)
       .or('converted_job_id.is.null,status.in.(scheduled,visit_done)')
       .order('created_at', { ascending: false });
     if (error || !data) return [];
@@ -371,4 +375,79 @@ export async function setLeadStatus(
   const { error } = await supabase.from('leads').update(patch).eq('id', leadId);
   if (error) return { ok: false, message: error.message };
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Removing leads (2026-10-08) — 2026-10-08_remove_leads.sql
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove (hide) leads. Admins and the sales manager: any; a rep: leads they
+ * added by hand. Leads with a booked visit are skipped.
+ */
+export async function removeLeads(
+  ids: string[],
+): Promise<{ ok: true; removed: number; booked: number; notAllowed: number } | { ok: false; message: string }> {
+  try {
+    const { data, error } = await supabase.rpc('remove_leads', { p_ids: ids });
+    if (error) return { ok: false, message: error.message };
+    const r = (data ?? {}) as { removed?: number; booked?: number; not_allowed?: number };
+    return { ok: true, removed: Number(r.removed ?? 0), booked: Number(r.booked ?? 0), notAllowed: Number(r.not_allowed ?? 0) };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not remove.' };
+  }
+}
+
+/** "Removed 12 · 1 has a booked visit — cancel it first" */
+export function removeSummary(r: { removed: number; booked: number; notAllowed: number }): string {
+  const parts = [`Removed ${r.removed}`];
+  if (r.booked) parts.push(`${r.booked} ${r.booked === 1 ? 'has' : 'have'} a booked visit — cancel it first`);
+  if (r.notAllowed) parts.push(`${r.notAllowed} not yours to remove`);
+  return `${parts.join(' · ')}.`;
+}
+
+export interface RemovedLead {
+  id: string;
+  name: string;
+  address: string | null;
+  removedAt: string;
+  removedBy: string | null;
+}
+
+/** Admins: the removed leads, newest first. */
+export async function fetchRemovedLeads(): Promise<RemovedLead[]> {
+  try {
+    const { data, error } = await supabase
+      .from('leads')
+      .select('id, name, address, removed_at, removed_by')
+      .eq('company', COMPANY)
+      .not('removed_at', 'is', null)
+      .order('removed_at', { ascending: false });
+    if (error || !data) return [];
+    return (data as { id: string; name: string; address: string | null; removed_at: string; removed_by: string | null }[]).map(
+      (r) => ({ id: r.id, name: r.name, address: r.address, removedAt: r.removed_at, removedBy: r.removed_by }),
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function countRpc(fn: 'restore_leads' | 'delete_leads_forever', ids: string[]) {
+  try {
+    const { data, error } = await supabase.rpc(fn, { p_ids: ids });
+    if (error) return { ok: false as const, message: error.message };
+    return { ok: true as const, count: Number(data ?? 0) };
+  } catch (e) {
+    return { ok: false as const, message: e instanceof Error ? e.message : 'Something went wrong.' };
+  }
+}
+
+/** Admins: bring removed leads back. */
+export function restoreLeads(ids: string[]) {
+  return countRpc('restore_leads', ids);
+}
+
+/** Admins: delete removed leads for good (their tasks/appointments go too). */
+export function deleteLeadsForever(ids: string[]) {
+  return countRpc('delete_leads_forever', ids);
 }

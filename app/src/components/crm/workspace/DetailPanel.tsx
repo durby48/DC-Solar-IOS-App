@@ -21,7 +21,7 @@ import { isUpcoming, type LeadAppointment } from '@/lib/leadAppointments';
 import { updateLead } from '@/lib/leads';
 import { useRole } from '@/lib/role';
 import { TEMPERATURE_META, TEMPERATURES, type LeadTemperature } from '@/lib/leadTemperature';
-import { assignLead, setLeadStatus, setLeadTemperature, VISIT_DRIVEN_STATUSES, type LeadStatus } from '@/lib/sales';
+import { assignLead, removeLeads, removeSummary, setLeadStatus, setLeadTemperature, VISIT_DRIVEN_STATUSES, type LeadStatus } from '@/lib/sales';
 import { type Task } from '@/lib/tasks';
 import { firstName } from '@/lib/staffNames';
 
@@ -143,6 +143,8 @@ export function DetailPanel({
   const isSales = role?.isSales === true;
   const [editing, setEditing] = useState(false);
   const [tempBusy, setTempBusy] = useState<LeadTemperature | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [booking, setBooking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '' });
@@ -160,6 +162,7 @@ export function DetailPanel({
     setEditing(false);
     setError(null);
     setBooking(false);
+    setConfirmRemove(false);
     setNotice(null);
     setAddingTask(false);
     setShowDoneTasks(false);
@@ -210,6 +213,17 @@ export function DetailPanel({
     setStatusBusy(null);
     if (result.ok) onChanged();
     else setError(result.message);
+  };
+
+  // Remove (2026-10-08): hides the lead everywhere; an admin can restore it.
+  const removeLead = async () => {
+    setRemoving(true);
+    const result = await removeLeads([record.id]);
+    setRemoving(false);
+    setConfirmRemove(false);
+    if (!result.ok) setError(result.message);
+    else if (result.removed === 0) setError(removeSummary(result));
+    else onChanged();
   };
 
   // Hot / Warm / Cold (2026-10-08): one tap sets it, tapping it again clears.
@@ -474,6 +488,43 @@ export function DetailPanel({
             <Fact label="SMS consent" value={`Opted in ${shortDate(record.lead.sms_opt_in_at)} · ${record.lead.sms_opt_in_source?.split('@')[0] ?? 'form'}`} />
           ) : null}
           <Fact label={record.lead.source_ref ? 'Received' : 'Created'} value={shortDate(record.lead.created_at)} muted />
+          {(() => {
+            // Who may remove (mirrors remove_leads()): admins, the manager,
+            // developers; a rep only a lead they added by hand.
+            const mine =
+              !!myEmail &&
+              record.lead?.created_by?.toLowerCase() === myEmail.toLowerCase() &&
+              !record.lead?.import_batch;
+            const canRemove = role?.isAdmin || role?.isSalesManager || role?.isDeveloper || mine;
+            if (!canRemove) return null;
+            const booked = record.lead?.status === 'scheduled' || record.lead?.status === 'visit_done';
+            if (booked) {
+              return <Text style={styles.removeHint}>To remove this lead, cancel its visit first.</Text>;
+            }
+            return confirmRemove ? (
+              <View style={styles.removeBox}>
+                <Text style={styles.removeText}>
+                  Remove {record.name}? It disappears from the CRM, the map and every count. An admin can restore it.
+                </Text>
+                <View style={styles.formButtons}>
+                  <Pressable onPress={() => setConfirmRemove(false)} style={({ pressed }) => [styles.cancel, pressed && styles.pressed]}>
+                    <Text style={styles.cancelText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => void removeLead()}
+                    disabled={removing}
+                    style={({ pressed }) => [styles.removeGo, (pressed || removing) && styles.pressed]}>
+                    {removing ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.removeGoText}>Remove</Text>}
+                  </Pressable>
+                </View>
+              </View>
+            ) : (
+              <Pressable onPress={() => setConfirmRemove(true)} hitSlop={6} style={({ pressed }) => [styles.removeLink, pressed && styles.pressed]}>
+                <Ionicons name="trash-outline" size={14} color={colors.danger} />
+                <Text style={styles.removeLinkText}>Remove lead</Text>
+              </Pressable>
+            );
+          })()}
         </Section>
       ) : null}
 
@@ -700,6 +751,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   formButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.sm },
+  removeLink: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', marginTop: spacing.sm },
+  removeLinkText: { color: colors.danger, fontSize: 13, fontWeight: '700' },
+  removeHint: { color: colors.inkSoft, fontSize: 12, fontWeight: '600', marginTop: spacing.sm },
+  removeBox: { gap: spacing.sm, backgroundColor: colors.dangerSoft, borderRadius: radii.sm, padding: spacing.sm, marginTop: spacing.sm },
+  removeText: { color: colors.ink, fontSize: 13, fontWeight: '600' },
+  removeGo: { backgroundColor: colors.danger, paddingHorizontal: spacing.lg, paddingVertical: 6, borderRadius: radii.pill, minWidth: 80, alignItems: 'center' },
+  removeGoText: { color: '#fff', fontSize: 13, fontWeight: '800' },
   cancel: { paddingHorizontal: spacing.md, paddingVertical: 6, borderRadius: radii.pill },
   cancelText: { color: colors.inkSoft, fontSize: 13, fontWeight: '700' },
   save: { backgroundColor: colors.sun, paddingHorizontal: spacing.lg, paddingVertical: 6, borderRadius: radii.pill, minWidth: 70, alignItems: 'center' },
