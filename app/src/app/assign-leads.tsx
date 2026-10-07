@@ -38,7 +38,7 @@ import { fetchSalesTeam } from '@/lib/sales';
 
 type From = 'all' | 'unassigned' | string;
 type Order = 'oldest' | 'newest' | 'zip';
-const STAGES: Stage[] = ['prospect', 'contacted', 'closed', 'interested', 'booked'];
+const STAGES: Stage[] = ['prospect', 'contacted', 'interested', 'closed', 'booked'];
 const ORDER_LABEL: Record<Order, string> = { oldest: 'Oldest first', newest: 'Newest first', zip: 'By ZIP' };
 const OWNER_COLORS = ['#7C5CFF', '#2E9E6A', '#D9822B', '#2F7FD1', '#C2416B', '#8A6D3B'];
 

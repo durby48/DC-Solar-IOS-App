@@ -64,7 +64,7 @@ export const STAGE_LABEL: Record<Stage, string> = {
   customer: 'Customer',
   closed: 'Not interested',
 };
-export const STAGE_ORDER: Stage[] = ['prospect', 'contacted', 'closed', 'interested', 'booked', 'customer'];
+export const STAGE_ORDER: Stage[] = ['prospect', 'contacted', 'interested', 'closed', 'booked', 'customer'];
 
 export const CONTACT_LABEL: Record<ContactFilter, string> = {
   never: 'Never contacted',

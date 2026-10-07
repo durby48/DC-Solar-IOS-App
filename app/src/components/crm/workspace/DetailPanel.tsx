@@ -30,9 +30,9 @@ import { type Task } from '@/lib/tasks';
  * admins' side (projections, conversion into a customer and a job). The
  * four contact fields are what a visit cannot be booked without.
  */
-// Not interested sits left of Interested, in red (Carson, 2026-10-08).
-const SALES_STATUSES: LeadStatus[] = ['new', 'contacted', 'lost', 'interested', 'scheduled', 'visit_done'];
-const ADMIN_STATUSES: LeadStatus[] = ['new', 'contacted', 'lost', 'interested', 'scheduled', 'visit_done', 'estimating', 'won'];
+// Not interested sits right after Interested (Carson, 2026-10-08).
+const SALES_STATUSES: LeadStatus[] = ['new', 'contacted', 'interested', 'lost', 'scheduled', 'visit_done'];
+const ADMIN_STATUSES: LeadStatus[] = ['new', 'contacted', 'interested', 'lost', 'scheduled', 'visit_done', 'estimating', 'won'];
 /** A lead in one of these can be booked (B1); the database re-checks. */
 const BOOKABLE: readonly LeadStatus[] = ['new', 'contacted', 'interested'];
 const SALES_STATUS_LABEL: Partial<Record<LeadStatus, string>> = { new: 'Prospect', lost: 'Not interested' };
@@ -349,16 +349,11 @@ export function DetailPanel({
                   key={s}
                   onPress={() => void moveLead(s)}
                   disabled={statusBusy !== null || visitDriven}
-                  style={({ pressed }) => [
-                    styles.statusChip,
-                    s === 'lost' && styles.statusChipNo,
-                    active && (s === 'lost' ? styles.statusChipNoActive : styles.statusChipActive),
-                    pressed && styles.pressed,
-                  ]}>
+                  style={({ pressed }) => [styles.statusChip, active && styles.statusChipActive, pressed && styles.pressed]}>
                   {statusBusy === s ? (
                     <ActivityIndicator size="small" color={colors.ink} />
                   ) : (
-                    <Text style={[styles.statusChipText, s === 'lost' && styles.statusChipNoText, active && styles.statusChipTextActive]}>
+                    <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>
                       {(isSales ? SALES_STATUS_LABEL[s] : undefined) ?? LEAD_STATUS_LABEL[s]}
                     </Text>
                   )}
@@ -741,9 +736,6 @@ const styles = StyleSheet.create({
   notice: { color: colors.olive, fontSize: 12, fontWeight: '700' },
   statusChip: { paddingHorizontal: spacing.sm + 2, paddingVertical: 5, borderRadius: radii.pill, backgroundColor: colors.canvas, borderWidth: 1, borderColor: colors.line },
   statusChipActive: { backgroundColor: colors.olive, borderColor: colors.olive },
-  statusChipNo: { borderColor: colors.danger },
-  statusChipNoActive: { backgroundColor: colors.danger, borderColor: colors.danger },
-  statusChipNoText: { color: colors.danger },
   statusChipText: { color: colors.inkSoft, fontSize: 12, fontWeight: '700' },
   statusChipTextActive: { color: colors.textInverse },
   repButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
