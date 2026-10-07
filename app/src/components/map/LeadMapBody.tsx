@@ -20,16 +20,20 @@ import { fetchSalesTeam } from '@/lib/sales';
 import { useRoleGate } from '@/lib/role';
 import { firstName } from '@/lib/staffNames';
 import {
-  loadReportsForDay,
-  loadReportsWindow,
+  groupStorms,
+  inPath,
+  loadAllReports,
   loadWarnings,
   STORM_WINDOWS,
+  ZONE_LEGEND,
+  type MapStorm,
+  type StormKind,
   type StormLayers,
   type StormReportPoint,
   type StormWarning,
   type StormWindow,
 } from '@/lib/stormLayers';
-import { stormDayLabel } from '@/lib/storms';
+import { hailLabel, stormDayLabel } from '@/lib/storms';
 
 /**
  * The Lead map's body (2026-10-07; a component since 2026-10-09 so the
@@ -72,14 +76,19 @@ export function LeadMapBody({
   const [roof, setRoof] = useState<{ key: string; n: number } | null>(null);
   const placing = useRef(false);
 
-  // Storms (2026-10-09): radar, NWS warnings, NOAA hail / wind reports.
+  // Storms (2026-10-09, reworked): OFF until turned on; then a list of storms
+  // in two categories (Hail / Wind), the most recent one that hit someone
+  // picked; or an overview of a time window. Radar and NWS warnings are
+  // separate live-weather switches.
   const [stormsOn, setStormsOn] = useState(Boolean(stormDay));
-  const [radar, setRadar] = useState(!stormDay);
-  const [warningsOn, setWarningsOn] = useState(!stormDay);
-  const [reportsOn, setReportsOn] = useState(true);
-  const [stormWindow, setStormWindow] = useState<StormWindow | 'day'>(stormDay ? 'day' : '30d');
+  const [stormKind, setStormKind] = useState<StormKind>('hail');
+  /** A storm key (`hail:YYYY-MM-DD`) or an overview window. */
+  const [stormPick, setStormPick] = useState<string | null>(stormDay ? `hail:${stormDay}` : null);
+  const [radar, setRadar] = useState(false);
+  const [warningsOn, setWarningsOn] = useState(false);
+  const [labels, setLabels] = useState(true);
   const [warnings, setWarnings] = useState<StormWarning[]>([]);
-  const [reports, setReports] = useState<StormReportPoint[]>([]);
+  const [allReports, setAllReports] = useState<StormReportPoint[] | null>(null);
   useEffect(() => {
     if (!stormsOn || !warningsOn) return;
     let cancelled = false;
@@ -89,28 +98,13 @@ export function LeadMapBody({
     };
   }, [stormsOn, warningsOn]);
   useEffect(() => {
-    if (!stormsOn || !reportsOn) return;
+    if (!stormsOn || allReports) return;
     let cancelled = false;
-    const job =
-      stormWindow === 'day' && stormDay
-        ? loadReportsForDay(stormDay)
-        : loadReportsWindow(STORM_WINDOWS.find((w) => w.key === stormWindow)?.days ?? 30);
-    void job.then((r) => !cancelled && setReports(r));
+    void loadAllReports().then((r) => !cancelled && setAllReports(r));
     return () => {
       cancelled = true;
     };
-  }, [stormsOn, reportsOn, stormWindow, stormDay]);
-  const storms = useMemo<StormLayers | null>(() => {
-    if (!stormsOn) return null;
-    const shownReports = reportsOn ? reports : [];
-    return {
-      radar,
-      warnings: warningsOn ? warnings : [],
-      reports: shownReports,
-      fitTo: stormWindow === 'day' ? shownReports.filter((r) => r.kind === 'hail') : undefined,
-    };
-  }, [stormsOn, radar, warningsOn, warnings, reportsOn, reports, stormWindow]);
-
+  }, [stormsOn, allReports]);
   const load = useCallback(async () => {
     const result = await fetchMapPoints(isSales);
     setPoints(result.points);
@@ -148,6 +142,43 @@ export function LeadMapBody({
     return c;
   }, [points]);
   const selected = shown.find((p) => p.key === selectedKey) ?? null;
+
+  // Storms from the reports, with who (of the pins shown) is in each path.
+  const stormList = useMemo<MapStorm[]>(() => (allReports ? groupStorms(allReports, shown) : []), [allReports, shown]);
+  const listed = useMemo(
+    () => stormList.filter((st) => st.kind === stormKind && st.affected.length > 0),
+    [stormList, stormKind],
+  );
+  // Most recent storm that hit someone, once the list is known.
+  useEffect(() => {
+    if (!stormsOn || stormPick || listed.length === 0) return;
+    setStormPick(listed[0].key);
+  }, [stormsOn, stormPick, listed]);
+  const pickedStorm = stormPick && !stormPick.startsWith('window:') ? (stormList.find((st) => st.key === stormPick) ?? null) : null;
+  const pickedWindow = stormPick?.startsWith('window:') ? (stormPick.slice(7) as StormWindow) : null;
+  const windowReports = useMemo(() => {
+    if (!pickedWindow || !allReports) return [];
+    const days = STORM_WINDOWS.find((w) => w.key === pickedWindow)?.days ?? 30;
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    return allReports.filter((r) => r.kind === stormKind && r.day >= cutoff && (r.kind === 'wind' || (r.size ?? 0) >= 1));
+  }, [pickedWindow, allReports, stormKind]);
+  const stormReports = pickedStorm ? pickedStorm.reports : windowReports;
+  const highlight = useMemo(() => {
+    if (!stormsOn || stormReports.length === 0) return null;
+    return new Set(pickedStorm ? pickedStorm.affected : inPath(shown, windowReports));
+  }, [stormsOn, stormReports, pickedStorm, shown, windowReports]);
+  const storms = useMemo<StormLayers | null>(() => {
+    if (!stormsOn) return null;
+    return {
+      radar,
+      warnings: warningsOn ? warnings : [],
+      reports: stormReports,
+      highlight,
+      fitKey: stormPick,
+    };
+  }, [stormsOn, radar, warningsOn, warnings, stormReports, highlight, stormPick]);
+  const hitLeads = highlight ? shown.filter((p) => highlight.has(p.key) && p.stage !== 'customer').length : 0;
+  const hitCustomers = highlight ? shown.filter((p) => highlight.has(p.key) && p.stage === 'customer').length : 0;
 
   const toggle = (s: MapStage) =>
     setHidden((prev) => {
@@ -194,7 +225,17 @@ export function LeadMapBody({
             {unplaced > 0 ? ` · ${unplaced} address${unplaced === 1 ? '' : 'es'} could not be placed` : ''}
           </Text>
           <Pressable
-            onPress={() => setStormsOn((v) => !v)}
+            onPress={() => setLabels((v) => !v)}
+            style={[styles.stormsButton, styles.labelsButton, labels && styles.labelsButtonOn]}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: labels }}>
+            <Text style={[styles.stormsButtonText, labels && styles.stormsButtonTextOn]}>Labels</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setStormsOn((v) => !v);
+              if (stormsOn) setStormPick(null);
+            }}
             style={[styles.stormsButton, stormsOn && styles.stormsButtonOn]}
             accessibilityRole="switch"
             accessibilityState={{ checked: stormsOn }}>
@@ -202,27 +243,64 @@ export function LeadMapBody({
           </Pressable>
         </View>
         {stormsOn ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            {[
-              { label: 'Radar', on: radar, set: setRadar },
-              { label: 'Warnings', on: warningsOn, set: setWarningsOn },
-              { label: 'Hail & wind', on: reportsOn, set: setReportsOn },
-            ].map((t) => (
-              <Pressable key={t.label} onPress={() => t.set(!t.on)} style={[styles.chip, !t.on && styles.chipOff]}>
-                <Text style={[styles.chipText, !t.on && styles.chipTextOff]}>{t.label}</Text>
-              </Pressable>
-            ))}
-            {stormDay ? (
-              <Pressable onPress={() => setStormWindow('day')} style={[styles.repChip, stormWindow === 'day' && styles.repChipOn]}>
-                <Text style={[styles.repChipText, stormWindow === 'day' && styles.repChipTextOn]}>{stormDayLabel(stormDay, false)} storm</Text>
-              </Pressable>
-            ) : null}
-            {STORM_WINDOWS.map((w) => (
-              <Pressable key={w.key} onPress={() => setStormWindow(w.key)} style={[styles.repChip, stormWindow === w.key && styles.repChipOn]}>
-                <Text style={[styles.repChipText, stormWindow === w.key && styles.repChipTextOn]}>{w.label}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+          <>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              {(['hail', 'wind'] as StormKind[]).map((k) => (
+                <Pressable
+                  key={k}
+                  onPress={() => {
+                    setStormKind(k);
+                    setStormPick(null);
+                  }}
+                  style={[styles.kindChip, stormKind === k && styles.kindChipOn]}>
+                  <Text style={[styles.kindChipText, stormKind === k && styles.kindChipTextOn]}>
+                    {k === 'hail' ? 'Hail' : 'Wind'}
+                  </Text>
+                </Pressable>
+              ))}
+              {[
+                { label: 'Radar', on: radar, set: setRadar },
+                { label: 'Warnings', on: warningsOn, set: setWarningsOn },
+              ].map((t) => (
+                <Pressable key={t.label} onPress={() => t.set(!t.on)} style={[styles.chip, !t.on && styles.chipOff]}>
+                  <Text style={[styles.chipText, !t.on && styles.chipTextOff]}>{t.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              {allReports === null ? (
+                <Text style={styles.summary}>Loading storms…</Text>
+              ) : listed.length === 0 ? (
+                <Text style={styles.summary}>No {stormKind} storms hit these pins in the last 2 years.</Text>
+              ) : (
+                listed.slice(0, 40).map((st) => {
+                  const on = stormPick === st.key;
+                  return (
+                    <Pressable key={st.key} onPress={() => setStormPick(st.key)} style={[styles.stormChip, on && styles.stormChipOn]}>
+                      <Text style={[styles.stormChipTitle, on && styles.stormChipTextOn]}>
+                        {stormDayLabel(st.day, false)}
+                        {st.kind === 'hail' ? ` · ${hailLabel(st.maxSize)}` : st.maxSize ? ` · ${st.maxSize} mph` : ''}
+                      </Text>
+                      <Text style={[styles.stormChipSub, on && styles.stormChipTextOn]} numberOfLines={1}>
+                        {st.affected.length} in path{st.place ? ` · ${st.place}` : ''}
+                      </Text>
+                    </Pressable>
+                  );
+                })
+              )}
+            </ScrollView>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              <Text style={styles.overviewLabel}>All storms:</Text>
+              {STORM_WINDOWS.map((w) => {
+                const on = stormPick === `window:${w.key}`;
+                return (
+                  <Pressable key={w.key} onPress={() => setStormPick(`window:${w.key}`)} style={[styles.repChip, on && styles.repChipOn]}>
+                    <Text style={[styles.repChipText, on && styles.repChipTextOn]}>{w.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </>
         ) : null}
       </View>
 
@@ -237,9 +315,57 @@ export function LeadMapBody({
             roof={roof}
             focusKey={focusKey}
             storms={storms}
+            labels={labels}
           />
         )}
       </View>
+
+      {stormsOn && stormReports.length > 0 && !selected ? (
+        <Card style={styles.card}>
+          <View style={styles.legendRow}>
+            {stormKind === 'hail' ? (
+              ZONE_LEGEND.map((l) => (
+                <View key={l.label} style={styles.legendItem}>
+                  <View style={[styles.legendSwatch, { backgroundColor: l.color }]} />
+                  <Text style={styles.legendText}>{l.label}</Text>
+                </View>
+              ))
+            ) : (
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, { backgroundColor: '#FF8C1A' }]} />
+                <Text style={styles.legendText}>Damaging wind</Text>
+              </View>
+            )}
+            <Text style={styles.legendText}>· shaded = within 3 mi</Text>
+          </View>
+          <AppText variant="bodyStrong">
+            {pickedStorm
+              ? `${stormDayLabel(pickedStorm.day, false)} ${pickedStorm.kind}`
+              : `All ${stormKind} storms · ${STORM_WINDOWS.find((w) => w.key === pickedWindow)?.label ?? ''}`}
+            {' · '}
+            {hitLeads} lead{hitLeads === 1 ? '' : 's'} · {hitCustomers} customer{hitCustomers === 1 ? '' : 's'} in the path
+          </AppText>
+          {pickedStorm && pickedStorm.kind === 'hail' ? (
+            <View style={styles.cardButtons}>
+              <Button
+                label="Open Storm report"
+                icon="thunderstorm-outline"
+                size="sm"
+                onPress={() => router.push({ pathname: '/storm-reports/[day]', params: { day: pickedStorm.day } } as never)}
+              />
+              {isAdmin ? (
+                <Button
+                  label="Assign these leads"
+                  icon="people-outline"
+                  size="sm"
+                  variant="secondary"
+                  onPress={() => router.push({ pathname: '/assign-leads', params: { storm: pickedStorm.day } } as never)}
+                />
+              ) : null}
+            </View>
+          ) : null}
+        </Card>
+      ) : null}
 
       {selected ? (
         <Card style={styles.card}>
@@ -307,6 +433,22 @@ const styles = StyleSheet.create({
   stormsButtonOn: { backgroundColor: colors.ocean },
   stormsButtonText: { color: colors.ink, fontSize: 12, fontWeight: '800' },
   stormsButtonTextOn: { color: colors.textInverse },
+  labelsButton: { marginRight: spacing.xs },
+  labelsButtonOn: { backgroundColor: colors.olive },
+  kindChip: { paddingHorizontal: spacing.md, paddingVertical: 5, borderRadius: radii.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line },
+  kindChipOn: { backgroundColor: colors.ocean, borderColor: colors.ocean },
+  kindChipText: { color: colors.ink, fontSize: 12, fontWeight: '800' },
+  kindChipTextOn: { color: colors.textInverse },
+  stormChip: { paddingHorizontal: spacing.sm + 2, paddingVertical: 6, borderRadius: radii.md, backgroundColor: colors.surface, minWidth: 120, maxWidth: 220 },
+  stormChipOn: { backgroundColor: colors.ocean },
+  stormChipTitle: { color: colors.ink, fontSize: 12, fontWeight: '800' },
+  stormChipSub: { color: colors.inkSoft, fontSize: 11, fontWeight: '600' },
+  stormChipTextOn: { color: colors.textInverse },
+  overviewLabel: { color: colors.inkSoft, fontSize: 12, fontWeight: '700', alignSelf: 'center' },
+  legendRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  legendSwatch: { width: 12, height: 12, borderRadius: 6, opacity: 0.85 },
+  legendText: { color: colors.inkSoft, fontSize: 11, fontWeight: '700' },
   mapWrap: { flex: 1, padding: spacing.md },
   loading: { marginTop: spacing.xl },
   card: { marginHorizontal: spacing.md, marginBottom: spacing.md, gap: spacing.sm },

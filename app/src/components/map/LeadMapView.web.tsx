@@ -4,37 +4,41 @@ import { useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 
 import { STAGE_COLOR, type MapPoint } from '@/lib/leadMap';
-import { type StormLayers } from '@/lib/stormLayers';
+import { ZONE_METERS, zoneColor, type StormLayers } from '@/lib/stormLayers';
 
 /**
- * The Lead map on the WEB (2026-10-07): Leaflet over OpenStreetMap's own
- * tiles (no key; a few staff viewing it is well inside the OSM tile usage
- * policy, with the attribution shown), darkened with a CSS filter to sit in
- * the app's dark palette. CARTO's free basemaps now answer "API key required",
- * so they are not used. One coloured dot per
- * person, dashed and faded when the address only placed to the street / ZIP.
- * Tapping a dot selects it; the screen shows the card. The phone build gets
- * its own map in the next native build (LeadMapView.tsx explains).
+ * The Lead map on the WEB (2026-10-07; smoothed + storm zones 2026-10-09).
  *
- * SATELLITE (2026-10-07): a Map / Satellite switch (Leaflet's layer control,
- * top right; the choice is remembered per browser). Satellite is Esri World
- * Imagery — sharp enough at zoom 19 to see panels on a roof — with Esri's
- * place-name labels on top. Esri's keyless tiles are fine for trying it; for
- * steady commercial use Esri asks for a (free) ArcGIS developer account, whose
- * key would go on these URLs. `roof` (from the card's "See the roof") switches
- * to Satellite and flies to that pin at roof level.
+ * BASEMAPS. Satellite (Esri World Imagery — panels visible at roof level) is
+ * the default; Map is OpenStreetMap darkened with a CSS filter. The choice is
+ * remembered per browser. Esri's place-name LABELS are their own layer, on by
+ * default and shown only while zoomed out (≤ 15): past that Esri stops
+ * drawing them and Leaflet used to stretch the last ones — huge, blurry,
+ * jumping labels. `labels` turns them off entirely.
  *
- * Leaflet draws into a plain <div> filling a View. Leaflet is IMPORTED IN THE
- * BROWSER ONLY (in the effect):
- * the web build pre-renders pages on the server, where Leaflet's top-level
- * `window` access throws "window is not defined".
+ * SMOOTH (2026-10-09, Carson: "very glitchy navigating"). Everything vector
+ * (pins, zones, report dots) draws on ONE canvas instead of hundreds of SVG
+ * elements; pins are created once per data change and only RESTYLED when the
+ * selection or the storm highlight changes (it used to wipe and redraw every
+ * pin on every tap); the map zooms by itself only when asked (`focusKey` at
+ * first load, `storms.fitKey` when a storm is picked) — never as a side
+ * effect of another change; half-step zoom with a gentler mouse wheel.
+ *
+ * STORMS. Each report's 3-mile zone is a soft circle coloured by hail size
+ * (wind: orange); overlapping circles blend into the storm's footprint. With a
+ * storm picked, pins in its path get a white ring and the rest fade.
+ *
+ * Leaflet is IMPORTED IN THE BROWSER ONLY (the web build pre-renders on the
+ * server, where Leaflet's `window` access throws) and draws into a plain
+ * <div> (drawing into the React Native View measured a 0-wide box).
  */
 const KANSAS_CITY: Leaflet.LatLngTuple = [39.0997, -94.5786];
 const DARK_TILES_STYLE = 'dc-dark-tiles-style';
 const BASEMAP_KEY = 'dcsolar.leadmap.basemap';
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
+const LABELS_MAX_ZOOM = 15;
 
-/** Satellite unless the person switched to Map (2026-10-09: satellite first, to see panels). */
+/** Satellite unless the person switched to Map. */
 function rememberedBasemap(): 'Map' | 'Satellite' {
   try {
     return localStorage.getItem(BASEMAP_KEY) === 'Map' ? 'Map' : 'Satellite';
@@ -43,8 +47,22 @@ function rememberedBasemap(): 'Map' | 'Satellite' {
   }
 }
 
-/** On a native build the map is real (react-native-maps); here it always is. */
+/** On the web the map is always real. */
 export const NATIVE_MAP = true;
+
+function pinStyle(p: MapPoint, selected: boolean, highlight: Set<string> | null): Leaflet.CircleMarkerOptions {
+  const inPath = highlight?.has(p.key) ?? false;
+  const faded = highlight !== null && !inPath && !selected;
+  return {
+    radius: selected ? 11 : inPath ? 9 : 7,
+    color: selected || inPath ? '#FFFFFF' : '#1E1C1A',
+    weight: selected ? 3 : inPath ? 2.5 : 1.5,
+    dashArray: p.approx ? '3 3' : undefined,
+    fillColor: STAGE_COLOR[p.stage],
+    fillOpacity: faded ? 0.2 : p.approx ? 0.55 : 0.95,
+    opacity: faded ? 0.3 : 1,
+  };
+}
 
 export function LeadMapView({
   points,
@@ -53,6 +71,7 @@ export function LeadMapView({
   roof,
   focusKey,
   storms,
+  labels = true,
 }: {
   points: MapPoint[];
   selectedKey: string | null;
@@ -61,20 +80,27 @@ export function LeadMapView({
   roof?: { key: string; n: number } | null;
   /** Start zoomed in on this pin, on Satellite (opened from a record's panel map). */
   focusKey?: string | null;
-  /** Storm coverage (2026-10-09): radar, NWS warnings, hail / wind reports. */
   storms?: StormLayers | null;
+  /** Esri place-name labels over the satellite (zoomed out only). */
+  labels?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [L, setL] = useState<typeof Leaflet | null>(null);
   const map = useRef<Leaflet.Map | null>(null);
-  const layer = useRef<Leaflet.LayerGroup | null>(null);
-  const fitted = useRef(false);
-  // Bounds waiting for the box to have a real size (see the ResizeObserver).
-  const pendingFit = useRef<Leaflet.LatLngBounds | null>(null);
-  const pendingCenter = useRef<Leaflet.LatLngTuple | null>(null);
+  const canvas = useRef<Leaflet.Canvas | null>(null);
+  const pinLayer = useRef<Leaflet.LayerGroup | null>(null);
+  const pins = useRef(new Map<string, { marker: Leaflet.CircleMarker; point: MapPoint }>());
+  const stormLayer = useRef<Leaflet.LayerGroup | null>(null);
+  const radarLayer = useRef<Leaflet.TileLayer | null>(null);
+  const labelLayer = useRef<Leaflet.TileLayer | null>(null);
   const basemaps = useRef<{ Map: Leaflet.Layer; Satellite: Leaflet.Layer } | null>(null);
+  const firstView = useRef(false);
+  const pendingView = useRef<(() => void) | null>(null);
+  const lastFit = useRef<string | null>(null);
   const select = useRef(onSelect);
   select.current = onSelect;
+  const latest = useRef({ selectedKey, highlight: storms?.highlight ?? null });
+  latest.current = { selectedKey, highlight: storms?.highlight ?? null };
 
   useEffect(() => {
     let alive = true;
@@ -86,10 +112,29 @@ export function LeadMapView({
     };
   }, []);
 
+  /** Run a view change now if the box has a size, else when it gets one. */
+  const whenSized = (fn: () => void) => {
+    const m = map.current;
+    if (!m) return;
+    m.invalidateSize();
+    if (m.getSize().x > 0) fn();
+    else pendingView.current = fn;
+  };
+
+  // The map itself — once.
   useEffect(() => {
     const el = host.current;
     if (!el || !L) return;
-    const m = L.map(el, { zoomControl: true }).setView(KANSAS_CITY, 10);
+    const m = L.map(el, {
+      zoomControl: true,
+      preferCanvas: true,
+      zoomSnap: 0.5,
+      zoomDelta: 0.5,
+      wheelPxPerZoomLevel: 110,
+      wheelDebounceTime: 30,
+      maxZoom: 20,
+    }).setView(KANSAS_CITY, 10);
+    canvas.current = L.canvas({ padding: 0.5, tolerance: 6 });
     if (!document.getElementById(DARK_TILES_STYLE)) {
       const style = document.createElement('style');
       style.id = DARK_TILES_STYLE;
@@ -97,18 +142,25 @@ export function LeadMapView({
         '.dc-dark-tiles { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(85%) saturate(60%); }';
       document.head.appendChild(style);
     }
+    const tileOpts = { keepBuffer: 4, updateWhenZooming: false };
     const street = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      ...tileOpts,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 19,
+      maxNativeZoom: 19,
+      maxZoom: 20,
       className: 'dc-dark-tiles',
     });
-    const satellite = L.layerGroup([
-      L.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, {
-        attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics',
-        maxZoom: 19,
-      }),
-      L.tileLayer(`${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`, { maxZoom: 19 }),
-    ]);
+    const satellite = L.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, {
+      ...tileOpts,
+      attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics',
+      maxNativeZoom: 19,
+      maxZoom: 20,
+    });
+    labelLayer.current = L.tileLayer(`${ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`, {
+      ...tileOpts,
+      maxZoom: LABELS_MAX_ZOOM,
+      pane: 'overlayPane',
+    });
     basemaps.current = { Map: street, Satellite: satellite };
     (focusKey || rememberedBasemap() === 'Satellite' ? satellite : street).addTo(m);
     L.control.layers({ Map: street, Satellite: satellite }, undefined, { position: 'topright' }).addTo(m);
@@ -120,20 +172,15 @@ export function LeadMapView({
       }
     });
     m.on('click', () => select.current(null));
-    layer.current = L.layerGroup().addTo(m);
+    stormLayer.current = L.layerGroup().addTo(m);
+    pinLayer.current = L.layerGroup().addTo(m);
     map.current = m;
-    // Leaflet measures its box once; on the web the box can still be 0 wide
-    // when the map is created (it was, in testing). Re-measure on every size
-    // change, and do the first fit-to-pins once there is a real width.
     const observer = new ResizeObserver(() => {
       m.invalidateSize();
-      if (pendingCenter.current && m.getSize().x > 0) {
-        m.setView(pendingCenter.current, 18);
-        pendingCenter.current = null;
-      }
-      if (pendingFit.current && m.getSize().x > 0) {
-        m.fitBounds(pendingFit.current, { padding: [30, 30], maxZoom: 13 });
-        pendingFit.current = null;
+      if (pendingView.current && m.getSize().x > 0) {
+        const fn = pendingView.current;
+        pendingView.current = null;
+        fn();
       }
     });
     observer.observe(el);
@@ -141,53 +188,129 @@ export function LeadMapView({
       observer.disconnect();
       m.remove();
       map.current = null;
-      layer.current = null;
+      pinLayer.current = null;
+      stormLayer.current = null;
+      radarLayer.current = null;
+      labelLayer.current = null;
       basemaps.current = null;
-      fitted.current = false;
-      pendingFit.current = null;
-      pendingCenter.current = null;
+      pins.current.clear();
+      firstView.current = false;
+      lastFit.current = null;
+      pendingView.current = null;
     };
   }, [L]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Labels on / off.
   useEffect(() => {
     const m = map.current;
-    const group = layer.current;
+    const layer = labelLayer.current;
+    if (!m || !layer) return;
+    if (labels) layer.addTo(m);
+    else m.removeLayer(layer);
+  }, [L, labels]);
+
+  // Pins: (re)built only when the points change.
+  useEffect(() => {
+    const m = map.current;
+    const group = pinLayer.current;
     if (!m || !group || !L) return;
     group.clearLayers();
+    pins.current.clear();
+    const { selectedKey: sel, highlight } = latest.current;
     for (const p of points) {
-      const selected = p.key === selectedKey;
-      const dot = L.circleMarker([p.lat, p.lng], {
-        radius: selected ? 11 : 7,
-        color: selected ? '#FFFFFF' : '#1E1C1A',
-        weight: selected ? 3 : 1.5,
-        dashArray: p.approx ? '3 3' : undefined,
-        fillColor: STAGE_COLOR[p.stage],
-        fillOpacity: p.approx ? 0.55 : 0.95,
+      const marker = L.circleMarker([p.lat, p.lng], {
+        renderer: canvas.current ?? undefined,
+        ...pinStyle(p, p.key === sel, highlight),
       });
-      dot.bindTooltip(p.name, { direction: 'top', offset: [0, -6] });
-      dot.on('click', (e) => {
+      marker.bindTooltip(p.name, { direction: 'top', offset: [0, -6] });
+      marker.on('click', (e) => {
         L.DomEvent.stopPropagation(e);
         select.current(p.key);
       });
-      dot.addTo(group);
+      marker.addTo(group);
+      pins.current.set(p.key, { marker, point: p });
     }
-    const focus = focusKey ? points.find((p) => p.key === focusKey) : undefined;
-    if (!fitted.current && focus) {
-      // Opened from a record: start on it at roof level; the rest still show.
-      fitted.current = true;
-      const center: Leaflet.LatLngTuple = [focus.lat, focus.lng];
-      m.invalidateSize();
-      if (m.getSize().x > 0) m.setView(center, 18);
-      else pendingCenter.current = center;
+    if (!firstView.current && points.length > 0) {
+      firstView.current = true;
+      const focus = focusKey ? points.find((p) => p.key === focusKey) : undefined;
+      if (focus) {
+        whenSized(() => m.setView([focus.lat, focus.lng], 18));
+      } else if (!storms?.fitKey) {
+        const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng] as Leaflet.LatLngTuple));
+        whenSized(() => m.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 }));
+      }
     }
-    if (!fitted.current && points.length > 0) {
-      fitted.current = true;
-      const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng] as Leaflet.LatLngTuple));
-      m.invalidateSize();
-      if (m.getSize().x > 0) m.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
-      else pendingFit.current = bounds; // the ResizeObserver fits it
+  }, [L, points]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Selection / storm highlight: restyle in place, no redraw of the layer.
+  useEffect(() => {
+    const highlight = storms?.highlight ?? null;
+    for (const { marker, point } of pins.current.values()) {
+      marker.setStyle(pinStyle(point, point.key === selectedKey, highlight));
+      if (point.key === selectedKey || highlight?.has(point.key)) marker.bringToFront();
     }
-  }, [L, points, selectedKey, focusKey]);
+  }, [selectedKey, storms?.highlight]);
+
+  // Storm zones, report dots, warnings, radar.
+  useEffect(() => {
+    const m = map.current;
+    const g = stormLayer.current;
+    if (!m || !g || !L) return;
+    g.clearLayers();
+    if (storms?.radar) {
+      if (!radarLayer.current) {
+        radarLayer.current = L.tileLayer(
+          'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png',
+          { opacity: 0.55, maxZoom: 20, maxNativeZoom: 16, attribution: 'Radar &copy; Iowa Environmental Mesonet' },
+        );
+      }
+      radarLayer.current.addTo(m);
+    } else if (radarLayer.current) {
+      m.removeLayer(radarLayer.current);
+    }
+    for (const w of storms?.warnings ?? []) {
+      L.polygon(w.rings, {
+        color: w.tornado ? '#FF4D4D' : '#FFB020',
+        weight: 2,
+        fillOpacity: 0.1,
+        renderer: canvas.current ?? undefined,
+      })
+        .bindTooltip(w.label)
+        .addTo(g);
+    }
+    const reports = storms?.reports ?? [];
+    for (const r of reports) {
+      L.circle([r.lat, r.lng], {
+        radius: ZONE_METERS,
+        stroke: false,
+        fillColor: zoneColor(r),
+        fillOpacity: 0.16,
+        interactive: false,
+        renderer: canvas.current ?? undefined,
+      }).addTo(g);
+    }
+    for (const r of reports) {
+      L.circleMarker([r.lat, r.lng], {
+        radius: r.kind === 'hail' ? 3 + Math.min(6, (r.size ?? 1) * 2) : 3.5,
+        color: '#FFFFFF',
+        weight: 1,
+        fillColor: zoneColor(r),
+        fillOpacity: 0.95,
+        renderer: canvas.current ?? undefined,
+      })
+        .bindTooltip(r.label, { direction: 'top' })
+        .addTo(g);
+    }
+    // Zoom to a storm only when a storm was just picked.
+    const fitKey = storms?.fitKey ?? null;
+    if (fitKey && fitKey !== lastFit.current && reports.length > 0) {
+      lastFit.current = fitKey;
+      firstView.current = true;
+      const b = L.latLngBounds(reports.map((x) => [x.lat, x.lng] as Leaflet.LatLngTuple)).pad(0.25);
+      whenSized(() => m.flyToBounds(b, { maxZoom: 13, duration: 0.8 }));
+    }
+    if (!fitKey) lastFit.current = null;
+  }, [L, storms]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // "See the roof": Satellite on, then fly to the pin at roof level.
   useEffect(() => {
@@ -204,57 +327,6 @@ export function LeadMapView({
     m.flyTo([p.lat, p.lng], 19, { duration: 1.2 });
   }, [roof]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Storms (2026-10-09): live radar tiles (Iowa Environmental Mesonet's NEXRAD
-  // mosaic), active NWS severe-thunderstorm / tornado warnings, and NOAA
-  // hail / wind reports sized by hail size. Fits to the reports when asked.
-  const stormGroup = useRef<Leaflet.LayerGroup | null>(null);
-  const radarLayer = useRef<Leaflet.TileLayer | null>(null);
-  useEffect(() => {
-    const m = map.current;
-    if (!m || !L) return;
-    if (!stormGroup.current) stormGroup.current = L.layerGroup().addTo(m);
-    const g = stormGroup.current;
-    g.clearLayers();
-    if (storms?.radar) {
-      if (!radarLayer.current) {
-        radarLayer.current = L.tileLayer(
-          'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png',
-          { opacity: 0.6, maxZoom: 19, attribution: 'Radar &copy; Iowa Environmental Mesonet' },
-        );
-      }
-      radarLayer.current.addTo(m);
-    } else if (radarLayer.current) {
-      m.removeLayer(radarLayer.current);
-    }
-    for (const w of storms?.warnings ?? []) {
-      L.polygon(w.rings, { color: w.tornado ? '#FF4D4D' : '#FFB020', weight: 2, fillOpacity: 0.12 })
-        .bindTooltip(w.label)
-        .addTo(g);
-    }
-    for (const r of storms?.reports ?? []) {
-      const hail = r.kind === 'hail';
-      const radius = hail ? 4 + Math.min(10, (r.size ?? 1) * 3) : 4;
-      L.circleMarker([r.lat, r.lng], {
-        radius,
-        color: hail ? '#BFE3FF' : '#FFB020',
-        weight: 1.5,
-        fillColor: hail ? '#3FA9F5' : '#FF8C1A',
-        fillOpacity: 0.55,
-      })
-        .bindTooltip(r.label, { direction: 'top' })
-        .addTo(g);
-    }
-    if (storms?.fitTo && storms.fitTo.length > 0) {
-      const b = L.latLngBounds(storms.fitTo.map((x) => [x.lat, x.lng] as Leaflet.LatLngTuple));
-      m.invalidateSize();
-      if (m.getSize().x > 0) m.fitBounds(b.pad(0.4), { maxZoom: 13 });
-      else pendingFit.current = b.pad(0.4);
-      fitted.current = true;
-    }
-  }, [L, storms]);
-
-  // A plain <div>, absolutely filling the View: drawing into the React Native
-  // View itself left Leaflet measuring a 0-wide box.
   return (
     <View style={{ flex: 1, minHeight: 320, borderRadius: 12, overflow: 'hidden', position: 'relative' }}>
       <div ref={host} style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 }} />

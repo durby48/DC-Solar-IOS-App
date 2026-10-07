@@ -1,22 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import MapView, { Marker, Polygon, UrlTile, type Region } from 'react-native-maps';
+import MapView, { Circle, Marker, Polygon, UrlTile, type Region } from 'react-native-maps';
 
 import { colors, radii, spacing } from '@/constants/theme';
 import { STAGE_COLOR, type MapPoint } from '@/lib/leadMap';
-import { type StormLayers } from '@/lib/stormLayers';
+import { ZONE_METERS, zoneColor, type StormLayers } from '@/lib/stormLayers';
 
 /**
- * The Lead map on the PHONE (build with runtime 6, 2026-10-09): Apple Maps
- * through react-native-maps — no API key on iOS. Satellite by default (panels
- * visible), a Map / Satellite switch, one coloured dot per lead / customer
- * (faded when the address only placed to the street / ZIP). Tap a dot to
- * select it (the screen shows its card); tap the map to clear. `focusKey`
- * starts zoomed in on that pin; otherwise the map fits every pin. `roof`
- * ("See the roof") flies to a pin at roof level on Satellite.
+ * The Lead map on the PHONE (runtime 6, 2026-10-09): Apple Maps through
+ * react-native-maps — no API key on iOS. Satellite by default (panels
+ * visible) with Apple's labels; a Map / Satellite switch; `labels` off =
+ * plain satellite. One coloured dot per lead / customer (faded when the
+ * address only placed to the street / ZIP). Tap a dot to select it (the
+ * screen shows its card); tap the map to clear.
  *
- * A NATIVE MODULE: this file only exists from the runtime-6 build on. Build 33
- * (runtime 5) never receives it over the air.
+ * Moves on its own only when asked: `focusKey` at first load (zoomed in on
+ * that pin), otherwise it fits every pin once; `storms.fitKey` changing (a
+ * storm picked) zooms to that storm; `roof` flies to a pin at roof level.
+ *
+ * STORMS: each report's 3-mile zone (coloured by hail size; wind orange),
+ * report dots, NWS warning polygons and live radar tiles. With a storm
+ * picked, pins in its path get a white ring and the rest fade.
+ *
+ * A NATIVE MODULE: only from the runtime-6 build on (Build 33 never gets it).
  */
 export const NATIVE_MAP = true;
 
@@ -43,6 +49,39 @@ function fitRegion(points: MapPoint[]): Region {
   };
 }
 
+/** One pin; memoised so a selection change re-renders only the pins it touches. */
+const Pin = memo(function Pin({
+  p,
+  state,
+  onPress,
+}: {
+  p: MapPoint;
+  state: 'normal' | 'selected' | 'inPath' | 'faded';
+  onPress: (key: string) => void;
+}) {
+  const size = state === 'selected' ? 22 : state === 'inPath' ? 18 : 14;
+  return (
+    <Marker
+      coordinate={{ latitude: p.lat, longitude: p.lng }}
+      onPress={() => onPress(p.key)}
+      tracksViewChanges={false}
+      anchor={{ x: 0.5, y: 0.5 }}
+      zIndex={state === 'selected' ? 10 : state === 'inPath' ? 5 : 1}>
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          borderWidth: state === 'selected' ? 3 : state === 'inPath' ? 2.5 : 1.5,
+          borderColor: state === 'selected' || state === 'inPath' ? '#FFFFFF' : '#1E1C1A',
+          backgroundColor: STAGE_COLOR[p.stage],
+          opacity: state === 'faded' ? 0.25 : p.approx ? 0.6 : 1,
+        }}
+      />
+    </Marker>
+  );
+});
+
 export function LeadMapView({
   points,
   selectedKey,
@@ -50,17 +89,19 @@ export function LeadMapView({
   roof,
   focusKey,
   storms,
+  labels = true,
 }: {
   points: MapPoint[];
   selectedKey: string | null;
   onSelect: (key: string | null) => void;
   roof?: { key: string; n: number } | null;
   focusKey?: string | null;
-  /** Storm coverage (2026-10-09): radar, NWS warnings, hail / wind reports. */
   storms?: StormLayers | null;
+  labels?: boolean;
 }) {
   const map = useRef<MapView>(null);
   const [satellite, setSatellite] = useState(true);
+  const lastFit = useRef<string | null>(null);
 
   const initialRegion = useMemo<Region>(() => {
     const f = focusKey ? points.find((p) => p.key === focusKey) : undefined;
@@ -80,15 +121,25 @@ export function LeadMapView({
     );
   }, [roof]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A storm opened from its report: zoom to its hail.
+  // A storm picked: zoom to it (once per pick).
+  const fitKey = storms?.fitKey ?? null;
   useEffect(() => {
-    const fit = storms?.fitTo;
-    if (!fit || fit.length === 0) return;
+    const reports = storms?.reports ?? [];
+    if (!fitKey || fitKey === lastFit.current || reports.length === 0) {
+      if (!fitKey) lastFit.current = null;
+      return;
+    }
+    lastFit.current = fitKey;
     map.current?.fitToCoordinates(
-      fit.map((p) => ({ latitude: p.lat, longitude: p.lng })),
-      { edgePadding: { top: 60, right: 60, bottom: 60, left: 60 }, animated: true },
+      reports.map((r) => ({ latitude: r.lat, longitude: r.lng })),
+      { edgePadding: { top: 80, right: 60, bottom: 80, left: 60 }, animated: true },
     );
-  }, [storms?.fitTo]);
+  }, [fitKey, storms?.reports]);
+
+  const highlight = storms?.highlight ?? null;
+  const select = useRef(onSelect);
+  select.current = onSelect;
+  const press = useMemo(() => (key: string) => select.current(key), []);
 
   return (
     <View style={styles.wrap}>
@@ -96,18 +147,20 @@ export function LeadMapView({
         ref={map}
         style={StyleSheet.absoluteFill}
         initialRegion={initialRegion}
-        mapType={satellite ? 'hybrid' : 'standard'}
+        mapType={satellite ? (labels ? 'hybrid' : 'satellite') : 'standard'}
         userInterfaceStyle="dark"
         showsUserLocation={false}
+        rotateEnabled={false}
+        pitchEnabled={false}
         onPress={(e) => {
           if (e.nativeEvent.action !== 'marker-press') onSelect(null);
         }}>
         {storms?.radar ? (
           <UrlTile
             urlTemplate="https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png"
-            opacity={0.6}
+            opacity={0.55}
             zIndex={2}
-            maximumZ={19}
+            maximumZ={16}
           />
         ) : null}
         {(storms?.warnings ?? []).flatMap((w) =>
@@ -116,55 +169,47 @@ export function LeadMapView({
               key={`${w.id}-${i}`}
               coordinates={ring.map(([lat, lng]) => ({ latitude: lat, longitude: lng }))}
               strokeColor={w.tornado ? '#FF4D4D' : '#FFB020'}
-              fillColor={w.tornado ? 'rgba(255,77,77,0.12)' : 'rgba(255,176,32,0.12)'}
+              fillColor={w.tornado ? 'rgba(255,77,77,0.10)' : 'rgba(255,176,32,0.10)'}
               strokeWidth={2}
             />
           )),
         )}
-        {(storms?.reports ?? []).map((r) => {
-          const hail = r.kind === 'hail';
-          const d = hail ? 8 + Math.min(20, (r.size ?? 1) * 6) : 8;
-          return (
-            <Marker
-              key={r.id}
-              coordinate={{ latitude: r.lat, longitude: r.lng }}
-              title={r.label}
-              tracksViewChanges={false}
-              anchor={{ x: 0.5, y: 0.5 }}
-              zIndex={0}>
-              <View
-                style={{
-                  width: d,
-                  height: d,
-                  borderRadius: d / 2,
-                  backgroundColor: hail ? 'rgba(63,169,245,0.55)' : 'rgba(255,140,26,0.55)',
-                  borderWidth: 1.5,
-                  borderColor: hail ? '#BFE3FF' : '#FFB020',
-                }}
-              />
-            </Marker>
-          );
-        })}
-        {points.map((p) => {
-          const on = p.key === selectedKey;
-          return (
-            <Marker
-              key={p.key}
-              coordinate={{ latitude: p.lat, longitude: p.lng }}
-              onPress={() => onSelect(p.key)}
-              tracksViewChanges={false}
-              anchor={{ x: 0.5, y: 0.5 }}
-              zIndex={on ? 10 : 1}>
-              <View
-                style={[
-                  styles.dot,
-                  on && styles.dotOn,
-                  { backgroundColor: STAGE_COLOR[p.stage], opacity: p.approx ? 0.6 : 1 },
-                ]}
-              />
-            </Marker>
-          );
-        })}
+        {(storms?.reports ?? []).map((r) => (
+          <Circle
+            key={`zone-${r.id}`}
+            center={{ latitude: r.lat, longitude: r.lng }}
+            radius={ZONE_METERS}
+            strokeWidth={0}
+            fillColor={`${zoneColor(r)}29`}
+          />
+        ))}
+        {(storms?.reports ?? []).map((r) => (
+          <Marker
+            key={r.id}
+            coordinate={{ latitude: r.lat, longitude: r.lng }}
+            title={r.label}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 0.5 }}
+            zIndex={0}>
+            <View style={[styles.report, { backgroundColor: zoneColor(r) }]} />
+          </Marker>
+        ))}
+        {points.map((p) => (
+          <Pin
+            key={p.key}
+            p={p}
+            state={
+              p.key === selectedKey
+                ? 'selected'
+                : highlight?.has(p.key)
+                  ? 'inPath'
+                  : highlight
+                    ? 'faded'
+                    : 'normal'
+            }
+            onPress={press}
+          />
+        ))}
       </MapView>
       <View style={styles.switch}>
         {(['Map', 'Satellite'] as const).map((label) => {
@@ -185,8 +230,7 @@ export function LeadMapView({
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, minHeight: 320, borderRadius: radii.md, overflow: 'hidden', backgroundColor: colors.surface },
-  dot: { width: 14, height: 14, borderRadius: 7, borderWidth: 1.5, borderColor: '#1E1C1A' },
-  dotOn: { width: 22, height: 22, borderRadius: 11, borderWidth: 3, borderColor: '#FFFFFF' },
+  report: { width: 8, height: 8, borderRadius: 4, borderWidth: 1, borderColor: '#FFFFFF' },
   switch: {
     position: 'absolute',
     left: spacing.sm,
