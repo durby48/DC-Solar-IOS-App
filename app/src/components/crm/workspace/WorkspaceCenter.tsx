@@ -200,6 +200,7 @@ export function WorkspaceCenter({
 
   // A sales rep keeps a lead's running notes on the lead itself.
   const [leadNotes, setLeadNotes] = useState(record.lead?.notes ?? '');
+  const [leadNotesHeight, setLeadNotesHeight] = useState(0);
   const [savingLeadNotes, setSavingLeadNotes] = useState(false);
   const [leadNotesError, setLeadNotesError] = useState<string | null>(null);
   const [leadNotesSaved, setLeadNotesSaved] = useState(false);
@@ -444,7 +445,11 @@ export function WorkspaceCenter({
               placeholder="What they said, who to ask for, best time to call…"
               placeholderTextColor={colors.inkSoft}
               multiline
-              style={styles.noteInput}
+              textAlignVertical="top"
+              // Grows with the notes (2026-10-08) — it was three lines tall,
+              // so imported notes scrolled inside a sliver.
+              onContentSizeChange={(e) => setLeadNotesHeight(e.nativeEvent.contentSize.height)}
+              style={[styles.noteInput, styles.leadNotesInput, { height: Math.min(560, Math.max(220, leadNotesHeight + 24)) }]}
             />
             <View style={styles.noteActions}>
               {leadNotesError ? (
@@ -584,6 +589,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
+  leadNotesInput: { lineHeight: 20 },
   noteActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   noteError: { color: colors.danger, fontSize: 12, fontWeight: '700' },
   callNotice: { color: colors.coralDeep, fontSize: 12, fontWeight: '700', paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
