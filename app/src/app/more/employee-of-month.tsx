@@ -13,9 +13,9 @@ import {
   View,
 } from 'react-native';
 
+import { EmployeeOfMonth } from '@/components/EmployeeOfMonth';
 import { DropboxStatusCard, MediaGrid } from '@/components/MediaGrid';
 import { accentCycle, colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
-import { useAdminOnlyScreen } from '@/lib/adminGate';
 import {
   currentMonthISO,
   deleteEmployeeOfMonth,
@@ -31,7 +31,9 @@ import { getRole, type RoleInfo } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
 /**
- * Admin screen for Employee of the Month.
+ * Employee of the Month. Admins get the editor below; crew (2026-10-08) get
+ * the winners, read-only — the same card as the Calendar, arrows paging back
+ * through past months.
  *
  * The award is one row per month (see the 2026-08-18 migration) precisely so
  * this screen can exist: Devon adds next month's row and photo without anyone
@@ -113,7 +115,6 @@ function accentFor(seed: string) {
 export default function EmployeeOfMonthScreen() {
   const gate = useGate();
   const isAdmin = gate.role?.isAdmin ?? false;
-  const door = useAdminOnlyScreen();
 
   const [listState, setListState] = useState<'loading' | 'ok' | 'unavailable'>('loading');
   const [entries, setEntries] = useState<EmployeeOfMonthEntry[]>([]);
@@ -342,20 +343,11 @@ export default function EmployeeOfMonthScreen() {
     );
   };
 
-  if (door.blocked) {
-    return (
-      <>
-        <Stack.Screen options={{ title: 'Employee of the Month' }} />
-        <View style={styles.screen} />
-      </>
-    );
-  }
-
   return (
     <>
       <Stack.Screen options={{ title: 'Employee of the Month' }} />
       <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-        {gate.state === 'loading' || door.phase === 'loading' ? (
+        {gate.state === 'loading' ? (
           <View style={styles.centerCard}>
             <ActivityIndicator color={colors.ocean} />
           </View>
@@ -369,7 +361,10 @@ export default function EmployeeOfMonthScreen() {
               Employee of the Month is set by owners and operators.
             </Text>
           </View>
-        ) : !isAdmin ? null : (
+        ) : !isAdmin ? (
+          // Crew: this month's winner, arrows back through past months.
+          <EmployeeOfMonth />
+        ) : (
           <>
             <View style={styles.noteCard}>
               <Ionicons name="information-circle" size={18} color={colors.ocean} />

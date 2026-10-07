@@ -1,16 +1,16 @@
 /**
- * The admin door (2026-09-12 overhaul).
+ * The admin door (2026-09-12 overhaul; 2026-10-08: hidden, not greyed).
  *
- * Every person sees the SAME layout — the same five hubs, the same tiles,
- * the same menu rows. What differs is what happens on the tap: an admin-only
- * destination tells a crew member, in one sentence, that they need their
- * administrator, and goes nowhere. Two places enforce it:
+ * Admin-only entries are HIDDEN from crew on Home, the Menu, the CRM tab and
+ * the hub pages (Carson, 2026-10-08 — a wall of locked rows read as clutter).
+ * `isVisibleFor()` decides. Until the role is known an admin-only entry stays
+ * hidden, so crew never see one flash; admins see theirs land a beat later
+ * (the role is cached).
  *
- *   1. `explainAdminOnly()` — called by Home / Menu / hub screens instead of
- *      navigating when `isLockedFor(item, isAdmin)`.
+ *   1. `isVisibleFor()` — Home / Menu / hub screens skip what it rejects.
  *   2. `useAdminOnlyScreen()` — mounted by every admin-only SCREEN, so a deep
- *      link, a notification tap or a typed URL gets the same alert and is
- *      sent back to Home instead of rendering an empty admin screen.
+ *      link, a notification tap or a typed URL explains (`explainAdminOnly`)
+ *      and is sent back to Home instead of rendering an empty admin screen.
  *
  * Neither is a security boundary. RLS is: a crew member's queries return
  * nothing they may not see whatever screen they are on. This is the polite
@@ -36,6 +36,11 @@ export const ADMIN_ONLY_MESSAGE =
 /** True when this entry is an admin door and this person is not an admin. */
 export function isLockedFor(gate: HubGate, isAdmin: boolean): boolean {
   return gate === 'admin' && !isAdmin;
+}
+
+/** Whether to show an entry at all: everyone's, or an admin's once the role says admin. */
+export function isVisibleFor(gate: HubGate, phase: 'loading' | 'ready', isAdmin: boolean): boolean {
+  return gate === 'all' || (phase === 'ready' && isAdmin);
 }
 
 /** The one alert. `Alert.alert` is a no-op on react-native-web, hence the split. */

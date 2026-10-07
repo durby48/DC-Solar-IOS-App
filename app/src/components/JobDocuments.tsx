@@ -29,6 +29,8 @@ import { shareDocument, viewDocument } from '@/lib/pdf';
 import { supabase } from '@/lib/supabase';
 
 const DOC_TYPES = Object.keys(DOC_TYPE_LABELS) as DocType[];
+/** Crew may not file estimates or invoices (2026-10-08; jd_crew_insert enforces it). */
+const CREW_DOC_TYPES = DOC_TYPES.filter((t) => t !== 'estimate' && t !== 'invoice');
 
 function formatBytes(bytes: number | null): string {
   if (bytes == null || bytes <= 0) return '';
@@ -59,8 +61,14 @@ function notify(
  * a `SkeletonList` in place of the bare first-load spinner, and rows that
  * stagger in with `FadeInUp`. The Alert-on-native / inline-on-web split in
  * `notify` is untouched, and so is every upload and share path.
+ *
+ * CREW (2026-10-08): they upload to the job and see ONLY what they uploaded —
+ * the office's estimates, invoices and contracts never reach them (RLS:
+ * 2026-10-08_crew_job_documents.sql). Their type chips leave out Estimate
+ * and Invoice.
  */
-export function JobDocuments({ jobId }: { jobId: string }) {
+export function JobDocuments({ jobId, isAdmin = false }: { jobId: string; isAdmin?: boolean }) {
+  const types = isAdmin ? DOC_TYPES : CREW_DOC_TYPES;
   const [documents, setDocuments] = useState<JobDocument[]>([]);
   const [docsState, setDocsState] = useState<'loading' | 'ok' | 'unavailable'>('loading');
   const [signedIn, setSignedIn] = useState(false);
@@ -174,9 +182,11 @@ export function JobDocuments({ jobId }: { jobId: string }) {
           icon="document-text"
           title={signedIn ? 'No documents yet' : 'Sign in to view documents'}
           body={
-            signedIn
-              ? 'Contracts, permits and anything else you upload for this job land here.'
-              : 'Sign in to view and upload documents.'
+            !signedIn
+              ? 'Sign in to view and upload documents.'
+              : isAdmin
+                ? 'Contracts, permits and anything else you upload for this job land here.'
+                : 'Permits, photo reports and anything else you add for this job land here. Only the documents you add show up.'
           }
         />
       ) : (
@@ -229,7 +239,7 @@ export function JobDocuments({ jobId }: { jobId: string }) {
       {signedIn ? (
         <>
           <View style={styles.typeSelector}>
-            {DOC_TYPES.map((type) => (
+            {types.map((type) => (
               <Chip
                 key={type}
                 label={DOC_TYPE_LABELS[type]}

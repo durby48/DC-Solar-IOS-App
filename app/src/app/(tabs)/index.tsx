@@ -26,7 +26,7 @@ import {
   Tile,
 } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
-import { explainAdminOnly, isLockedFor } from '@/lib/adminGate';
+import { isVisibleFor } from '@/lib/adminGate';
 import { getSessionEmail } from '@/lib/clock';
 import { fetchUnreadCount } from '@/lib/comms';
 import { fetchJobs, fetchScheduleEntries } from '@/lib/data';
@@ -169,8 +169,10 @@ export default function HomeScreen() {
   if (isSales) return <SalesHome />;
 
   const wide = width >= WIDE_BREAKPOINT;
-  // One row of five on a desktop browser; two columns on a phone.
-  const columns = wide ? HUBS.length : 2;
+  // Admin-only hubs are hidden from crew (2026-10-08), not drawn locked.
+  const hubs = HUBS.filter((hub) => isVisibleFor(hub.gate, gate.phase, isAdmin));
+  // One row on a desktop browser; two columns on a phone.
+  const columns = wide ? hubs.length : 2;
   const compact = Platform.OS === 'web' && wide;
 
   return (
@@ -204,11 +206,7 @@ export default function HomeScreen() {
             <View style={styles.section}>
               <SectionHeader title="Hubs" subtitle="Everything in the app, five doors" />
               <View style={styles.grid}>
-                {HUBS.map((hub, i) => {
-                  // Only a CONFIRMED non-admin gets the lock; while the role is
-                  // loading the tile is drawn open and the press still explains
-                  // (the gate below re-checks at tap time with the same rule).
-                  const locked = gate.phase === 'ready' && isLockedFor(hub.gate, isAdmin);
+                {hubs.map((hub, i) => {
                   return (
                     <FadeInUp
                       key={hub.key}
@@ -216,16 +214,12 @@ export default function HomeScreen() {
                       style={[styles.cell, { width: `${100 / columns}%` }]}>
                       <Tile
                         title={hub.title}
-                        subtitle={hub.subtitle}
+                        subtitle={!isAdmin && hub.crewSubtitle ? hub.crewSubtitle : hub.subtitle}
                         icon={hub.icon}
                         tone={hub.key}
                         compact={compact}
-                        locked={locked}
                         badge={hub.key === 'crm' ? unread : undefined}
-                        onPress={() => {
-                          if (isLockedFor(hub.gate, isAdmin)) explainAdminOnly();
-                          else router.push(hub.href);
-                        }}
+                        onPress={() => router.push(hub.href)}
                         style={styles.tile}
                       />
                     </FadeInUp>

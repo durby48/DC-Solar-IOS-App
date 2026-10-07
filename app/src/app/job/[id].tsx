@@ -315,7 +315,7 @@ export default function JobDetailScreen() {
               </View>
             ) : null}
 
-            <JobDocuments jobId={job.id} />
+            <JobDocuments jobId={job.id} isAdmin={role?.isAdmin ?? false} />
 
             <JobPhotos jobId={job.id} />
 

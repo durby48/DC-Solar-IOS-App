@@ -14,7 +14,7 @@ import {
 } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { deleteOwnAccount } from '@/lib/account';
-import { explainAdminOnly, isLockedFor } from '@/lib/adminGate';
+import { isVisibleFor } from '@/lib/adminGate';
 import { fetchUnreadCount } from '@/lib/comms';
 import { hubSections } from '@/lib/hub';
 import { clearRoleCache, useRoleGate } from '@/lib/role';
@@ -29,12 +29,10 @@ import { resetToLogin, signOutAndLeave } from '@/lib/signOut';
  * purple, and so on. Home is for finding the thing you use every day; this
  * is for finding the thing you use twice a month.
  *
- * EVERY ROLE SEES EVERY ROW. Admin-only entries are drawn locked (lock glyph,
- * muted) and, on tap, explain that they need an administrator instead of
- * navigating — see `lib/adminGate.ts`. The lock is a courtesy, not a
- * boundary: the destinations still check for themselves and RLS still
- * decides what any query returns. Because the layout no longer depends on
- * the role there is no skeleton phase; the locks land when the role does.
+ * Admin-only rows are HIDDEN from crew (2026-10-08 — they used to be drawn
+ * locked), and a hub with nothing left for them is skipped. Hiding is a
+ * courtesy, not a boundary: the destinations still check for themselves and
+ * RLS still decides what any query returns. See `lib/adminGate.ts`.
  *
  * The file is still `more.tsx` and the route is still `/more`, because the
  * `more/*` directory has to keep working alongside it. Only the label is
@@ -88,16 +86,15 @@ export default function MenuScreen() {
 
   return (
     <Screen header={<AppText variant="title">Menu</AppText>}>
-      {hubSections().map(({ hub, items }) => {
+      {hubSections().map(({ hub, items: all }) => {
         const accent = hubColors[hub.key];
+        const items = all.filter((item) => isVisibleFor(item.gate, gate.phase, isAdmin));
+        if (items.length === 0) return null;
         return (
           <View key={hub.key} style={styles.section}>
             <SectionHeader title={hub.title} subtitle={hub.subtitle} accent={accent.fg} />
             <Card padded={false}>
               {items.map((item, i) => {
-                // Per ROW, the same rule as `hub/[key].tsx`: Receipts sits in
-                // the (admin) Systems hub but is open to everyone.
-                const locked = gate.phase === 'ready' && isLockedFor(item.gate, isAdmin);
                 return (
                   <ListRow
                     key={item.key}
@@ -108,11 +105,7 @@ export default function MenuScreen() {
                     subtitle={item.subtitle}
                     badge={item.badge === 'unread' ? unread : undefined}
                     divider={i < items.length - 1}
-                    locked={locked}
-                    onPress={() => {
-                      if (isLockedFor(item.gate, isAdmin)) explainAdminOnly();
-                      else router.push(item.href);
-                    }}
+                    onPress={() => router.push(item.href)}
                   />
                 );
               })}

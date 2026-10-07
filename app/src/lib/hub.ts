@@ -7,11 +7,10 @@
  * The Menu tab draws the same map as dense rows. The bottom tabs are Home ·
  * CRM · Pipeline · Operations · Menu.
  *
- * EVERYBODY SEES THE SAME LAYOUT. There is no `visibleItems` any more: a
- * crew member sees every tile and every row; the admin-only ones are drawn
- * locked and, on tap, explain that they need their administrator
- * (`lib/adminGate.ts`). The `gate` field decides which. RLS decides what any
- * screen actually loads — hiding or locking a tile was never the security.
+ * WHO SEES WHAT (2026-10-08): admin-only entries are hidden from crew
+ * (`isVisibleFor` in `lib/adminGate.ts`; before this they were drawn locked).
+ * The `gate` field decides which. RLS decides what any screen actually loads —
+ * hiding a tile was never the security.
  *
  * `href` is typed as expo-router's `Href`, so a route that doesn't exist is a
  * compile error rather than a dead tap (`app.json` sets
@@ -28,7 +27,7 @@ type IconName = keyof typeof Ionicons.glyphMap;
 
 export type { HubKey };
 
-/** Who an entry is for. `admin` = owner or operator; others see it locked. */
+/** Who an entry is for. `admin` = owner or operator (and developers); hidden from others. */
 export type HubGate = 'all' | 'admin';
 
 /**
@@ -46,8 +45,10 @@ export interface Hub {
   icon: IconName;
   /** Where the Home tile goes. Hubs with one obvious screen go straight there. */
   href: Href;
-  /** Whether the whole hub is an admin area (Systems Management). */
+  /** Whether the whole hub is an admin area. */
   gate: HubGate;
+  /** The Home subtitle crew see, when theirs differs (only their entries show). */
+  crewSubtitle?: string;
 }
 
 export interface HubItem {
@@ -105,7 +106,10 @@ export const HUBS: readonly Hub[] = [
     subtitle: 'Financials, security, inventory',
     icon: 'settings',
     href: '/hub/systems' as never,
-    gate: 'admin',
+    // Open to crew since 2026-10-08: Receipts, Inventory, Vehicle Checklist
+    // and Security live here; the admin entries are hidden from them.
+    gate: 'all',
+    crewSubtitle: 'Receipts, inventory, checklist',
   },
 ];
 
@@ -133,7 +137,8 @@ export const HUB_ITEMS: readonly HubItem[] = [
   { key: 'time-off', title: 'Time Off', icon: 'airplane', href: '/more/time-off', hub: 'hr', tone: 2, gate: 'all' },
   { key: 'cards', title: 'Trading Cards', icon: 'albums', href: '/cards', hub: 'hr', tone: 3, gate: 'all', subtitle: 'One pack per ten hours' },
   { key: 'employees', title: 'Employees', icon: 'id-card', href: '/more/employees', hub: 'hr', tone: 4, gate: 'admin' },
-  { key: 'eom', title: 'Employee of the Month', icon: 'trophy', href: '/more/employee-of-month', hub: 'hr', tone: 5, gate: 'admin' },
+  // Everyone (2026-10-08): crew get the winners, read-only; admins the editor.
+  { key: 'eom', title: 'Employee of the Month', icon: 'trophy', href: '/more/employee-of-month', hub: 'hr', tone: 5, gate: 'all' },
 
   // ---- Systems Management ----
   { key: 'financials', title: 'Financials', icon: 'wallet', href: '/financials', hub: 'systems', tone: 'hr', gate: 'admin', subtitle: 'P&L, ledger, cash position' },

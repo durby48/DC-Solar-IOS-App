@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CrmWorkspace } from '@/components/crm/workspace/CrmWorkspace';
 import { AppText, FadeInUp, Screen, SectionHeader, Tile } from '@/components/ui';
 import { colors, hubColors, spacing } from '@/constants/theme';
-import { explainAdminOnly, isLockedFor } from '@/lib/adminGate';
+import { isVisibleFor } from '@/lib/adminGate';
 import { fetchUnreadCount } from '@/lib/comms';
 import { hubFor, itemsIn } from '@/lib/hub';
 import { useRoleGate } from '@/lib/role';
@@ -91,14 +91,14 @@ function CrmHub() {
 
   const hub = hubFor('crm');
   const accent = hubColors.crm;
-  const items = itemsIn('crm');
+  // Admin-only entries are hidden from crew (2026-10-08), not drawn locked.
+  const items = itemsIn('crm').filter((item) => isVisibleFor(item.gate, gate.phase, isAdmin));
 
   return (
     <Screen header={<AppText variant="title">{hub.title}</AppText>}>
       <SectionHeader title={hub.title} subtitle={hub.subtitle} accent={accent.fg} />
       <View style={styles.grid}>
         {items.map((item, i) => {
-          const locked = gate.phase === 'ready' && isLockedFor(item.gate, isAdmin);
           return (
             <FadeInUp key={item.key} index={i} style={[styles.cell, { width: `${100 / columns}%` }]}>
               <Tile
@@ -106,12 +106,8 @@ function CrmHub() {
                 subtitle={item.subtitle}
                 icon={item.icon}
                 tone={item.tone}
-                locked={locked}
                 badge={item.badge === 'unread' ? unread : undefined}
-                onPress={() => {
-                  if (isLockedFor(item.gate, isAdmin)) explainAdminOnly();
-                  else router.push(item.href);
-                }}
+                onPress={() => router.push(item.href)}
                 style={styles.tile}
               />
             </FadeInUp>

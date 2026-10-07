@@ -3,7 +3,7 @@ import { StyleSheet, View, useWindowDimensions, Platform } from 'react-native';
 
 import { FadeInUp, Screen, SectionHeader, Tile, AppText } from '@/components/ui';
 import { colors, hubColors, spacing } from '@/constants/theme';
-import { explainAdminOnly, isLockedFor } from '@/lib/adminGate';
+import { isVisibleFor } from '@/lib/adminGate';
 import { HUBS, hubFor, itemsIn, type HubKey } from '@/lib/hub';
 import { useRoleGate } from '@/lib/role';
 import { router } from 'expo-router';
@@ -11,8 +11,8 @@ import { router } from 'expo-router';
 /**
  * A hub's front page (2026-09-12): the entries of one Home hub as a grid of
  * colour-edged tiles. Human Resources and Systems Management land here; CRM,
- * Pipeline and Operations have their own screens. Same grid for every role —
- * admin-only entries are drawn locked and explain themselves on tap.
+ * Pipeline and Operations have their own screens. Admin-only entries are
+ * hidden from crew (2026-10-08; they used to be drawn locked).
  */
 const WIDE_BREAKPOINT = 900;
 
@@ -41,7 +41,7 @@ export default function HubScreen() {
 
   const hub = hubFor(key);
   const accent = hubColors[key];
-  const items = itemsIn(key);
+  const items = itemsIn(key).filter((item) => isVisibleFor(item.gate, gate.phase, isAdmin));
 
   return (
     <Screen>
@@ -49,7 +49,6 @@ export default function HubScreen() {
       <SectionHeader title={hub.title} subtitle={hub.subtitle} accent={accent.fg} />
       <View style={styles.grid}>
         {items.map((item, i) => {
-          const locked = gate.phase === 'ready' && isLockedFor(item.gate, isAdmin);
           return (
             <FadeInUp key={item.key} index={i} style={[styles.cell, { width: `${100 / columns}%` }]}>
               <Tile
@@ -58,11 +57,7 @@ export default function HubScreen() {
                 icon={item.icon}
                 tone={item.tone}
                 compact={compact}
-                locked={locked}
-                onPress={() => {
-                  if (locked) explainAdminOnly();
-                  else router.push(item.href);
-                }}
+                onPress={() => router.push(item.href)}
                 style={styles.tile}
               />
             </FadeInUp>
