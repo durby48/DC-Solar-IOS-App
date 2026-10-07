@@ -249,7 +249,9 @@ function BoardCard({
                 }}
                 disabled={!openCustomer}
                 hitSlop={4}
-                accessibilityRole={openCustomer ? 'button' : undefined}
+                // A link, not a button: it sits inside the card's button, and
+                // a <button> inside a <button> is invalid on the web.
+                accessibilityRole={openCustomer ? 'link' : undefined}
                 accessibilityLabel={openCustomer ? `Open customer ${job.customer.name}` : undefined}
                 style={({ pressed }) => [styles.customerRow, pressed && styles.customerPressed]}>
                 <CustomerAvatar customer={job.customer} size={22} />

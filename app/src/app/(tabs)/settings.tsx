@@ -23,6 +23,7 @@ import { signOutAndLeave } from '@/lib/signOut';
  *   Phone     · Recent calls, Do not disturb, Notifications, Calling check
  *   Account   · Security (password, two-step sign-in), Sign out
  *   App       · version / check for an update, Delete my account
+ *   Pay & time off · Paystubs, Time off (2026-10-08)
  *   Developer · Developer Tools, for a developer on a Sales account (2026-10-08)
  *
  * Each row opens its own screen (`/commission`, `/lead-map`, `/plans`,
@@ -128,6 +129,15 @@ function SalesSettings() {
           </Card>
         </View>
       ) : null}
+
+      {/* Pay and time off (2026-10-08) — the same screens the crew use. */}
+      <View>
+        <SectionHeader title="Pay & time off" accent={hubColors.crm.fg} />
+        <Card padded={false}>
+          <ListRow icon="cash" title="Paystubs" subtitle="Your pay statements" onPress={() => go('/more/paystubs')} divider />
+          <ListRow icon="airplane" title="Time off" subtitle="Ask for days off and see your requests" onPress={() => go('/more/time-off')} />
+        </Card>
+      </View>
 
       <View>
         <SectionHeader title="Account" accent={hubColors.crm.fg} />

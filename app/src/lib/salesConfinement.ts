@@ -43,6 +43,8 @@ const ALLOWED = [
   '/dev-tools',
   '/assign-leads',
   '/removed-leads',
+  '/more/paystubs',
+  '/more/time-off',
 ];
 
 function allowed(pathname: string): boolean {
