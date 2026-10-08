@@ -579,7 +579,9 @@ export function CustomerList({
         />
       </View>
 
-      {leads.length > 0 ? (
+      {/* Leads only under Show → Leads (2026-10-09, Carson): the default list
+          is actual customers. */}
+      {leadsOnly && leads.length > 0 ? (
         <View style={styles.leadsSection}>
           <Text style={styles.sectionTitle}>
             Leads · {leads.length} not converted

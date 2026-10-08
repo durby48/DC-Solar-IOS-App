@@ -247,6 +247,20 @@ function PipelineCard({
               {`Your hours: ${myHours.toFixed(1)} h`}
             </AppText>
           ) : null}
+          {/* The amount on the front, like the desktop board's card
+              (2026-10-09, Carson). Money is admin-only in RLS, so only owners
+              and operators ever have it. */}
+          {company ? (
+            money ? (
+              <AppText variant="bodyStrong" color={colors.textPrimary} numberOfLines={1} style={styles.frontMoney}>
+                {`Overhead ${formatCurrency(money.expenses)}`}
+              </AppText>
+            ) : null
+          ) : money ? (
+            <AppText variant="bodyStrong" color={colors.textPrimary} numberOfLines={1} style={styles.frontMoney}>
+              {`Inv ${formatCurrency(money.invoiced)} · Paid ${formatCurrency(money.paid)}`}
+            </AppText>
+          ) : null}
         </AnimatedPressable>
 
         {/* ---- page 2: how much ---- */}
@@ -730,6 +744,7 @@ const styles = StyleSheet.create({
   numeric: {
     fontVariant: ['tabular-nums'],
   },
+  frontMoney: { fontVariant: ['tabular-nums'] },
   moneyRowNew: {
     flexDirection: 'row',
     justifyContent: 'space-between',
