@@ -8,8 +8,12 @@
  *   invite { name, email, role: 'sales'|'viewer'|'operator',
  *            cell?, number?, pay_rate? }
  *                           → { link, expires_at }   (operator: owner only)
- *   link   { email }        → { link, expires_at, kind }  a fresh setup link,
- *                             or a password-reset link if they have a login
+ *   link   { email, send_email? }
+ *                           → { link, expires_at, kind, emailed?, email_error? }
+ *                             a fresh setup link, or a password-reset link if
+ *                             they have a login. send_email (2026-10-09) also
+ *                             emails it to them from the company mailbox;
+ *                             if the email fails the link is still returned.
  *   remove { email }        → { ok }   owner only: they lose all access, their
  *                             records stay
  *   numbers                 → { numbers: [{ number, texting_ready, calls_ready }] }
@@ -20,8 +24,12 @@
  *
  * Links are https://app.dcsolarkc.com/join?code=<32 random bytes>; only the
  * SHA-256 of the code is stored, valid 7 days, single use (`accept-invite`).
- * No email is sent — the admin texts / copies / emails the link from the app,
- * because this project's Auth email only reaches the team (no custom SMTP).
+ * Supabase Auth email is NOT used — it only reaches the team (no custom SMTP).
+ * Either the admin texts / copies the link from the app, or `send_email` sends
+ * it through Gmail: the same service account (GMAIL_SA_JSON, domain-wide
+ * delegation, gmail.modify) that gmail-inbox uses, impersonating
+ * INVITE_EMAIL_FROM (default devon@dcsolarkc.com). It lands in that mailbox's
+ * Sent, so there is a record of every link emailed.
  */
 
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
@@ -113,6 +121,97 @@ async function twilioNumbers(): Promise<TwilioNumber[]> {
       texting_ready: inService.has(n.sid),
       calls_ready: Boolean(n.voice_url && n.voice_url.trim()),
     }));
+}
+
+// --- emailing a link (2026-10-09) --------------------------------------------
+// Same Google service account and scope as gmail-inbox; see its header for
+// the delegation setup. Only the link email is sent from here.
+
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
+function b64url(bytes: Uint8Array): string {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function b64(text: string): string {
+  let bin = '';
+  for (const b of new TextEncoder().encode(text)) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+async function gmailToken(mailbox: string): Promise<string> {
+  const raw = Deno.env.get('GMAIL_SA_JSON');
+  if (!raw) throw new Error('Email is not set up on the server (GMAIL_SA_JSON).');
+  const sa = JSON.parse(raw) as { client_email?: string; private_key?: string };
+  if (!sa.client_email || !sa.private_key) throw new Error('The email key on the server is incomplete.');
+  const now = Math.floor(Date.now() / 1000);
+  const enc = new TextEncoder();
+  const header = b64url(enc.encode(JSON.stringify({ alg: 'RS256', typ: 'JWT' })));
+  const claims = b64url(
+    enc.encode(JSON.stringify({ iss: sa.client_email, sub: mailbox, scope: GMAIL_SCOPE, aud: GOOGLE_TOKEN_URL, iat: now, exp: now + 3600 })),
+  );
+  const der = atob(sa.private_key.replace(/-----[A-Z ]+-----/g, '').replace(/\s+/g, ''));
+  const keyBytes = Uint8Array.from(der, (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey('pkcs8', keyBytes, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+  const signature = new Uint8Array(await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, enc.encode(`${header}.${claims}`)));
+  const res = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: `${header}.${claims}.${b64url(signature)}`,
+    }).toString(),
+  });
+  const data = (await res.json().catch(() => ({}))) as { access_token?: string; error?: string };
+  if (!res.ok || !data.access_token) throw new Error(`Google refused the email login (${data.error ?? res.status}).`);
+  return data.access_token;
+}
+
+/** Email a setup / reset link to the employee. Throws a readable message. */
+async function emailLink(input: { to: string; name: string | null; link: string; kind: 'invite' | 'reset' }): Promise<void> {
+  const from = (Deno.env.get('INVITE_EMAIL_FROM') ?? 'devon@dcsolarkc.com').trim();
+  const first = (input.name ?? '').trim().split(' ')[0] || 'there';
+  const subject = input.kind === 'reset' ? 'Reset your DC Solar password' : 'Welcome to DC Solar: set up your account';
+  const text = [
+    `Hi ${first},`,
+    '',
+    input.kind === 'reset'
+      ? `Here is a link to set a new password for your DC Solar app account (${input.to}):`
+      : `Welcome to DC Solar! Set up your app account (${input.to}) here:`,
+    '',
+    input.link,
+    '',
+    'The link works once and is good for 7 days.',
+    input.kind === 'reset' ? 'If you did not ask for a new password, you can ignore this email; your current one still works.' : '',
+    '',
+    'DC Solar',
+  ]
+    .filter((line, i, all) => line !== '' || all[i - 1] !== '')
+    .join('\n');
+  // `to` passed EMAIL_RE (no whitespace, so no CR/LF); the subject is ASCII.
+  const message = [
+    `From: "DC Solar" <${from}>`,
+    `To: ${input.to}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    b64(text).replace(/(.{76})/g, '$1\r\n'),
+  ].join('\r\n');
+  const token = await gmailToken(from);
+  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw: b64url(new TextEncoder().encode(message)) }),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+    throw new Error(`Gmail did not send it (${data.error?.message ?? res.status}).`);
+  }
 }
 
 interface AuthUserLite {
@@ -328,12 +427,17 @@ Deno.serve(async (req) => {
       if (!emp) return fail(404, 'not_found', 'That person is not an employee.');
       const users = await authUsers(admin);
       const kind: 'invite' | 'reset' = users.has(email) ? 'reset' : 'invite';
-      const issued = await issueLink(
-        admin,
-        { email, name: (emp as { display_name?: string | null }).display_name ?? null, kind, createdBy: callerEmail },
-        appBase,
-      );
-      return ok({ ...issued, kind });
+      const name = (emp as { display_name?: string | null }).display_name ?? null;
+      const issued = await issueLink(admin, { email, name, kind, createdBy: callerEmail }, appBase);
+      if (body.send_email !== true) return ok({ ...issued, kind });
+      if (!EMAIL_RE.test(email)) return ok({ ...issued, kind, emailed: false, email_error: 'Their email address does not look right.' });
+      try {
+        await emailLink({ to: email, name, link: issued.link, kind });
+        return ok({ ...issued, kind, emailed: true });
+      } catch (e) {
+        // The link is good either way: the admin can still copy or text it.
+        return ok({ ...issued, kind, emailed: false, email_error: e instanceof Error ? e.message : 'The email could not be sent.' });
+      }
     }
 
     // --- remove access (owner only) -------------------------------------------

@@ -65,6 +65,18 @@ export function newEmployeeLink(email: string) {
   );
 }
 
+/**
+ * A fresh link, emailed to them by the server (2026-10-09). `emailed` false
+ * means the link was made but the email failed — show it so it can be sent
+ * another way.
+ */
+export function emailEmployeeLink(email: string) {
+  return access<{ link: string; expires_at: string; kind: 'invite' | 'reset'; emailed: boolean; email_error?: string }>(
+    { action: 'link', email, send_email: true },
+    'Could not email a new link.',
+  );
+}
+
 export interface AvailableNumber {
   number: string;
   /** In the Twilio Messaging Service — texts will be delivered (else 30034). */

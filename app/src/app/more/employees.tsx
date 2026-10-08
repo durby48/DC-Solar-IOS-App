@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/ui';
 import { colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
 import { useAdminOnlyScreen } from '@/lib/adminGate';
 import {
+  emailEmployeeLink,
   fetchEmployeeStatuses,
   newEmployeeLink,
   removeEmployeeAccess,
@@ -123,6 +124,8 @@ export default function EmployeesScreen() {
   const [rowLink, setRowLink] = useState<{ email: string; link: string; kind: 'invite' | 'reset' } | null>(null);
   const [rowBusy, setRowBusy] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+  /** "Emailed … to …" after the Email button (2026-10-09). */
+  const [rowNotice, setRowNotice] = useState<{ email: string; text: string } | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const isOwner = gate.role?.role === 'owner';
 
@@ -202,6 +205,7 @@ export default function EmployeesScreen() {
   const makeLink = async (employee: EmployeeRow) => {
     setRowBusy(employee.email);
     setRowError(null);
+    setRowNotice(null);
     setRowLink(null);
     const result = await newEmployeeLink(employee.email);
     setRowBusy(null);
@@ -210,6 +214,32 @@ export default function EmployeesScreen() {
       setReloadKey((k) => k + 1);
     } else {
       setRowError(result.message);
+    }
+  };
+
+  // One tap: a fresh link, emailed to them by the server. Making a link
+  // revokes their older one, so if the email fails the new link is shown to
+  // send another way.
+  const emailLink = async (employee: EmployeeRow) => {
+    setRowBusy(`email:${employee.email}`);
+    setRowError(null);
+    setRowNotice(null);
+    setRowLink(null);
+    const result = await emailEmployeeLink(employee.email);
+    setRowBusy(null);
+    if (!result.ok) {
+      setRowError(result.message);
+      return;
+    }
+    setReloadKey((k) => k + 1);
+    if (result.emailed) {
+      setRowNotice({
+        email: employee.email,
+        text: `${result.kind === 'reset' ? 'Password reset' : 'Setup'} link emailed to ${employee.email}. It works once, for 7 days.`,
+      });
+    } else {
+      setRowError(`The link was made but not emailed: ${result.email_error ?? 'unknown error'} Send it another way:`);
+      setRowLink({ email: employee.email, link: result.link, kind: result.kind });
     }
   };
 
@@ -432,6 +462,20 @@ export default function EmployeesScreen() {
             ) : null}
             <View style={styles.accessRow}>
               <Pressable
+                onPress={() => void emailLink(employee)}
+                disabled={rowBusy !== null}
+                accessibilityRole="button"
+                style={({ pressed }) => [styles.contactButton, pressed && styles.rowPressed]}>
+                <Ionicons name="mail-outline" size={16} color={colors.ocean} />
+                <Text style={styles.contactButtonText}>
+                  {rowBusy === `email:${employee.email}`
+                    ? 'Emailing…'
+                    : statuses.get(employee.email.toLowerCase())?.has_login
+                      ? 'Email password reset'
+                      : 'Email setup link'}
+                </Text>
+              </Pressable>
+              <Pressable
                 onPress={() => void makeLink(employee)}
                 disabled={rowBusy !== null}
                 style={({ pressed }) => [styles.contactButton, pressed && styles.rowPressed]}>
@@ -464,6 +508,10 @@ export default function EmployeesScreen() {
                 They will not be able to sign in. Their leads, notes and calls stay; their DC Solar number is freed.
               </Text>
             ) : null}
+            {rowNotice && rowNotice.email === employee.email ? <Text style={styles.noticeText}>{rowNotice.text}</Text> : null}
+            {rowError && expandedId === employee.id && rowLink?.email === employee.email ? (
+              <Text style={styles.errorText}>{rowError}</Text>
+            ) : null}
             {rowLink && rowLink.email === employee.email ? (
               <LinkPanel
                 link={rowLink.link}
@@ -472,7 +520,9 @@ export default function EmployeesScreen() {
                 kind={rowLink.kind}
               />
             ) : null}
-            {rowError && expandedId === employee.id ? <Text style={styles.errorText}>{rowError}</Text> : null}
+            {rowError && expandedId === employee.id && rowLink?.email !== employee.email ? (
+              <Text style={styles.errorText}>{rowError}</Text>
+            ) : null}
             {renderDocs(employee)}
           </View>
         ) : null}
@@ -591,6 +641,7 @@ const styles = StyleSheet.create({
   removeButton: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs },
   removeButtonText: { color: colors.danger, fontSize: 13, fontWeight: '700' },
   errorText: { color: colors.danger, fontSize: 12, fontWeight: '700' },
+  noticeText: { color: hubColors.hr.fg, fontSize: 12, fontWeight: '700' },
   sectionTitle: {
     color: hubColors.hr.fg,
     fontSize: 18,
