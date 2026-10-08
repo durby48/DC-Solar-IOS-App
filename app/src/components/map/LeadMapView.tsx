@@ -70,6 +70,7 @@ export function LeadMapView({
   focusKey,
   storms,
   labels = true,
+  controlsTop,
   initialView = null,
   onViewChange,
 }: {
@@ -80,6 +81,8 @@ export function LeadMapView({
   focusKey?: string | null;
   storms?: StormLayers | null;
   labels?: boolean;
+  /** Where the Map / Satellite switch sits (full screen: under the Close row). */
+  controlsTop?: number;
   /** Start exactly here (the full-screen map opening where the small one was). */
   initialView?: MapViewState | null;
   /** Reports where the map is looking after every move. */
@@ -207,7 +210,7 @@ export function LeadMapView({
           />
         ))}
       </MapView>
-      <View style={styles.switch}>
+      <View style={[styles.switch, controlsTop !== undefined && { top: controlsTop }]}>
         {(['Map', 'Satellite'] as const).map((label) => {
           const active = (label === 'Satellite') === satellite;
           return (

@@ -85,6 +85,8 @@ export function LeadMapView({
   storms?: StormLayers | null;
   /** Esri place-name labels over the satellite (zoomed out only). */
   labels?: boolean;
+  /** Phone only (the web's Map / Satellite control is Leaflet's own, top-right). */
+  controlsTop?: number;
   /** Start exactly here (the full-screen map opening where the small one was). */
   initialView?: MapViewState | null;
   /** Reports where the map is looking after every move. */

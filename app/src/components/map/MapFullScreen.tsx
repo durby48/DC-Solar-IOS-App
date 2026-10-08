@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { type ComponentProps, type ReactNode } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LeadMapView } from '@/components/map/LeadMapView';
 import { colors, radii, spacing } from '@/constants/theme';
@@ -29,15 +29,45 @@ export function MapFullScreen({
   /** Wind storm picked: one orange swatch instead of the hail sizes. */
   windLegend?: boolean;
 }) {
+  return (
+    <Modal visible={visible} animationType="fade" presentationStyle="fullScreen" onRequestClose={onClose} statusBarTranslucent>
+      {/* A Modal is its own native window: give it its own SafeAreaProvider,
+          or the insets can read 0 and Close lands under the status bar /
+          Dynamic Island, where it cannot be tapped (fixed 2026-10-09). */}
+      <SafeAreaProvider>
+        <FullScreenBody visible={visible} onClose={onClose} title={title} footer={footer} windLegend={windLegend} map={map} />
+      </SafeAreaProvider>
+    </Modal>
+  );
+}
+
+function FullScreenBody({
+  visible,
+  onClose,
+  title,
+  footer,
+  windLegend,
+  map,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  title?: string | null;
+  footer?: ReactNode;
+  windLegend: boolean;
+  map: ComponentProps<typeof LeadMapView>;
+}) {
   const insets = useSafeAreaInsets();
+  // Never closer to the top than the status bar, even if insets still read 0.
+  const top = Math.max(insets.top, Platform.OS === 'ios' ? 50 : Platform.OS === 'android' ? 28 : 0) + spacing.sm;
   const showLegend = (map.storms?.reports.length ?? 0) > 0;
 
   return (
-    <Modal visible={visible} animationType="fade" presentationStyle="fullScreen" onRequestClose={onClose} statusBarTranslucent>
+    <>
       <View style={styles.screen}>
-        {visible ? <LeadMapView {...map} /> : null}
+        {/* The map's own Map / Satellite switch sits under the Close row. */}
+        {visible ? <LeadMapView {...map} controlsTop={top + 48} /> : null}
 
-        <View pointerEvents="box-none" style={[styles.top, { top: insets.top + spacing.sm }]}>
+        <View pointerEvents="box-none" style={[styles.top, { top }]}>
           <Pressable
             onPress={onClose}
             accessibilityRole="button"
@@ -77,7 +107,7 @@ export function MapFullScreen({
           ) : null}
         </View>
       </View>
-    </Modal>
+    </>
   );
 }
 
