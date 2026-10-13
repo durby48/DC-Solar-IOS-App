@@ -12,7 +12,8 @@
  *
  * Each redraw saves a NEW file name in the public 'marketing-art' bucket and
  * points marketing_art.path at it (2026-10-12_marketing_art.sql), so nobody is
- * ever served a stale cached image; the old file is removed afterwards.
+ * ever served a stale cached image. Old files stay (Stripe product images link
+ * to them).
  *
  * Auth: verify_jwt ON. The caller is a company admin (owner/operator, or a
  * developer), or the service role (a session drawing the set from a PC — the
@@ -274,7 +275,8 @@ Deno.serve(async (req) => {
       updated_by: who,
     });
     if (rowErr) return fail(500, 'server_error', `Picture saved but not recorded: ${rowErr.message}`);
-    if (oldPath && oldPath !== path) await admin.storage.from(BUCKET).remove([oldPath]);
+    // Old files are KEPT: the Stripe products (Solar Shield tiers) link to them
+    // as their images, and a deleted file would break that picture.
 
     return ok({ path, cached: false });
   } catch (e) {

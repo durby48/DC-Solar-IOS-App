@@ -22,8 +22,11 @@
  * WHICH PRICE (2026-10-06, plans). The booking's `jobs.plan_tier`:
  *   bronze / silver / gold → that tier's Stripe price (`service_plans`);
  *   custom                 → a yearly price made on the fly at the rep's
- *                            `plan_price_cents`, on the same Stripe product as
- *                            the tiers (read from the Bronze price);
+ *                            `plan_price_cents`, on the Solar Shield Custom
+ *                            product (company_settings.stripe_custom_product_id,
+ *                            2026-10-12 — before that it rode on the Bronze
+ *                            product and read as "Bronze" on the invoice);
+ *                            falls back to the Bronze price's product;
  *   null                   → booked before plans: the legacy
  *                            company_settings.stripe_annual_price_id.
  * On success the customer records what they are on (plan_tier,
@@ -179,16 +182,25 @@ Deno.serve(async (req) => {
       planPrice = (plan.amount_cents as number) ?? planPrice;
     } else if (tier === 'custom') {
       if (!planPrice || planPrice < 100) return await notSet('The custom price is missing');
-      // Same Stripe product as the tiers, so every plan reports together.
+      // Its own product, so the invoice does not call a custom deal "Bronze".
+      const { data: customSettings } = await admin
+        .from('company_settings')
+        .select('stripe_custom_product_id')
+        .eq('company', job!.company)
+        .maybeSingle();
+      const customProduct = (customSettings?.stripe_custom_product_id as string | null) ?? null;
       const { data: bronze } = await admin
         .from('service_plans')
         .select('stripe_price_id')
         .eq('company', job!.company)
         .eq('tier', 'bronze')
         .maybeSingle();
-      if (!bronze?.stripe_price_id) return await notSet('The plans are not set up in Stripe');
-      const base = await stripe(stripeKey, 'GET', `prices/${encodeURIComponent(bronze.stripe_price_id as string)}`);
-      const product = base.ok ? (base.data.product as string | undefined) : undefined;
+      let product: string | undefined = customProduct ?? undefined;
+      if (!product) {
+        if (!bronze?.stripe_price_id) return await notSet('The plans are not set up in Stripe');
+        const base = await stripe(stripeKey, 'GET', `prices/${encodeURIComponent(bronze.stripe_price_id as string)}`);
+        product = base.ok ? (base.data.product as string | undefined) : undefined;
+      }
       if (!product) return await notSet('The plan product could not be read from Stripe');
       item = {
         'items[0][price_data][currency]': 'usd',

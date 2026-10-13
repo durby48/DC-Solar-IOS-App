@@ -24,6 +24,7 @@ const TERMS = [
   'Every plan is billed yearly, with a 2-year minimum agreement.',
   'Nothing is charged when they save their card — the first year is charged after the first service visit.',
   'The second year renews automatically 12 months later.',
+  'Panel cleaning is an optional add-on, never included: 5% off with Bronze, 10% with Silver, 15% with Gold — the same as removal & reinstall.',
   'You can sell a custom yearly price; it is billed the same way.',
   'You earn 30% of every payment from customers you sold — first year and renewals.',
 ];

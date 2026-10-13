@@ -45,7 +45,7 @@ export default function BrochurePage() {
 
   useEffect(() => {
     void fetchPublicPlans().then(setPlans);
-    void fetchArtUrls(['shield-program', 'shield-bronze', 'shield-silver', 'shield-gold'], 960).then(setArt);
+    void fetchArtUrls(['script-hero', 'shield-program', 'shield-bronze', 'shield-silver', 'shield-gold'], 960).then(setArt);
     if (typeof rep === 'string' && rep) void fetchRepContact(rep).then(setContact);
   }, [rep]);
 
@@ -58,7 +58,15 @@ export default function BrochurePage() {
       <Stack.Screen options={{ title: 'DC Solar service plans', headerShown: false }} />
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.hero}>
-          <Image source={require('@/assets/images/login-solarflow.jpg')} style={StyleSheet.absoluteFill} contentFit="cover" />
+          {/* DC Solar's own imagery (2026-10-12): the Gemini-drawn hail-check scene with
+              the DC Solar van; the login still paints first and stays if it fails. */}
+          <Image
+            source={art['script-hero'] ? { uri: art['script-hero'] } : require('@/assets/images/login-solarflow.jpg')}
+            placeholder={require('@/assets/images/login-solarflow.jpg')}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            transition={200}
+          />
           <View style={styles.heroShade} />
           <View style={[styles.inner, styles.heroInner]}>
             {/* The logo stays black (brand), on a light plate so it reads on the photo. */}
@@ -66,7 +74,7 @@ export default function BrochurePage() {
               <Image source={require('@/assets/images/logo.png')} style={styles.logo} contentFit="contain" />
             </View>
             <Text style={styles.heroTitle}>Keep your solar working like day one.</Text>
-            <Text style={styles.heroSub}>Yearly solar service from your local Kansas City team.</Text>
+            <Text style={styles.heroSub}>Solar Shield: yearly protection for your solar, from your local Kansas City team.</Text>
           </View>
         </View>
 
@@ -106,7 +114,12 @@ export default function BrochurePage() {
 
           <Text style={styles.h2}>What we do on a visit</Text>
           <View style={styles.list}>
-            {['Inspect the panels, mounting and wiring', 'Clean the panels', 'Check the inverter and your monitoring', 'Send you a report on what we found'].map((t) => (
+            {[
+              'Voltage and current readings on every string',
+              'Thermal imaging to find hot spots',
+              'Inspect the panels, racking, wiring and inverter',
+              'Your Solar Health Report: photos, readings and roof documents for your roofer',
+            ].map((t) => (
               <View key={t} style={styles.listRow}>
                 <Ionicons name="checkmark-circle" size={18} color="#3E9B5B" />
                 <Text style={styles.listText}>{t}</Text>
@@ -116,6 +129,11 @@ export default function BrochurePage() {
 
           {/* The plans are sold as the Solar Shield program (2026-10-12), with
               Gemini-drawn art per tier (marketing-art). */}
+          <Text style={styles.addOn}>
+            Panel cleaning is an optional add-on, discounted by plan: 5% with Bronze, 10% with Silver, 15% with Gold —
+            the same discount as panel removal & reinstall.
+          </Text>
+
           <Text style={styles.h2}>The Solar Shield program</Text>
           <Text style={styles.kicker}>Yearly protection for your solar, powered by DC Solar. Pick Bronze, Silver or Gold.</Text>
           {art['shield-program'] ? (
@@ -253,6 +271,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   planName: { fontSize: 18, fontWeight: '800' },
+  addOn: { color: SOFT, fontSize: 14, lineHeight: 21, fontStyle: 'italic' },
   kicker: { color: SOFT, fontSize: 15, lineHeight: 22, marginTop: -8 },
   banner: { width: '100%', aspectRatio: 16 / 9, borderRadius: 14, backgroundColor: SKY },
   tierArt: { width: '100%', maxWidth: 260, alignSelf: 'center', aspectRatio: 4 / 5, borderRadius: 10, backgroundColor: SKY },

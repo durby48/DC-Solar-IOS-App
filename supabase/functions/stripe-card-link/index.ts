@@ -150,15 +150,34 @@ Deno.serve(async (req) => {
     // --- what they are agreeing to (2026-10-06, plans) -----------------------
     // Shown above the Save button on Stripe's page: the plan, its yearly
     // price, the 2-year agreement, and that nothing is charged yet.
+    // 2026-10-12: sold as the Solar Shield program, and the tier's "what's
+    // included" (service_plans.includes, the same lines as the brochure) is
+    // listed so the customer sees what they are paying for. Stripe caps this
+    // message at 1,200 characters.
     const TIER_LABEL: Record<string, string> = { bronze: 'Bronze', silver: 'Silver', gold: 'Gold', custom: 'Custom' };
     const cents = job.plan_price_cents as number | null;
     const dollars = cents ? `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: cents % 100 ? 2 : 0 })}` : null;
-    const terms = [
-      job.plan_tier && dollars ? `DC Solar ${TIER_LABEL[job.plan_tier as string] ?? ''} service plan: ${dollars} per year, 2-year agreement.` : null,
-      'Nothing is charged until after your first service visit.',
-    ]
-      .filter(Boolean)
-      .join(' ');
+    let includes: string[] = [];
+    if (job.plan_tier && job.plan_tier !== 'custom') {
+      const { data: planRow } = await admin
+        .from('service_plans')
+        .select('includes')
+        .eq('company', job.company)
+        .eq('tier', job.plan_tier)
+        .maybeSingle();
+      includes = ((planRow as { includes?: string | null } | null)?.includes ?? '')
+        .split('\n')
+        .map((l) => l.trim().replace(/^[-•✓]\s*/, ''))
+        .filter(Boolean);
+    }
+    const head = job.plan_tier && dollars
+      ? `Solar Shield ${TIER_LABEL[job.plan_tier as string] ?? ''} by DC Solar: ${dollars} per year, 2-year agreement.`
+      : null;
+    const tail = 'Nothing is charged until after your first service visit.';
+    let list = includes.length ? `Includes: ${includes.join('; ')}.` : null;
+    const room = 1200 - [head, tail].filter(Boolean).join(' ').length - 1;
+    if (list && list.length > room) list = `${list.slice(0, Math.max(0, room - 1)).replace(/[;,]?\s*\S*$/, '')}…`;
+    const terms = [head, list, tail].filter(Boolean).join(' ');
 
     // --- the card page ------------------------------------------------------
     const session = await stripe(stripeKey, 'POST', 'checkout/sessions', {
