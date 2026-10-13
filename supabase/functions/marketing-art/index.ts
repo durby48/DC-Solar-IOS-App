@@ -2,7 +2,8 @@
  * marketing-art — draw one of DC Solar's marketing pictures with Gemini.
  *
  * Slots (2026-10-12): the sales call script's header picture and the Solar
- * Shield program (a banner + one package per tier: Bronze, Silver, Gold) that
+ * Shield program — each carrying the real DC Solar logo (passed as a reference
+ * image) and the Kansas City skyline — (a banner + one package per tier: Bronze, Silver, Gold) that
  * customers see on the brochure and reps see on Plans & prices.
  *
  * THE PROMPTS LIVE HERE, not in the app, so a redraw a year from now still
@@ -48,39 +49,64 @@ const SHIELD =
   'The hero object is a heraldic shield emblem with a stylised rising sun and a grid of solar-panel cells ' +
   'engraved across its face, a raised rim, and a small sun burst at the top. ';
 
-const NO_EXTRA_TEXT =
-  ' No other words, letters, numbers, logos, brand marks or watermarks anywhere in the image.';
+/**
+ * The real DC Solar logo rides along as a reference image (2026-10-12, Devon:
+ * "include the logo and imagery of DC Solar"). It lives in this bucket at
+ * LOGO_PATH (a copy of app/assets/images/app-icon.png — skyline over the
+ * wordmark on cream). Gemini redraws it into the scene; eyeball every result,
+ * a garbled logo is worse than none.
+ */
+const LOGO_PATH = 'brand/dc-solar-logo.png';
+const LOGO =
+  'The attached image is the DC Solar logo: a black Kansas City skyline silhouette above the wordmark ' +
+  '"DC SOLAR" in heavy geometric capitals (the O is a solid black circle, the A has no crossbar). Wherever ' +
+  'this prompt asks for the DC Solar logo, reproduce THAT logo faithfully and legibly — same skyline, same ' +
+  'letterforms, black or white on a plain panel. Never invent a different logo or misspell it. ';
+const SKYLINE =
+  'The downtown Kansas City skyline (the same skyline as in the logo) is visible on the horizon. ';
+
+const ONLY_TEXT = (allowed: string) =>
+  ` The ONLY text in the whole image is ${allowed}. No other words, letters, numbers, logos or watermarks.`;
 
 const TIER_PACKAGE = (metal: string, label: string, extras: string) =>
   STYLE +
+  LOGO +
   SHIELD +
   `Show it as premium product packaging: the shield is cast in polished ${metal}, standing upright in front of ` +
-  `a matching ${metal}-trimmed presentation box, on a clean light surface with a soft reflection. ` +
-  `Behind it, softly out of focus, a Kansas City home with solar panels on the roof. ${extras} ` +
-  `The ONLY text in the image is engraved on the shield in clean bold capitals, spelled exactly: ` +
-  `"SOLAR SHIELD" on the top line and "${label}" on the line below. Check the spelling letter by letter.` +
-  NO_EXTRA_TEXT;
+  `a deep navy presentation box trimmed in ${metal}, on a clean light surface with a soft reflection. The DC ` +
+  `Solar logo is printed in white, clearly and legibly, on the front of the box below the shield. Behind it, ` +
+  `softly out of focus, a Kansas City home with solar panels on the roof. ${extras} ` +
+  `Engraved on the shield in clean bold capitals, spelled exactly: "SOLAR SHIELD" on the top line and ` +
+  `"${label}" on the line below. Check the spelling letter by letter.` +
+  ONLY_TEXT(`"SOLAR SHIELD", "${label}" and the DC Solar logo`);
 
 const SLOTS: Record<string, { prompt: string; aspect: string }> = {
   'script-hero': {
     aspect: '16:9',
     prompt:
       STYLE +
+      LOGO +
+      SKYLINE +
       'Scene: the morning after a hailstorm in a Kansas City suburb. Storm clouds are breaking up and golden ' +
       'sunlight is coming through. In the foreground a residential roof with a clean solar array; a DC Solar ' +
       'technician in a sun-orange work shirt and navy cap kneels beside the panels, checking them with a tablet. ' +
-      'A few hailstones and leaves on the shingles. Hopeful, reassuring mood — help has arrived. ' +
-      'Absolutely no text, letters, numbers, logos or watermarks.',
+      'A few hailstones and leaves on the shingles. Below, in the driveway, a white DC Solar service van with ' +
+      'the DC Solar logo large and legible on its side. Hopeful, reassuring mood — help has arrived.' +
+      ONLY_TEXT('the DC Solar logo on the van'),
   },
   'shield-program': {
     aspect: '16:9',
     prompt:
       STYLE +
+      LOGO +
       SHIELD +
-      'Three of these shields stand side by side in a row on a clean light surface, left to right: polished ' +
-      'bronze, polished silver, polished gold — the gold one slightly larger and in the centre-right, glowing ' +
-      'warmly. Behind them, a wide view of a Kansas City neighbourhood with solar panels on the roofs under a ' +
-      'clearing storm sky with sunshine breaking through. Absolutely no text, letters, numbers, logos or watermarks.',
+      SKYLINE +
+      'Three of these shields stand side by side on a deep navy display plinth, left to right: polished ' +
+      'bronze, polished silver, polished gold — the gold one slightly larger and glowing warmly. The DC Solar ' +
+      'logo is printed in white, large and legible, centred on the front face of the plinth. Behind them, a ' +
+      'Kansas City neighbourhood with solar panels on the roofs under a clearing storm sky with sunshine ' +
+      'breaking through.' +
+      ONLY_TEXT('the DC Solar logo on the plinth'),
   },
   'shield-bronze': {
     aspect: '4:5',
@@ -111,6 +137,13 @@ function fail(status: number, code: string, error: string): Response {
     status,
     headers: { 'content-type': 'application/json', ...CORS_HEADERS },
   });
+}
+
+/** Uint8Array → base64 without blowing the stack on large images. */
+function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
 }
 
 function fromBase64(b64: string): Uint8Array {
@@ -184,6 +217,14 @@ Deno.serve(async (req) => {
     const direction = payload.direction?.trim().slice(0, 500);
     const prompt = direction ? `${slot.prompt} Additional direction: ${direction}` : slot.prompt;
 
+    // --- the real logo, as a reference image ------------------------------------
+    const parts: Record<string, unknown>[] = [];
+    const { data: logo } = await admin.storage.from(BUCKET).download(LOGO_PATH);
+    if (logo) {
+      parts.push({ inline_data: { mime_type: logo.type || 'image/png', data: toBase64(new Uint8Array(await logo.arrayBuffer())) } });
+    }
+    parts.push({ text: prompt });
+
     // --- Gemini -----------------------------------------------------------------
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`,
@@ -191,7 +232,7 @@ Deno.serve(async (req) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          contents: [{ role: 'user', parts }],
           generationConfig: { imageConfig: { aspectRatio: slot.aspect } },
         }),
       },
