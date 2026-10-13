@@ -125,11 +125,61 @@ export function hailLabel(size: number | null | undefined): string {
   return `${Number(size.toFixed(2))} in`;
 }
 
-/** A record's last hail, from its last_hail_* columns: "Aug 19, 2026 · 1.75 in · 1.2 mi". */
+/**
+ * A record's last hail, from its last_hail_* columns: "Aug 19, 2026 · 1.75 in
+ * · at the address (radar)". Radar hits (2026-10-12) have no distance — the
+ * address was inside the swath; an older report-based hit still shows miles.
+ */
 export function lastHailLabel(at: string | null | undefined, size: number | null | undefined, miles: number | null | undefined): string | null {
   if (!at) return null;
-  const d = new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  return [d, hailLabel(size ?? null), miles != null ? `${Number(miles).toFixed(1)} mi away` : null].filter(Boolean).join(' · ');
+  const d = new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Chicago' });
+  const where = miles != null && Number(miles) > 0 ? `${Number(miles).toFixed(1)} mi away` : 'at the address (radar)';
+  return [d, hailLabel(size ?? null), where].filter(Boolean).join(' · ');
+}
+
+// ---------------------------------------------------------------------------
+// Radar swaths (2026-10-12) — 2026-10-12_hail_swaths.sql
+// ---------------------------------------------------------------------------
+
+export interface SwathRow {
+  day: string;
+  band: number;
+  final: boolean;
+  /** Polygons, each = rings of [lat, lng] (outer first, then holes). */
+  polygons: [number, number][][][];
+}
+
+function toLatLng(rings: number[][][]): [number, number][][] {
+  return rings.map((ring) => ring.map(([lng, lat]) => [lat, lng] as [number, number]));
+}
+
+/** Swath bands between two Central days (inclusive); `bands` narrows which steps. */
+export async function fetchSwaths(from: string, to: string, bands?: number[]): Promise<SwathRow[]> {
+  try {
+    const { data, error } = await supabase.rpc('hail_swaths_range', { p_from: from, p_to: to, p_bands: bands ?? null });
+    if (error || !data) return [];
+    return (data as { storm_day: string; band: number | string; final: boolean; geojson: string | null }[]).flatMap((r) => {
+      if (!r.geojson) return [];
+      const g = JSON.parse(r.geojson) as { type: string; coordinates: number[][][] | number[][][][] };
+      const polys = g.type === 'Polygon' ? [g.coordinates as number[][][]] : (g.coordinates as number[][][][]);
+      return [{ day: String(r.storm_day), band: Number(r.band), final: r.final, polygons: polys.map(toLatLng) }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** The ten coverage counties as one outline (rings of [lat, lng]). */
+export async function fetchCoverage(): Promise<[number, number][][]> {
+  try {
+    const { data, error } = await supabase.rpc('hail_coverage_outline');
+    if (error || typeof data !== 'string') return [];
+    const g = JSON.parse(data) as { type: string; coordinates: number[][][] | number[][][][] };
+    const polys = g.type === 'Polygon' ? [g.coordinates as number[][][]] : (g.coordinates as number[][][][]);
+    return polys.flatMap(toLatLng);
+  } catch {
+    return [];
+  }
 }
 
 /** Within the last N days? */

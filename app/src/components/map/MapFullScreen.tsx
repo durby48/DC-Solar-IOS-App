@@ -59,7 +59,7 @@ function FullScreenBody({
   const insets = useSafeAreaInsets();
   // Never closer to the top than the status bar, even if insets still read 0.
   const top = Math.max(insets.top, Platform.OS === 'ios' ? 50 : Platform.OS === 'android' ? 28 : 0) + spacing.sm;
-  const showLegend = (map.storms?.reports.length ?? 0) > 0;
+  const showLegend = (map.storms?.reports.length ?? 0) > 0 || (map.storms?.swaths.length ?? 0) > 0;
 
   return (
     <>

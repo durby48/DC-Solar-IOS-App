@@ -10,12 +10,26 @@ import { AppText, Card, Screen, SectionHeader } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { sendSms } from '@/lib/comms';
 import { fetchMapPoints, type MapPoint } from '@/lib/leadMap';
-import { inPath, loadAllReports, MIN_HAIL, ZONE_LEGEND, type MapViewState, type StormLayers, type StormReportPoint } from '@/lib/stormLayers';
+import {
+  areaAt,
+  keysInAreas,
+  loadAllReports,
+  mergeBounds,
+  swathAreas,
+  swathShapes,
+  ZONE_LEGEND,
+  type LatLng,
+  type MapViewState,
+  type StormLayers,
+  type StormReportPoint,
+} from '@/lib/stormLayers';
 import { useRoleGate } from '@/lib/role';
 import { personName } from '@/lib/staffNames';
 import {
   checkStormHit,
+  fetchCoverage,
   fetchStormHits,
+  fetchSwaths,
   fetchStorms,
   hailLabel,
   markStormChecked,
@@ -23,10 +37,14 @@ import {
   stormDayLabel,
   type Storm,
   type StormHit,
+  type SwathRow,
 } from '@/lib/storms';
 
 /**
  * `/storm-reports/[day]` — one storm (2026-10-09): who was in its path.
+ * Since 2026-10-12 the path is the RADAR SWATH: the map shows that day's hail
+ * bands over the coverage counties, and everyone listed was inside the ≥ 1″
+ * swath (hail size = the radar estimate at their address; no distance).
  *
  *   Customers affected   distance, hail size, a "checked" tick each
  *   Leads affected       distance, hail size, owner
@@ -56,30 +74,49 @@ export default function StormDetailScreen() {
   // the Lead map on this storm.
   const [mapPoints, setMapPoints] = useState<MapPoint[] | null>(null);
   const [dayReports, setDayReports] = useState<StormReportPoint[]>([]);
+  const [swathRows, setSwathRows] = useState<SwathRow[]>([]);
+  const [coverage, setCoverage] = useState<LatLng[][]>([]);
+  const [selectedArea, setSelectedArea] = useState<string | null>(null);
   const [full, setFull] = useState(false);
   const view = useRef<MapViewState | null>(null);
 
   const load = useCallback(async () => {
     if (!day) return;
-    const [list, rows, pts, reports] = await Promise.all([
+    const [list, rows, pts, reports, swaths, outline] = await Promise.all([
       fetchStorms(),
       fetchStormHits(day),
       fetchMapPoints(gate.role?.isSales === true),
       loadAllReports(),
+      fetchSwaths(day, day),
+      fetchCoverage(),
     ]);
     setStorm(list.find((s) => s.day === day) ?? null);
     setHits(rows);
     setMapPoints(pts.points);
-    setDayReports(reports.filter((r) => r.day === day && r.kind === 'hail' && (r.size ?? 0) >= MIN_HAIL));
+    setDayReports(reports.filter((r) => r.day === day && r.kind === 'hail'));
+    setSwathRows(swaths);
+    setCoverage(outline);
   }, [day, gate.role?.isSales]);
 
-  const mapLayers = useMemo<StormLayers | null>(
-    () =>
-      dayReports.length && mapPoints
-        ? { radar: false, warnings: [], reports: dayReports, highlight: new Set(inPath(mapPoints, dayReports)), fitKey: `hail:${day}` }
-        : null,
-    [dayReports, mapPoints, day],
-  );
+  const shapes = useMemo(() => swathShapes(swathRows), [swathRows]);
+  const areas = useMemo(() => swathAreas(shapes), [shapes]);
+  const mapLayers = useMemo<StormLayers | null>(() => {
+    if (!mapPoints || shapes.length === 0) return null;
+    const picked = areas.find((a) => a.id === selectedArea);
+    return {
+      radar: false,
+      warnings: [],
+      reports: dayReports,
+      zones: false,
+      swaths: shapes,
+      areas,
+      selectedArea,
+      coverage,
+      highlight: keysInAreas(picked ? [picked] : areas, mapPoints),
+      fitKey: `hail:${day}`,
+      fitBounds: mergeBounds(areas.map((a) => a.bounds)),
+    };
+  }, [mapPoints, shapes, areas, selectedArea, coverage, dayReports, day]);
 
   useFocusEffect(
     useCallback(() => {
@@ -145,7 +182,7 @@ export default function StormDetailScreen() {
           {h.name}
         </Text>
         <Text style={styles.sub} numberOfLines={1}>
-          {h.miles.toFixed(1)} mi · {hailLabel(h.hailSize)}
+          {h.miles > 0 ? `${h.miles.toFixed(1)} mi · ${hailLabel(h.hailSize)}` : `${hailLabel(h.hailSize)} at the address`}
           {h.address ? ` · ${h.address}` : ''}
         </Text>
       </Pressable>
@@ -173,6 +210,7 @@ export default function StormDetailScreen() {
             onViewChange={(v) => {
               view.current = v;
             }}
+            onMapPress={(lat, lng) => setSelectedArea(areaAt(areas, lat, lng)?.id ?? null)}
           />
           <Pressable
             onPress={() => setFull(true)}
@@ -199,7 +237,7 @@ export default function StormDetailScreen() {
         </AppText>
         <AppText variant="caption" color={colors.textSecondary}>
           {storm?.places.slice(0, 4).join(', ') || 'Kansas City area'}
-          {storm ? ` · ${storm.hailReports} hail report${storm.hailReports === 1 ? '' : 's'}` : ''}
+          {storm ? ` · radar swath · ${storm.hailReports} spotter report${storm.hailReports === 1 ? '' : 's'}` : ''}
         </AppText>
         <View style={styles.actions}>
           <Pressable

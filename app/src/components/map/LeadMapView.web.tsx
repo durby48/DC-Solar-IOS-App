@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 
 import { STAGE_COLOR, type MapPoint } from '@/lib/leadMap';
-import { ZONE_METERS, zoneColor, type MapViewState, type StormLayers } from '@/lib/stormLayers';
+import { bandColor, ZONE_METERS, zoneColor, type MapViewState, type StormLayers } from '@/lib/stormLayers';
 
 /**
  * The Lead map on the WEB (2026-10-07; smoothed + storm zones 2026-10-09).
@@ -24,9 +24,11 @@ import { ZONE_METERS, zoneColor, type MapViewState, type StormLayers } from '@/l
  * first load, `storms.fitKey` when a storm is picked) — never as a side
  * effect of another change; half-step zoom with a gentler mouse wheel.
  *
- * STORMS. Each report's 3-mile zone is a soft circle coloured by hail size
- * (wind: orange); overlapping circles blend into the storm's footprint. With a
- * storm picked, pins in its path get a white ring and the rest fade.
+ * STORMS (radar swaths since 2026-10-12): hail is drawn as filled radar
+ * swaths, one colour per band, over a dashed outline of the coverage counties;
+ * a tap on the map is handed to `onMapPress` so the screen can pick the swath
+ * area under it (outlined white). Wind keeps its 3-mile report zones. Pins in
+ * the path get a white ring and the rest fade.
  *
  * Leaflet is IMPORTED IN THE BROWSER ONLY (the web build pre-renders on the
  * server, where Leaflet's `window` access throws) and draws into a plain
@@ -74,6 +76,7 @@ export function LeadMapView({
   labels = true,
   initialView = null,
   onViewChange,
+  onMapPress,
 }: {
   points: MapPoint[];
   selectedKey: string | null;
@@ -91,6 +94,8 @@ export function LeadMapView({
   initialView?: MapViewState | null;
   /** Reports where the map is looking after every move. */
   onViewChange?: (view: MapViewState) => void;
+  /** A tap on the map (not a pin) — the screen picks the swath under it. */
+  onMapPress?: (lat: number, lng: number) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [L, setL] = useState<typeof Leaflet | null>(null);
@@ -109,6 +114,8 @@ export function LeadMapView({
   select.current = onSelect;
   const viewChange = useRef(onViewChange);
   viewChange.current = onViewChange;
+  const mapPress = useRef(onMapPress);
+  mapPress.current = onMapPress;
   const latest = useRef({ selectedKey, highlight: storms?.highlight ?? null });
   latest.current = { selectedKey, highlight: storms?.highlight ?? null };
 
@@ -190,7 +197,10 @@ export function LeadMapView({
         // Private mode / blocked storage: forgetting the choice is fine.
       }
     });
-    m.on('click', () => select.current(null));
+    m.on('click', (e: Leaflet.LeafletMouseEvent) => {
+      select.current(null);
+      mapPress.current?.(e.latlng.lat, e.latlng.lng);
+    });
     stormLayer.current = L.layerGroup().addTo(m);
     pinLayer.current = L.layerGroup().addTo(m);
     map.current = m;
@@ -294,16 +304,40 @@ export function LeadMapView({
         .bindTooltip(w.label)
         .addTo(g);
     }
-    const reports = storms?.reports ?? [];
-    for (const r of reports) {
-      L.circle([r.lat, r.lng], {
-        radius: ZONE_METERS,
-        stroke: false,
-        fillColor: zoneColor(r),
-        fillOpacity: 0.16,
+    // Radar swaths (smallest band first, so bigger hail draws on top), the
+    // coverage outline, and the tapped area. None of them takes the click: a
+    // tap goes to the map, which hands it to onMapPress.
+    for (const c of storms?.coverage ?? []) {
+      L.polyline(c, { color: '#FFFFFF', weight: 1.5, opacity: 0.7, dashArray: '6 6', interactive: false, renderer: canvas.current ?? undefined }).addTo(g);
+    }
+    for (const sw of storms?.swaths ?? []) {
+      const color = bandColor(sw.band);
+      L.polygon(sw.rings, {
+        color,
+        weight: 0.6,
+        opacity: 0.9,
+        fillColor: color,
+        fillOpacity: sw.band < 1 ? 0.18 : 0.3,
         interactive: false,
         renderer: canvas.current ?? undefined,
       }).addTo(g);
+    }
+    const picked = storms?.areas.find((a) => a.id === storms?.selectedArea);
+    if (picked) {
+      L.polygon(picked.rings, { color: '#FFFFFF', weight: 3, fill: false, interactive: false, renderer: canvas.current ?? undefined }).addTo(g);
+    }
+    const reports = storms?.reports ?? [];
+    if (storms?.zones) {
+      for (const r of reports) {
+        L.circle([r.lat, r.lng], {
+          radius: ZONE_METERS,
+          stroke: false,
+          fillColor: zoneColor(r),
+          fillOpacity: 0.16,
+          interactive: false,
+          renderer: canvas.current ?? undefined,
+        }).addTo(g);
+      }
     }
     for (const r of reports) {
       L.circleMarker([r.lat, r.lng], {
@@ -319,10 +353,11 @@ export function LeadMapView({
     }
     // Zoom to a storm only when a storm was just picked.
     const fitKey = storms?.fitKey ?? null;
-    if (fitKey && fitKey !== lastFit.current && reports.length > 0) {
+    const fb = storms?.fitBounds ?? null;
+    if (fitKey && fitKey !== lastFit.current && fb) {
       lastFit.current = fitKey;
       firstView.current = true;
-      const b = L.latLngBounds(reports.map((x) => [x.lat, x.lng] as Leaflet.LatLngTuple)).pad(0.25);
+      const b = L.latLngBounds([fb.south, fb.west], [fb.north, fb.east]).pad(0.2);
       whenSized(() => m.flyToBounds(b, { maxZoom: 13, duration: 0.8 }));
     }
     if (!fitKey) lastFit.current = null;

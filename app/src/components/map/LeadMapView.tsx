@@ -1,10 +1,10 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import MapView, { Circle, Marker, Polygon, UrlTile, type Region } from 'react-native-maps';
+import MapView, { Circle, Marker, Polygon, Polyline, UrlTile, type Region } from 'react-native-maps';
 
 import { colors, radii, spacing } from '@/constants/theme';
 import { STAGE_COLOR, type MapPoint } from '@/lib/leadMap';
-import { ZONE_METERS, zoneColor, type MapViewState, type StormLayers } from '@/lib/stormLayers';
+import { bandColor, ZONE_METERS, zoneColor, type MapViewState, type StormLayers } from '@/lib/stormLayers';
 
 /**
  * The Lead map on the PHONE (runtime 6, 2026-10-09): Apple Maps through
@@ -18,9 +18,11 @@ import { ZONE_METERS, zoneColor, type MapViewState, type StormLayers } from '@/l
  * that pin), otherwise it opens over Kansas City; `storms.fitKey` changing (a
  * storm picked) zooms to that storm; `roof` flies to a pin at roof level.
  *
- * STORMS: each report's 3-mile zone (coloured by hail size; wind orange),
- * report dots, NWS warning polygons and live radar tiles. With a storm
- * picked, pins in its path get a white ring and the rest fade.
+ * STORMS: hail = filled radar swaths by band over a dashed outline of the
+ * coverage counties (2026-10-12); a tap on the map goes to `onMapPress` so the
+ * screen can pick the swath area under it (outlined white). Wind keeps its
+ * 3-mile report zones. Report dots, NWS warnings, live radar tiles. Pins in the
+ * path get a white ring and the rest fade.
  *
  * A NATIVE MODULE: only from the runtime-6 build on (Build 33 never gets it).
  */
@@ -73,6 +75,7 @@ export function LeadMapView({
   controlsTop,
   initialView = null,
   onViewChange,
+  onMapPress,
 }: {
   points: MapPoint[];
   selectedKey: string | null;
@@ -87,6 +90,8 @@ export function LeadMapView({
   initialView?: MapViewState | null;
   /** Reports where the map is looking after every move. */
   onViewChange?: (view: MapViewState) => void;
+  /** A tap on the map (not a pin) — the screen picks the swath under it. */
+  onMapPress?: (lat: number, lng: number) => void;
 }) {
   const map = useRef<MapView>(null);
   const [satellite, setSatellite] = useState(true);
@@ -119,18 +124,21 @@ export function LeadMapView({
 
   // A storm picked: zoom to it (once per pick).
   const fitKey = storms?.fitKey ?? null;
+  const fitBounds = storms?.fitBounds ?? null;
   useEffect(() => {
-    const reports = storms?.reports ?? [];
-    if (!fitKey || fitKey === lastFit.current || reports.length === 0) {
+    if (!fitKey || fitKey === lastFit.current || !fitBounds) {
       if (!fitKey) lastFit.current = null;
       return;
     }
     lastFit.current = fitKey;
     map.current?.fitToCoordinates(
-      reports.map((r) => ({ latitude: r.lat, longitude: r.lng })),
+      [
+        { latitude: fitBounds.north, longitude: fitBounds.west },
+        { latitude: fitBounds.south, longitude: fitBounds.east },
+      ],
       { edgePadding: { top: 80, right: 60, bottom: 80, left: 60 }, animated: true },
     );
-  }, [fitKey, storms?.reports]);
+  }, [fitKey, fitBounds]);
 
   const highlight = storms?.highlight ?? null;
   const select = useRef(onSelect);
@@ -152,7 +160,9 @@ export function LeadMapView({
           onViewChange?.({ lat: r.latitude, lng: r.longitude, zoom: Math.log2(360 / Math.max(r.longitudeDelta, 1e-6)) })
         }
         onPress={(e) => {
-          if (e.nativeEvent.action !== 'marker-press') onSelect(null);
+          if (e.nativeEvent.action === 'marker-press') return;
+          onSelect(null);
+          onMapPress?.(e.nativeEvent.coordinate.latitude, e.nativeEvent.coordinate.longitude);
         }}>
         {storms?.radar ? (
           <UrlTile
@@ -173,7 +183,40 @@ export function LeadMapView({
             />
           )),
         )}
-        {(storms?.reports ?? []).map((r) => (
+        {(storms?.coverage ?? []).map((ring, i) => (
+          <Polyline
+            key={`cov-${i}`}
+            coordinates={ring.map(([lat, lng]) => ({ latitude: lat, longitude: lng }))}
+            strokeColor="rgba(255,255,255,0.7)"
+            strokeWidth={1.5}
+            lineDashPattern={[6, 6]}
+          />
+        ))}
+        {(storms?.swaths ?? []).map((sw) => (
+          <Polygon
+            key={sw.id}
+            coordinates={sw.rings[0].map(([lat, lng]) => ({ latitude: lat, longitude: lng }))}
+            holes={sw.rings.slice(1).map((h) => h.map(([lat, lng]) => ({ latitude: lat, longitude: lng })))}
+            strokeColor={bandColor(sw.band)}
+            strokeWidth={0.6}
+            fillColor={`${bandColor(sw.band)}${sw.band < 1 ? '2E' : '4D'}`}
+            tappable={false}
+          />
+        ))}
+        {(() => {
+          const picked = storms?.areas.find((a) => a.id === storms?.selectedArea);
+          return picked ? (
+            <Polygon
+              key={`sel-${picked.id}`}
+              coordinates={picked.rings[0].map(([lat, lng]) => ({ latitude: lat, longitude: lng }))}
+              strokeColor="#FFFFFF"
+              strokeWidth={3}
+              fillColor="rgba(0,0,0,0)"
+              tappable={false}
+            />
+          ) : null;
+        })()}
+        {(storms?.zones ? (storms?.reports ?? []) : []).map((r) => (
           <Circle
             key={`zone-${r.id}`}
             center={{ latitude: r.lat, longitude: r.lng }}

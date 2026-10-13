@@ -33,7 +33,7 @@ export interface ScriptPerson {
 export const SCRIPT_FIELDS: { token: string; label: string }[] = [
   { token: 'first_name', label: 'Their first name' },
   { token: 'storm_date', label: 'Their storm date' },
-  { token: 'storm_detail', label: 'Hail size + distance (skipped when unknown)' },
+  { token: 'storm_detail', label: 'Radar hail at their address (skipped when unknown)' },
   { token: 'street', label: 'Street address' },
   { token: 'rep_first', label: 'Your first name' },
   { token: 'business', label: 'The business / record name' },
@@ -99,9 +99,12 @@ export async function scriptFieldsFor(person: ScriptPerson, repName: string | nu
 
   let detail: string | null = null;
   if (ownDay) {
-    const size = person.last_hail_size != null ? `${Number(person.last_hail_size.toFixed(2))}-inch hail` : 'hail';
-    const miles = person.last_hail_miles != null ? ` about ${Number(person.last_hail_miles).toFixed(1)} miles from` : ' near';
-    detail = `Reports put ${size}${miles} ${street ?? 'their home'}.`;
+    const size = person.last_hail_size != null ? `${Number(Number(person.last_hail_size).toFixed(2))}-inch hail` : 'hail';
+    // Radar hits (2026-10-12) are AT the address; older report hits had a distance.
+    detail =
+      person.last_hail_miles != null && Number(person.last_hail_miles) > 0
+        ? `Reports put ${size} about ${Number(person.last_hail_miles).toFixed(1)} miles from ${street ?? 'their home'}.`
+        : `Radar puts ${size} right over ${street ?? 'their building'}.`;
   }
 
   const panels = person.panel_count ?? null;

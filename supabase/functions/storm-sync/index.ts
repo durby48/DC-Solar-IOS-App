@@ -1,13 +1,23 @@
-// storm-sync (2026-10-09) — NOAA storm reports → storms, hits, alerts.
+// storm-sync (2026-10-09; RADAR SWATHS 2026-10-12) — storms, hits, alerts.
+//
+// STORMS COME FROM RADAR NOW (2026-10-12, Devon): NOAA MRMS MESH hail swaths
+// over the ten coverage counties (radar.ts + 2026-10-12_hail_swaths.sql). SPC
+// spotter reports are still collected — map dots and ground truth — but no
+// longer decide who was hit.
 //
 // Called by pg_cron with header `x-storm-secret: <STORM_SYNC_SECRET>`:
-//   { mode: 'sync' }     every 30 min: today's and yesterday's SPC reports;
-//                        a storm with someone in its path that has not been
-//                        announced yet → one push per person + one Storm
-//                        check task (for the sales manager).
+//   { mode: 'sync' }     every 30 min: SPC reports (today + yesterday); the
+//                        radar: finish yesterday from its 24-hour file once it
+//                        exists, and today's running swath from the newest
+//                        30/60-minute file; then a storm with someone in its
+//                        path that has not been announced yet → one push per
+//                        person + one Storm check task (for the sales manager).
 //   { mode: 'summary' }  7 AM Central: yesterday's storm, once.
 //   { mode: 'backfill', from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }
-//                        history (no alerts, no tasks).
+//                        SPC report history (no alerts, no tasks).
+//   { mode: 'radar', days: ['YYYY-MM-DD', …] }   (≤ 6 per call)
+//                        radar history: each day finished from its 24-hour
+//                        file; never alerts.
 //
 // SPC files: https://www.spc.noaa.gov/climo/reports/YYMMDD_rpts_filtered_{hail,wind}.csv
 // — one per convective day (12Z → 12Z), times in UTC (HHMM; < 1200 = the
@@ -18,6 +28,20 @@
 // database: storm_recompute_day() — see 2026-10-09_storms.sql.
 
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
+
+import {
+  decodeCrop,
+  fetchGrib,
+  fileAtOrAfter,
+  fromBase64,
+  keyTime,
+  latestFile,
+  maxInches,
+  mergeMax,
+  swathBands,
+  toBase64,
+  type Grid,
+} from './radar.ts';
 
 const COMPANY = 'dc-solar';
 const KC = { lat: 39.0997, lng: -94.5786 };
@@ -124,12 +148,103 @@ async function ingest(admin: SupabaseClient, convDays: string[]): Promise<Set<st
     const { error } = await admin.from('storm_reports').upsert(chunk, { onConflict: 'id' });
     if (error) throw new Error(`storm_reports upsert: ${error.message}`);
   }
+  // Reports no longer make storms (radar does, 2026-10-12): they are kept for
+  // the map and counted in storms.hail_reports when the radar recomputes.
   for (const r of rows) if (r.kind === 'hail') days.add(r.storm_day);
-  for (const day of days) {
-    const { error } = await admin.rpc('storm_recompute_day', { p_day: day });
-    if (error) throw new Error(`storm_recompute_day ${day}: ${error.message}`);
-  }
   return days;
+}
+
+// ---------------------------------------------------------------------------
+// Radar (2026-10-12)
+// ---------------------------------------------------------------------------
+
+/** America/Chicago's UTC offset in hours at an instant (-5 CDT, -6 CST). */
+function chicagoOffset(at: Date): number {
+  const tz = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', timeZoneName: 'shortOffset' })
+    .formatToParts(at)
+    .find((p) => p.type === 'timeZoneName')?.value;
+  const m = tz?.match(/GMT([+-]\d+)/);
+  return m ? Number(m[1]) : -6;
+}
+
+/** Local midnight that STARTS a Central day, in UTC. DST changes at 2 AM, so the evening before decides. */
+function dayStartUtc(day: string): Date {
+  const off = chicagoOffset(new Date(`${day}T03:00:00Z`));
+  return new Date(new Date(`${day}T00:00:00Z`).getTime() - off * 3600000);
+}
+
+async function storeSwaths(admin: SupabaseClient, day: string, grid: Grid, source: string, final: boolean) {
+  const { data, error } = await admin.rpc('hail_store_swaths', {
+    p_day: day,
+    p_bands: swathBands(grid),
+    p_max: maxInches(grid),
+    p_source: source,
+    p_final: final,
+  });
+  if (error) throw new Error(`hail_store_swaths ${day}: ${error.message}`);
+  return data as Record<string, unknown>;
+}
+
+/** A whole Central day from the 24-hour file that ends at the next local midnight. */
+async function finishDay(admin: SupabaseClient, day: string): Promise<string> {
+  const end = dayStartUtc(addDays(day, 1));
+  const key = await fileAtOrAfter('MESH_Max_1440min_00.50', end, 40);
+  if (!key) return 'missing';
+  const grid = await decodeCrop(await fetchGrib(key));
+  await storeSwaths(admin, day, grid, key, true);
+  return `max ${maxInches(grid)} in`;
+}
+
+/** Today so far: the newest 30/60-minute file merged into the running grid. */
+async function liveToday(admin: SupabaseClient, now: Date): Promise<string> {
+  const day = centralDay(now);
+  const start = dayStartUtc(day);
+  const minutes = (now.getTime() - start.getTime()) / 60000;
+  // The window must not reach back into yesterday.
+  const window = minutes >= 75 ? 60 : minutes >= 40 ? 30 : 0;
+  if (!window) return 'too early';
+  const key = await latestFile(`MESH_Max_${window}min_00.50`, now, 30);
+  const at = key ? keyTime(key) : null;
+  if (!key || !at || at.getTime() - window * 60000 < start.getTime()) return 'no file';
+
+  const { data: row } = await admin.from('hail_live_grids').select('*').eq('storm_day', day).maybeSingle();
+  const prev = row as { width: number; height: number; cells: string; files: string[] } | null;
+  if (prev?.files?.includes(key)) return 'seen';
+  const grid = await decodeCrop(await fetchGrib(key));
+  const hadHail = prev ? fromBase64(prev.cells).some((v) => v >= 19) : false;
+  if (prev && prev.width === grid.width && prev.height === grid.height) {
+    grid.mm = mergeMax(grid.mm, fromBase64(prev.cells));
+  }
+  const { error } = await admin.from('hail_live_grids').upsert({
+    storm_day: day,
+    width: grid.width,
+    height: grid.height,
+    lat0: grid.lat0,
+    lon0: grid.lon0,
+    step: grid.step,
+    cells: toBase64(grid.mm),
+    files: [...(prev?.files ?? []).slice(-60), key],
+    updated_at: now.toISOString(),
+  });
+  if (error) throw new Error(`hail_live_grids: ${error.message}`);
+  const max = maxInches(grid);
+  // Nothing to draw yet (and nothing was): skip the recompute.
+  if (max < 0.75 && !hadHail) return `max ${max} in`;
+  await storeSwaths(admin, day, grid, key, false);
+  return `max ${max} in (live)`;
+}
+
+/** Yesterday (and the day before, if missed) finished once its 24-hour file is out. */
+async function finishRecent(admin: SupabaseClient, now: Date): Promise<string[]> {
+  const today = centralDay(now);
+  const out: string[] = [];
+  for (const day of [addDays(today, -2), addDays(today, -1)]) {
+    if (now.getTime() < dayStartUtc(addDays(day, 1)).getTime() + 12 * 60000) continue;
+    const { data } = await admin.from('hail_days').select('final').eq('storm_day', day).maybeSingle();
+    if ((data as { final?: boolean } | null)?.final) continue;
+    out.push(`${day}: ${await finishDay(admin, day)}`);
+  }
+  return out;
 }
 
 function dayLabel(day: string): string {
@@ -257,6 +372,20 @@ Deno.serve(async (req) => {
       return json(200, { ok: true, days: days.size });
     }
 
+    if (mode === 'radar') {
+      const days = ((body as { days?: string[] }).days ?? []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+      if (days.length === 0 || days.length > 6) return json(400, { error: '1–6 days per call' });
+      const results: Record<string, string> = {};
+      for (const day of days) results[day] = await finishDay(admin, day);
+      // History never alerts.
+      await admin
+        .from('storms')
+        .update({ alerted_at: new Date().toISOString(), summary_sent_at: new Date().toISOString() })
+        .in('storm_day', days)
+        .is('alerted_at', null);
+      return json(200, { ok: true, results });
+    }
+
     const now = new Date();
     const today = centralDay(now);
 
@@ -274,6 +403,14 @@ Deno.serve(async (req) => {
     // sync: the current and previous convective days
     const conv0 = new Date(now.getTime() - 12 * 3600 * 1000).toISOString().slice(0, 10);
     await ingest(admin, [addDays(conv0, -1), conv0]);
+    // Radar: a failure here is reported but does not stop the alerts below.
+    const radar: string[] = [];
+    try {
+      radar.push(...(await finishRecent(admin, now)));
+      radar.push(`today: ${await liveToday(admin, now)}`);
+    } catch (e) {
+      radar.push(`radar error: ${e instanceof Error ? e.message : String(e)}`);
+    }
     const { data: fresh } = await admin
       .from('storms')
       .select('*')
@@ -286,7 +423,7 @@ Deno.serve(async (req) => {
       alerted += await announce(admin, s, 'alert');
       await admin.from('storms').update({ alerted_at: now.toISOString() }).eq('storm_day', s.storm_day);
     }
-    return json(200, { ok: true, alerted });
+    return json(200, { ok: true, alerted, radar });
   } catch (e) {
     return json(500, { error: e instanceof Error ? e.message : 'failed' });
   }

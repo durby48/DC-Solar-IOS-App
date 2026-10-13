@@ -24,12 +24,21 @@ import { fetchSalesTeam } from '@/lib/sales';
 import { useRoleGate } from '@/lib/role';
 import { firstName } from '@/lib/staffNames';
 import {
-  groupStorms,
+  areaAt,
+  groupWindStorms,
+  hailAt,
   inPath,
+  keysInAreas,
   loadAllReports,
   loadWarnings,
+  mergeBounds,
+  pointsInArea,
+  reportBounds,
   STORM_WINDOWS,
+  swathAreas,
+  swathShapes,
   ZONE_LEGEND,
+  type LatLng,
   type MapStorm,
   type MapViewState,
   type StormKind,
@@ -38,7 +47,7 @@ import {
   type StormWarning,
   type StormWindow,
 } from '@/lib/stormLayers';
-import { hailLabel, stormDayLabel } from '@/lib/storms';
+import { fetchCoverage, fetchStorms, fetchSwaths, hailLabel, stormDayLabel, type Storm, type SwathRow } from '@/lib/storms';
 
 /**
  * The Lead map's body (2026-10-07; a component since 2026-10-09 so the
@@ -90,10 +99,12 @@ export function LeadMapBody({
   const [cardHeight, setCardHeight] = useState(0);
   const view = useRef<MapViewState | null>(null);
 
-  // Storms (2026-10-09, reworked): OFF until turned on; then a list of storms
-  // in two categories (Hail / Wind), the most recent one that hit someone
-  // picked; or an overview of a time window. Radar and NWS warnings are
-  // separate live-weather switches.
+  // Storms (2026-10-09; RADAR SWATHS 2026-10-12): OFF until turned on; then a
+  // list of storms in two categories (Hail / Wind), the most recent one that
+  // hit someone picked; or an overview of a time window. Hail is the radar
+  // swaths (storm_list for the list — the same storms as the Storm reports);
+  // tapping inside a ≥ 1″ swath lists only the prospects, leads and customers
+  // in it. Radar and NWS warnings are separate live-weather switches.
   const [stormsOn, setStormsOn] = useState(Boolean(stormDay));
   const [stormKind, setStormKind] = useState<StormKind>('hail');
   /** A storm key (`hail:YYYY-MM-DD`) or an overview window. */
@@ -107,6 +118,11 @@ export function LeadMapBody({
   const [labels, setLabels] = useState(true);
   const [warnings, setWarnings] = useState<StormWarning[]>([]);
   const [allReports, setAllReports] = useState<StormReportPoint[] | null>(null);
+  const [hailStorms, setHailStorms] = useState<Storm[] | null>(null);
+  const [swathRows, setSwathRows] = useState<SwathRow[] | null>(null);
+  const [coverage, setCoverage] = useState<LatLng[][]>([]);
+  /** The tapped swath area (its id), listing who is inside it. */
+  const [selectedArea, setSelectedArea] = useState<string | null>(null);
   useEffect(() => {
     if (!stormsOn || !warningsOn) return;
     let cancelled = false;
@@ -116,13 +132,15 @@ export function LeadMapBody({
     };
   }, [stormsOn, warningsOn]);
   useEffect(() => {
-    if (!stormsOn || allReports) return;
+    if (!stormsOn) return;
     let cancelled = false;
-    void loadAllReports().then((r) => !cancelled && setAllReports(r));
+    if (!allReports) void loadAllReports().then((r) => !cancelled && setAllReports(r));
+    if (!hailStorms) void fetchStorms().then((s) => !cancelled && setHailStorms(s));
+    if (!coverage.length) void fetchCoverage().then((c) => !cancelled && setCoverage(c));
     return () => {
       cancelled = true;
     };
-  }, [stormsOn, allReports]);
+  }, [stormsOn, allReports, hailStorms, coverage.length]);
   const load = useCallback(async () => {
     const result = await fetchMapPoints(isSales);
     setPoints(result.points);
@@ -161,43 +179,122 @@ export function LeadMapBody({
   }, [points]);
   const selected = shown.find((p) => p.key === selectedKey) ?? null;
 
-  // Storms from the reports, with who (of the pins shown) is in each path.
-  const stormList = useMemo<MapStorm[]>(() => (allReports ? groupStorms(allReports, shown) : []), [allReports, shown]);
-  const listed = useMemo(
-    () => stormList.filter((st) => st.kind === stormKind && st.affected.length > 0),
-    [stormList, stormKind],
+  // The list: hail = storm_list (radar storms that hit someone you can see);
+  // wind = reports grouped by day, with who (of the pins shown) is within 3 mi.
+  const windList = useMemo<MapStorm[]>(
+    () => (allReports ? groupWindStorms(allReports, shown).filter((st) => st.affectedCount > 0) : []),
+    [allReports, shown],
   );
+  const hailList = useMemo<MapStorm[]>(
+    () =>
+      (hailStorms ?? []).map((s) => ({
+        key: `hail:${s.day}`,
+        kind: 'hail' as const,
+        day: s.day,
+        maxSize: s.maxHail,
+        place: s.places[0] ?? null,
+        reports: [],
+        affected: [],
+        affectedCount: s.leads + s.customers,
+      })),
+    [hailStorms],
+  );
+  const listed = stormKind === 'hail' ? hailList : windList;
+  const listLoading = stormKind === 'hail' ? hailStorms === null : allReports === null;
   // Most recent storm that hit someone, once the list is known.
   useEffect(() => {
     if (!stormsOn || stormPick || listed.length === 0) return;
     setStormPick(listed[0].key);
   }, [stormsOn, stormPick, listed]);
-  const pickedStorm = stormPick && !stormPick.startsWith('window:') ? (stormList.find((st) => st.key === stormPick) ?? null) : null;
+  const pickedStorm = stormPick && !stormPick.startsWith('window:') ? (listed.find((st) => st.key === stormPick) ?? null) : null;
+  const pickedDay = stormPick?.startsWith('hail:') ? stormPick.slice(5) : null;
   const pickedWindow = stormPick?.startsWith('window:') ? (stormPick.slice(7) as StormWindow) : null;
+
+  // Hail: the radar swaths for the picked day, or every storm in the window.
+  useEffect(() => {
+    setSelectedArea(null);
+    if (!stormsOn || stormKind !== 'hail' || !stormPick) {
+      setSwathRows(null);
+      return;
+    }
+    let cancelled = false;
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+    if (pickedDay) {
+      void fetchSwaths(pickedDay, pickedDay).then((r) => !cancelled && setSwathRows(r));
+    } else if (pickedWindow) {
+      const days = STORM_WINDOWS.find((w) => w.key === pickedWindow)?.days ?? 30;
+      const from = new Date(Date.now() - days * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+      void fetchSwaths(from, today, [0.75, 1, 1.5, 2, 2.5]).then((r) => !cancelled && setSwathRows(r));
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [stormsOn, stormKind, stormPick, pickedDay, pickedWindow]);
+  const shapes = useMemo(() => swathShapes(swathRows ?? []), [swathRows]);
+  const areas = useMemo(() => swathAreas(shapes), [shapes]);
+  const areaPicked = areas.find((a) => a.id === selectedArea) ?? null;
+
   const windowReports = useMemo(() => {
-    if (!pickedWindow || !allReports) return [];
+    if (!pickedWindow || !allReports || stormKind !== 'wind') return [];
     const days = STORM_WINDOWS.find((w) => w.key === pickedWindow)?.days ?? 30;
     const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-    return allReports.filter((r) => r.kind === stormKind && r.day >= cutoff && (r.kind === 'wind' || (r.size ?? 0) >= 1));
+    return allReports.filter((r) => r.kind === 'wind' && r.day >= cutoff);
   }, [pickedWindow, allReports, stormKind]);
-  const stormReports = pickedStorm ? pickedStorm.reports : windowReports;
+  // Dots: wind = its reports; hail = that day's spotter reports (ground truth).
+  const stormReports = useMemo(() => {
+    if (stormKind === 'wind') return pickedStorm ? pickedStorm.reports : windowReports;
+    if (pickedDay && allReports) return allReports.filter((r) => r.kind === 'hail' && r.day === pickedDay);
+    return [];
+  }, [stormKind, pickedStorm, windowReports, pickedDay, allReports]);
   const highlight = useMemo(() => {
-    if (!stormsOn || stormReports.length === 0) return null;
+    if (!stormsOn) return null;
+    if (stormKind === 'hail') {
+      if (areaPicked) return new Set(pointsInArea(areaPicked, shown).map((p) => p.key));
+      return areas.length ? keysInAreas(areas, shown) : null;
+    }
+    if (stormReports.length === 0) return null;
     return new Set(pickedStorm ? pickedStorm.affected : inPath(shown, windowReports));
-  }, [stormsOn, stormReports, pickedStorm, shown, windowReports]);
+  }, [stormsOn, stormKind, areaPicked, areas, shown, stormReports, pickedStorm, windowReports]);
+  const showing = stormKind === 'hail' ? shapes.length > 0 : stormReports.length > 0;
   const storms = useMemo<StormLayers | null>(() => {
     if (!stormsOn) return null;
+    const hail = stormKind === 'hail';
     return {
       radar,
       warnings: warningsOn ? warnings : [],
       reports: stormReports,
+      zones: !hail,
+      swaths: hail ? shapes : [],
+      areas: hail ? areas : [],
+      selectedArea,
+      coverage: hail ? coverage : [],
       highlight,
       // Only the storm a link opened moves the map (once).
-      fitKey: pickedStorm && fitPick === stormPick ? stormPick : null,
+      fitKey: pickedStorm && fitPick === stormPick && (hail ? areas.length > 0 : true) ? stormPick : null,
+      fitBounds: hail ? mergeBounds(areas.map((a) => a.bounds)) : reportBounds(stormReports),
     };
-  }, [stormsOn, radar, warningsOn, warnings, stormReports, highlight, stormPick, pickedStorm, fitPick]);
+  }, [stormsOn, stormKind, radar, warningsOn, warnings, stormReports, shapes, areas, selectedArea, coverage, highlight, stormPick, pickedStorm, fitPick]);
+  /** A tap on the map: pick the hail swath area under it (or clear). */
+  const pressMap = useCallback(
+    (lat: number, lng: number) => {
+      if (!stormsOn || stormKind !== 'hail') return;
+      setSelectedArea(areaAt(areas, lat, lng)?.id ?? null);
+    },
+    [stormsOn, stormKind, areas],
+  );
+  // Who is in the tapped area: prospects, leads, customers — with the radar hail at each address.
+  const areaPeople = useMemo(() => {
+    if (!areaPicked) return null;
+    const inside = pointsInArea(areaPicked, shown).map((p) => ({ ...p, hail: hailAt(shapes, areaPicked.day, p.lat, p.lng) }));
+    inside.sort((a, b) => (b.hail ?? 0) - (a.hail ?? 0) || a.name.localeCompare(b.name));
+    return {
+      prospects: inside.filter((p) => p.stage === 'prospect'),
+      leads: inside.filter((p) => p.stage === 'contacted' || p.stage === 'interested' || p.stage === 'booked'),
+      customers: inside.filter((p) => p.stage === 'customer'),
+    };
+  }, [areaPicked, shown, shapes]);
   const focused = useIsFocused();
-  const cardShown = selected !== null || (stormsOn && stormReports.length > 0 && !compact);
+  const cardShown = selected !== null || areaPicked !== null || (stormsOn && showing && !compact);
   useKeypadLift(isSales && focused && cardShown && cardHeight > 0 ? Math.round(cardHeight) + spacing.md : 0);
   const hitLeads = highlight ? shown.filter((p) => highlight.has(p.key) && p.stage !== 'customer').length : 0;
   const hitCustomers = highlight ? shown.filter((p) => highlight.has(p.key) && p.stage === 'customer').length : 0;
@@ -294,7 +391,7 @@ export function LeadMapBody({
               ))}
             </ScrollView>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-              {allReports === null ? (
+              {listLoading ? (
                 <Text style={styles.summary}>Loading storms…</Text>
               ) : listed.length === 0 ? (
                 <Text style={styles.summary}>No {stormKind} storms hit these pins in the last 2 years.</Text>
@@ -311,7 +408,7 @@ export function LeadMapBody({
                         {st.kind === 'hail' ? ` · ${hailLabel(st.maxSize)}` : st.maxSize ? ` · ${st.maxSize} mph` : ''}
                       </Text>
                       <Text style={[styles.stormChipSub, on && styles.stormChipTextOn]} numberOfLines={1}>
-                        {st.affected.length} in path{st.place ? ` · ${st.place}` : ''}
+                        {st.affectedCount} in path{st.place ? ` · ${st.place}` : ''}
                       </Text>
                     </Pressable>
                   );
@@ -348,6 +445,7 @@ export function LeadMapBody({
             onViewChange={(v) => {
               view.current = v;
             }}
+            onMapPress={pressMap}
           />
         )}
         {points !== null ? (
@@ -362,7 +460,7 @@ export function LeadMapBody({
         ) : null}
       </View>
 
-      {stormsOn && stormReports.length > 0 && !selected && compact ? (
+      {stormsOn && showing && !selected && !areaPicked && compact ? (
         <View style={[styles.legendBar, isSales && styles.legendClearFab]}>
           {stormKind === 'hail' ? (
             ZONE_LEGEND.map((l) => (
@@ -380,7 +478,7 @@ export function LeadMapBody({
         </View>
       ) : null}
 
-      {stormsOn && stormReports.length > 0 && !selected && !compact ? (
+      {stormsOn && showing && !selected && !areaPicked && !compact ? (
         <Card style={styles.card} onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}>
           <View style={styles.legendRow}>
             {stormKind === 'hail' ? (
@@ -396,7 +494,9 @@ export function LeadMapBody({
                 <Text style={styles.legendText}>Damaging wind</Text>
               </View>
             )}
-            <Text style={styles.legendText}>· shaded = within 3 mi</Text>
+            <Text style={styles.legendText}>
+              {stormKind === 'hail' ? '· radar hail swaths · tap a swath to list who is in it' : '· shaded = within 3 mi'}
+            </Text>
           </View>
           <AppText variant="bodyStrong">
             {pickedStorm
@@ -447,8 +547,20 @@ export function LeadMapBody({
         onViewChange={(v) => {
           view.current = v;
         }}
+        onMapPress={pressMap}
         footer={
-          selected ? (
+          areaPicked && areaPeople && !selected ? (
+            <View style={styles.fullCard}>
+              <View style={[styles.dot, { backgroundColor: '#FFFFFF' }]} />
+              <Text style={styles.fullCardText} numberOfLines={1}>
+                {stormDayLabel(areaPicked.day)} swath: {areaPeople.prospects.length} prospects · {areaPeople.leads.length} leads ·{' '}
+                {areaPeople.customers.length} customers
+              </Text>
+              <Pressable onPress={() => setFull(false)} hitSlop={6}>
+                <Text style={styles.fullCardLink}>See the list</Text>
+              </Pressable>
+            </View>
+          ) : selected ? (
             <View style={styles.fullCard}>
               <View style={[styles.dot, { backgroundColor: STAGE_COLOR[selected.stage] }]} />
               <Text style={styles.fullCardText} numberOfLines={1}>
@@ -466,6 +578,75 @@ export function LeadMapBody({
           ) : null
         }
       />
+
+      {areaPicked && areaPeople && !selected ? (
+        <Card style={styles.card} onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}>
+          <View style={styles.cardHead}>
+            <View style={[styles.dot, styles.dotBig, { backgroundColor: '#FFFFFF' }]} />
+            <View style={styles.flex}>
+              <AppText variant="bodyStrong" numberOfLines={1}>
+                {stormDayLabel(areaPicked.day)} hail swath · up to {hailLabel(areaPicked.maxBand)}
+              </AppText>
+              <AppText variant="caption" color={colors.textSecondary}>
+                {plural(areaPeople.prospects.length, 'prospect')} · {plural(areaPeople.leads.length, 'lead')} ·{' '}
+                {plural(areaPeople.customers.length, 'customer')} inside · radar hail at each address
+              </AppText>
+            </View>
+            <Pressable onPress={() => setSelectedArea(null)} hitSlop={8} accessibilityLabel="Close the swath list">
+              <Ionicons name="close" size={20} color={colors.inkSoft} />
+            </Pressable>
+          </View>
+          <ScrollView style={styles.swathList} nestedScrollEnabled>
+            {(
+              [
+                ['Prospects', areaPeople.prospects],
+                ['Leads', areaPeople.leads],
+                ['Customers', areaPeople.customers],
+              ] as const
+            ).map(([title, list]) =>
+              list.length === 0 ? null : (
+                <View key={title} style={styles.swathGroup}>
+                  <Text style={styles.swathGroupTitle}>
+                    {title} · {list.length}
+                  </Text>
+                  {list.map((p) => (
+                    <Pressable
+                      key={p.key}
+                      onPress={() => router.navigate({ pathname: '/workspace', params: { open: p.key } } as never)}
+                      style={({ pressed }) => [styles.swathRow, pressed && styles.expandPressed]}>
+                      <View style={[styles.dot, { backgroundColor: STAGE_COLOR[p.stage] }]} />
+                      <View style={styles.flex}>
+                        <Text style={styles.swathName} numberOfLines={1}>
+                          {p.name}
+                        </Text>
+                        <Text style={styles.swathSub} numberOfLines={1}>
+                          {STAGE_LABEL[p.stage]}
+                          {p.address ? ` · ${p.address}` : ''}
+                        </Text>
+                      </View>
+                      <Text style={styles.swathHail}>{p.hail ? hailLabel(p.hail) : ''}</Text>
+                      <Ionicons name="chevron-forward" size={14} color={colors.inkSoft} />
+                    </Pressable>
+                  ))}
+                </View>
+              ),
+            )}
+            {areaPeople.prospects.length + areaPeople.leads.length + areaPeople.customers.length === 0 ? (
+              <Text style={styles.summary}>Nobody on the map is inside this swath.</Text>
+            ) : null}
+          </ScrollView>
+          {hailStorms?.some((st) => st.day === areaPicked.day) ? (
+            <View style={styles.cardButtons}>
+              <Button
+                label="Open Storm report"
+                icon="thunderstorm-outline"
+                size="sm"
+                onPress={() => router.push({ pathname: '/storm-reports/[day]', params: { day: areaPicked.day } } as never)}
+              />
+            </View>
+          ) : null}
+        </Card>
+      ) : null}
 
       {selected ? (
         <Card style={styles.card} onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}>
@@ -583,4 +764,16 @@ const styles = StyleSheet.create({
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   cardButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   flex: { flex: 1 },
+  swathList: { maxHeight: 280 },
+  swathGroup: { gap: 2, marginBottom: spacing.sm },
+  swathGroupTitle: { color: colors.inkSoft, fontSize: 11, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2 },
+  swathRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 6 },
+  swathName: { color: colors.ink, fontSize: 13, fontWeight: '800' },
+  swathSub: { color: colors.inkSoft, fontSize: 11, fontWeight: '600' },
+  swathHail: { color: colors.ink, fontSize: 12, fontWeight: '800' },
 });
+
+/** "1 lead", "3 leads". */
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
