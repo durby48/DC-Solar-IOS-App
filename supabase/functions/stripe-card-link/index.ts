@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
     if (!body.job_id) return fail(400, 'bad_request', 'job_id is required.');
     const { data: job } = await admin
       .from('jobs')
-      .select('id, company, job_number, job_type, stage, sales_rep_email, customer_id, plan_tier, plan_price_cents')
+      .select('id, company, job_number, job_type, stage, sales_rep_email, customer_id, plan_tier, plan_price_cents, plan_commercial, module_count')
       .eq('id', body.job_id)
       .maybeSingle();
     if (!job) return fail(404, 'not_found', 'Visit not found.');
@@ -171,7 +171,9 @@ Deno.serve(async (req) => {
         .filter(Boolean);
     }
     const head = job.plan_tier && dollars
-      ? `Solar Shield ${TIER_LABEL[job.plan_tier as string] ?? ''} by DC Solar: ${dollars} per year, 2-year agreement.`
+      ? `Solar Shield ${TIER_LABEL[job.plan_tier as string] ?? ''} by DC Solar${
+          job.plan_commercial ? ` (commercial${job.module_count ? `, ${job.module_count} panels` : ''})` : ''
+        }: ${dollars} per year, 2-year agreement.`
       : null;
     const tail = 'Nothing is charged until after your first service visit.';
     let list = includes.length ? `Includes: ${includes.join('; ')}.` : null;

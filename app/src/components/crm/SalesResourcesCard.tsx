@@ -10,6 +10,7 @@ import {
   fetchResources,
   saveResource,
   uploadResourceFile,
+  type ResourceAudience,
   type ResourceKind,
   type SalesResource,
 } from '@/lib/salesResources';
@@ -27,7 +28,13 @@ const KIND_LABEL: Record<TextKind, string> = { script: 'Script', situation: 'Sit
 export function SalesResourcesCard() {
   const router = useRouter();
   const [items, setItems] = useState<SalesResource[] | null>(null);
-  const [editing, setEditing] = useState<{ id?: string; kind: TextKind; title: string; body: string } | null>(null);
+  const [editing, setEditing] = useState<{
+    id?: string;
+    kind: TextKind;
+    title: string;
+    body: string;
+    audience?: ResourceAudience;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -72,7 +79,7 @@ export function SalesResourcesCard() {
   const row = (r: SalesResource) => (
     <Pressable
       key={r.id}
-      onPress={() => setEditing({ id: r.id, kind: r.kind as TextKind, title: r.title, body: r.body ?? '' })}
+      onPress={() => setEditing({ id: r.id, kind: r.kind as TextKind, title: r.title, body: r.body ?? '', audience: r.audience })}
       style={({ pressed }) => [styles.row, pressed && styles.dim]}>
       <Text style={styles.rowKind}>{KIND_LABEL[r.kind as TextKind]}</Text>
       <Text style={styles.rowTitle} numberOfLines={1}>
@@ -100,6 +107,28 @@ export function SalesResourcesCard() {
       ) : editing ? (
         <View style={styles.editor}>
           <Text style={styles.small}>{KIND_LABEL[editing.kind]}</Text>
+          {editing.kind === 'script' ? (
+            // Which leads see this script in the CRM (2026-10-12).
+            <View style={styles.audienceRow}>
+              {(
+                [
+                  ['residential', 'Homes'],
+                  ['commercial', 'Businesses'],
+                  [null, 'Everyone'],
+                ] as const
+              ).map(([value, label]) => {
+                const on = (editing.audience ?? null) === value;
+                return (
+                  <Pressable
+                    key={label}
+                    onPress={() => setEditing({ ...editing, audience: value })}
+                    style={({ pressed }) => [styles.audienceChip, on && styles.audienceOn, pressed && styles.dim]}>
+                    <Text style={[styles.audienceText, on && styles.audienceTextOn]}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
           <TextInput
             value={editing.title}
             onChangeText={(title) => setEditing({ ...editing, title })}
@@ -138,7 +167,13 @@ export function SalesResourcesCard() {
             </Pressable>
             <Pressable
               onPress={() =>
-                void run(() => saveResource({ id: editing.id, kind: editing.kind, title: editing.title, body: editing.body }), 'Saved — reps see it now.').then(
+                void run(() => saveResource({
+                      id: editing.id,
+                      kind: editing.kind,
+                      title: editing.title,
+                      body: editing.body,
+                      ...(editing.kind === 'script' ? { audience: editing.audience ?? null } : {}),
+                    }), 'Saved — reps see it now.').then(
                   (ok) => ok && setEditing(null),
                 )
               }
@@ -177,6 +212,11 @@ export function SalesResourcesCard() {
 }
 
 const styles = StyleSheet.create({
+  audienceRow: { flexDirection: 'row', gap: spacing.xs },
+  audienceChip: { paddingHorizontal: spacing.sm + 2, paddingVertical: 4, borderRadius: radii.pill, borderWidth: 1, borderColor: colors.line },
+  audienceOn: { backgroundColor: hubColors.crm.fg, borderColor: hubColors.crm.fg },
+  audienceText: { color: colors.inkSoft, fontSize: 12, fontWeight: '700' },
+  audienceTextOn: { color: colors.textInverse },
   card: { backgroundColor: colors.surface, borderRadius: radii.md, padding: spacing.md, gap: spacing.xs, ...shadows.card },
   head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   title: { color: hubColors.crm.fg, fontSize: 15, fontWeight: '800' },

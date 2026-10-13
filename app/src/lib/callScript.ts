@@ -1,3 +1,4 @@
+import { commercialFitLine, fetchServicePlans, type ServicePlan } from '@/lib/servicePlans';
 import { fetchStorms } from '@/lib/storms';
 
 /**
@@ -23,6 +24,9 @@ export interface ScriptPerson {
   last_hail_at?: string | null;
   last_hail_size?: number | null;
   last_hail_miles?: number | null;
+  /** A business (2026-10-12): the commercial script and prices. */
+  is_commercial?: boolean;
+  panel_count?: number | null;
 }
 
 /** The fields a script may use, for the token picker and the docs. */
@@ -32,6 +36,9 @@ export const SCRIPT_FIELDS: { token: string; label: string }[] = [
   { token: 'storm_detail', label: 'Hail size + distance (skipped when unknown)' },
   { token: 'street', label: 'Street address' },
   { token: 'rep_first', label: 'Your first name' },
+  { token: 'business', label: 'The business / record name' },
+  { token: 'panel_count', label: 'Panels on the lead' },
+  { token: 'shield_quote', label: 'Commercial tiers that fit the panels (skipped when unknown)' },
 ];
 
 function ordinal(n: number): string {
@@ -75,6 +82,15 @@ async function newestStormDay(): Promise<string | null> {
   return day;
 }
 
+let plansCache: { at: number; plans: ServicePlan[] } | null = null;
+
+async function plans(): Promise<ServicePlan[]> {
+  if (plansCache && Date.now() - plansCache.at < 10 * 60 * 1000) return plansCache.plans;
+  const p = await fetchServicePlans();
+  plansCache = { at: Date.now(), plans: p };
+  return p;
+}
+
 /** Fill every script field for one person. Unknown values are null (drawn as a blank). */
 export async function scriptFieldsFor(person: ScriptPerson, repName: string | null): Promise<ScriptFields> {
   const ownDay = person.last_hail_at ? centralDay(person.last_hail_at) : null;
@@ -88,7 +104,13 @@ export async function scriptFieldsFor(person: ScriptPerson, repName: string | nu
     detail = `Reports put ${size}${miles} ${street ?? 'their home'}.`;
   }
 
+  const panels = person.panel_count ?? null;
+  const fit = person.is_commercial && panels ? commercialFitLine(await plans(), panels) : null;
+
   return {
+    business: person.name?.trim() || null,
+    panel_count: panels ? String(panels) : null,
+    shield_quote: fit ? `For ${panels} panels, that's ${fit}.` : null,
     first_name: firstOf(person.name),
     storm_date: day ? spokenDay(day) : null,
     storm_detail: detail,
@@ -111,6 +133,8 @@ export function scriptPersonOf(record: {
     last_hail_at: src?.last_hail_at ?? null,
     last_hail_size: src?.last_hail_size ?? null,
     last_hail_miles: src?.last_hail_miles ?? null,
+    is_commercial: src?.is_commercial === true,
+    panel_count: src?.panel_count ?? null,
   };
 }
 

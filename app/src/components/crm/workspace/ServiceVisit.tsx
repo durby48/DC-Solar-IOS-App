@@ -9,6 +9,8 @@ import { sendSms } from '@/lib/comms';
 import { fetchAvailability, nextWorkDays, spotsLabel, type DayAvailability } from '@/lib/availability';
 import { formatShortDate } from '@/lib/dates';
 import {
+  commercialCovers,
+  commercialFits,
   fetchServicePlans,
   formatCents,
   parseDollars,
@@ -138,6 +140,10 @@ function DateFields({
 /**
  * Bronze / Silver / Gold with their prices, or Custom with the rep's own
  * yearly price (no floor for now; admins just see it tagged Custom).
+ *
+ * Commercial (2026-10-12): the commercial prices instead, each tier offered
+ * only if it covers the system's panels (Bronze ≤ 100, Silver ≤ 250, Gold any
+ * size) — the database refuses the rest anyway. No panel count yet = no tier.
  */
 function PlanPicker({
   plans,
@@ -145,25 +151,49 @@ function PlanPicker({
   custom,
   onPlan,
   onCustom,
+  commercial,
 }: {
   plans: ServicePlan[];
   plan: PlanChoice | null;
   custom: string;
   onPlan: (p: PlanChoice) => void;
   onCustom: (v: string) => void;
+  commercial?: { panels: number | null } | null;
 }) {
   return (
     <>
+      {commercial ? (
+        <Text style={styles.meta}>
+          {commercial.panels
+            ? `Commercial · ${commercial.panels} panels`
+            : 'Commercial — add the panel count on the lead first (Lead → Panels) to quote a tier.'}
+        </Text>
+      ) : null}
       <View style={styles.chips}>
-        {plans.map((p) => (
-          <Chip
-            key={p.tier}
-            label={`${p.label} ${formatCents(p.amountCents)}`}
-            tone="olive"
-            selected={plan === p.tier}
-            onPress={() => onPlan(p.tier)}
-          />
-        ))}
+        {plans.map((p) => {
+          if (commercial && p.commercial) {
+            const fits = commercialFits(p, commercial.panels);
+            return (
+              <Chip
+                key={p.tier}
+                label={`${p.label} ${formatCents(p.commercial.amountCents)} · ${commercialCovers(p)}`}
+                tone="olive"
+                selected={plan === p.tier}
+                disabled={!fits}
+                onPress={() => onPlan(p.tier)}
+              />
+            );
+          }
+          return (
+            <Chip
+              key={p.tier}
+              label={`${p.label} ${formatCents(p.amountCents)}`}
+              tone="olive"
+              selected={plan === p.tier}
+              onPress={() => onPlan(p.tier)}
+            />
+          );
+        })}
         <Chip label="Custom" tone="olive" selected={plan === 'custom'} onPress={() => onPlan('custom')} />
       </View>
       {plan === 'custom' ? (
@@ -191,14 +221,18 @@ function planInput(plan: PlanChoice | null, custom: string): { plan: PlanChoice;
 
 export function BookVisitForm({
   leadId,
+  commercial,
   onBooked,
   onCancel,
 }: {
   leadId: string;
+  /** A commercial lead and its panel count (2026-10-12). */
+  commercial?: { panels: number | null } | null;
   onBooked: (message: string) => void;
   onCancel: () => void;
 }) {
-  const [kind, setKind] = useState<ServiceKind>('Cleaning');
+  // The first visit is the inspection that comes with the plan; cleaning is an add-on (2026-10-12).
+  const [kind, setKind] = useState<ServiceKind>('Inspection');
   const [date, setDate] = useState(isoPlusDays(1));
   const [time, setTime] = useState('');
   const [note, setNote] = useState('');
@@ -255,7 +289,7 @@ export function BookVisitForm({
         ))}
       </View>
       <Text style={styles.label}>Plan</Text>
-      <PlanPicker plans={plans} plan={plan} custom={custom} onPlan={setPlan} onCustom={setCustom} />
+      <PlanPicker plans={plans} plan={plan} custom={custom} onPlan={setPlan} onCustom={setCustom} commercial={commercial} />
       <Text style={styles.label}>When</Text>
       <DateFields date={date} time={time} onDate={setDate} onTime={setTime} />
       <TextInput
@@ -331,11 +365,14 @@ export function VisitCard({
   const when = [visit.date ? formatShortDate(visit.date) : 'No date', formatVisitTime(visit.startTime)].filter(Boolean).join(' · ');
 
   const firstName = (person?.name ?? '').split(' ')[0] || 'there';
-  const sold = planSummary(visit.planTier, visit.planPriceCents);
+  const sold = [planSummary(visit.planTier, visit.planPriceCents), visit.commercial ? 'commercial' : null]
+    .filter(Boolean)
+    .join(' · ') || null;
+  // Sold as Solar Shield (2026-10-12).
   const planWords =
     visit.planTier && visit.planPriceCents
-      ? `${planSummary(visit.planTier, null)} solar service plan (${formatCents(visit.planPriceCents)} a year, 2-year agreement)`
-      : 'annual solar service plan';
+      ? `Solar Shield ${planSummary(visit.planTier, null)}${visit.commercial ? ' (commercial)' : ''} plan (${formatCents(visit.planPriceCents)} a year, 2-year agreement)`
+      : 'Solar Shield plan';
   const linkMessage = (url: string) =>
     `Hi ${firstName}, this is DC Solar. Here is a secure Stripe link to save the card for your ${planWords}. Nothing is charged until after your first visit: ${url}`;
 
@@ -483,7 +520,14 @@ export function VisitCard({
 
       {mode === 'plan' ? (
         <>
-          <PlanPicker plans={plans} plan={plan} custom={custom} onPlan={setPlan} onCustom={setCustom} />
+          <PlanPicker
+            plans={plans}
+            plan={plan}
+            custom={custom}
+            onPlan={setPlan}
+            onCustom={setCustom}
+            commercial={visit.commercial}
+          />
           <View style={styles.buttons}>
             <Pressable onPress={() => setMode('view')} style={({ pressed }) => [styles.cancel, pressed && styles.pressed]}>
               <Text style={styles.cancelText}>Back</Text>

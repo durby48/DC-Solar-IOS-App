@@ -50,6 +50,8 @@ export interface ServiceVisit {
   planTier: PlanChoice | null;
   /** Its yearly price in cents. */
   planPriceCents: number | null;
+  /** Booked as a commercial Solar Shield plan (2026-10-12), with the panel count it was quoted on. */
+  commercial: { panels: number | null } | null;
 }
 
 export type DoneCharge = 'paid' | 'covered' | 'failed' | 'no_card' | 'not_configured';
@@ -171,7 +173,7 @@ export async function fetchServiceVisit(jobId: string): Promise<ServiceVisit | n
     const [{ data: job, error }, { data: dates }] = await Promise.all([
       supabase
         .from('jobs')
-        .select('id, job_number, job_type, stage, scheduled_for, completed_on, service_paid_at, customer_id, plan_tier, plan_price_cents')
+        .select('id, job_number, job_type, stage, scheduled_for, completed_on, service_paid_at, customer_id, plan_tier, plan_price_cents, plan_commercial, module_count')
         .eq('id', jobId)
         .maybeSingle(),
       supabase
@@ -193,6 +195,8 @@ export async function fetchServiceVisit(jobId: string): Promise<ServiceVisit | n
       customer_id: string | null;
       plan_tier: PlanChoice | null;
       plan_price_cents: number | null;
+      plan_commercial: boolean | null;
+      module_count: number | null;
     };
     const { data: cust } = j.customer_id
       ? await supabase
@@ -224,6 +228,7 @@ export async function fetchServiceVisit(jobId: string): Promise<ServiceVisit | n
       paymentIssue: c?.payment_issue ?? null,
       planTier: j.plan_tier,
       planPriceCents: j.plan_price_cents,
+      commercial: j.plan_commercial ? { panels: j.module_count } : null,
     };
   } catch {
     return null;

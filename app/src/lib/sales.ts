@@ -77,6 +77,10 @@ export interface Lead {
   last_hail_at?: string | null;
   last_hail_size?: number | null;
   last_hail_miles?: number | null;
+  /** A business / commercial building (2026-10-12): commercial Solar Shield prices. */
+  is_commercial?: boolean;
+  /** Panels on the system, from the call — picks which commercial tier fits. */
+  panel_count?: number | null;
 }
 
 export interface SalesRep {
@@ -155,7 +159,7 @@ export async function fetchSalesData(): Promise<SalesData | null> {
       supabase
         .from('leads')
         .select(
-          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by, last_hail_at, last_hail_size, last_hail_miles',
+          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by, last_hail_at, last_hail_size, last_hail_miles, is_commercial, panel_count',
         )
         .eq('company', COMPANY)
         .is('removed_at', null)
@@ -305,7 +309,7 @@ export async function fetchOpenLeads(): Promise<Lead[]> {
     const { data, error } = await supabase
       .from('leads')
       .select(
-        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by, last_hail_at, last_hail_size, last_hail_miles',
+        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by, last_hail_at, last_hail_size, last_hail_miles, is_commercial, panel_count',
       )
       .eq('company', COMPANY)
       .is('removed_at', null)
@@ -366,6 +370,20 @@ export async function setLeadTemperature(
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const { error } = await supabase.from('leads').update({ temperature }).eq('id', leadId);
   if (error) return { ok: false, message: error.message };
+  return { ok: true };
+}
+
+/** Commercial flag + panel count (2026-10-12); the booking reads both. */
+export async function setLeadCommercial(
+  leadId: string,
+  patch: { isCommercial?: boolean; panelCount?: number | null },
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const row: { is_commercial?: boolean; panel_count?: number | null } = {};
+  if (patch.isCommercial !== undefined) row.is_commercial = patch.isCommercial;
+  if (patch.panelCount !== undefined) row.panel_count = patch.panelCount;
+  const { data, error } = await supabase.from('leads').update(row).eq('id', leadId).select('id');
+  if (error) return { ok: false, message: error.message };
+  if (!data?.length) return { ok: false, message: 'Not saved — this lead is not yours to edit.' };
   return { ok: true };
 }
 

@@ -25,7 +25,7 @@ import { formatDuration, formatPhone, placeBridgeCall } from '@/lib/comms';
 import { takeIncomingCall } from '@/lib/incomingCall';
 import { callPersonFor, scriptFieldsFor, type ScriptFields } from '@/lib/callScript';
 import { getRole } from '@/lib/role';
-import { fetchResources } from '@/lib/salesResources';
+import { fetchResources, pickScript } from '@/lib/salesResources';
 import { inAppCallingSupported } from '@/lib/voice';
 
 /**
@@ -105,11 +105,12 @@ export default function CallScreen() {
     const next = !showScript;
     setShowScript(next);
     if (next) setShowKeys(false);
+    // The CRM record on the line, when the call started there; a business gets the commercial script.
+    const person = callPersonFor(to, /\d{3}/.test(name) ? null : name);
     if (next && script === undefined) {
-      void fetchResources().then((items) => setScript(items.find((r) => r.kind === 'script')?.body ?? null));
+      void fetchResources().then((items) => setScript(pickScript(items, person.is_commercial === true)?.body ?? null));
     }
     if (next && scriptFields === undefined) {
-      const person = callPersonFor(to, /\d{3}/.test(name) ? null : name);
       void getRole().then((r) => scriptFieldsFor(person, r?.displayName ?? null)).then(setScriptFields);
     }
   };

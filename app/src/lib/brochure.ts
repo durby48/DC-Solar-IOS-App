@@ -49,17 +49,30 @@ export interface PublicPlan {
   label: string;
   amountCents: number;
   includes: string | null;
+  /** Business price and the panels it covers (2026-10-12); maxPanels null = any size. */
+  commercial: { amountCents: number; maxPanels: number | null } | null;
 }
 
 export async function fetchPublicPlans(): Promise<PublicPlan[]> {
   try {
     const { data, error } = await supabase.rpc('public_service_plans');
     if (error || !data) return [];
-    return (data as { tier: string; label: string; amount_cents: number; includes: string | null }[]).map((p) => ({
+    return (
+      data as {
+        tier: string;
+        label: string;
+        amount_cents: number;
+        includes: string | null;
+        commercial_amount_cents: number | null;
+        commercial_max_panels: number | null;
+      }[]
+    ).map((p) => ({
       tier: p.tier,
       label: p.label,
       amountCents: p.amount_cents,
       includes: p.includes,
+      commercial:
+        p.commercial_amount_cents != null ? { amountCents: p.commercial_amount_cents, maxPanels: p.commercial_max_panels } : null,
     }));
   } catch {
     return [];

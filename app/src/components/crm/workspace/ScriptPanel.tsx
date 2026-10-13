@@ -11,7 +11,7 @@ import { scriptFieldsFor, scriptPersonOf, type ScriptFields } from '@/lib/callSc
 import { type WorkspaceRecord } from '@/lib/crmWorkspace';
 import { fetchArtUrls, TIER_ART, type ArtKey } from '@/lib/marketingArt';
 import { useRole } from '@/lib/role';
-import { fetchResources } from '@/lib/salesResources';
+import { fetchResources, pickScript, type SalesResource } from '@/lib/salesResources';
 
 /**
  * The call script in the CRM's right column (2026-10-12, Devon): one switch
@@ -25,14 +25,14 @@ import { fetchResources } from '@/lib/salesResources';
 
 const STORE_KEY = 'dc.crmScript.v1';
 let remembered: boolean | null = null;
-let scriptCache: { at: number; body: string | null } | null = null;
+let scriptCache: { at: number; items: SalesResource[] } | null = null;
 
-async function loadScript(): Promise<string | null> {
-  if (scriptCache && Date.now() - scriptCache.at < 5 * 60 * 1000) return scriptCache.body;
-  const items = await fetchResources();
-  const body = items.find((r) => r.kind === 'script')?.body ?? null;
-  scriptCache = { at: Date.now(), body };
-  return body;
+/** Every script (home + commercial, 2026-10-12); the panel picks one per record. */
+async function loadScripts(): Promise<SalesResource[]> {
+  if (scriptCache && Date.now() - scriptCache.at < 5 * 60 * 1000) return scriptCache.items;
+  const items = (await fetchResources()).filter((r) => r.kind === 'script');
+  scriptCache = { at: Date.now(), items };
+  return items;
 }
 
 const TIERS = ['bronze', 'silver', 'gold'] as const;
@@ -41,7 +41,7 @@ export function ScriptPanel({ record }: { record: WorkspaceRecord }) {
   const router = useRouter();
   const role = useRole();
   const [on, setOn] = useState<boolean | null>(remembered);
-  const [body, setBody] = useState<string | null | undefined>(undefined);
+  const [scripts, setScripts] = useState<SalesResource[] | undefined>(undefined);
   const [fields, setFields] = useState<ScriptFields | null>(null);
   const [art, setArt] = useState<Partial<Record<ArtKey, string>>>({});
 
@@ -64,12 +64,15 @@ export function ScriptPanel({ record }: { record: WorkspaceRecord }) {
 
   useEffect(() => {
     if (!on) return;
-    if (body === undefined) void loadScript().then(setBody);
+    if (scripts === undefined) void loadScripts().then(setScripts);
     void fetchArtUrls(['script-hero', ...TIERS.map((t) => TIER_ART[t])], 640).then(setArt);
-  }, [on, body]);
+  }, [on, scripts]);
 
   const person = scriptPersonOf(record);
-  const personKey = `${record.key}|${person.name}|${person.address}|${person.last_hail_at}`;
+  // A business gets the commercial script (2026-10-12).
+  const script = scripts ? pickScript(scripts, person.is_commercial === true) : undefined;
+  const body = script === undefined ? undefined : (script?.body ?? null);
+  const personKey = `${record.key}|${person.name}|${person.address}|${person.last_hail_at}|${person.is_commercial}|${person.panel_count}`;
   useEffect(() => {
     if (!on) return;
     let live = true;
@@ -93,7 +96,7 @@ export function ScriptPanel({ record }: { record: WorkspaceRecord }) {
         accessibilityLabel="Call script"
         style={styles.head}>
         <Ionicons name="document-text" size={15} color={on ? colors.sun : colors.inkSoft} />
-        <Text style={styles.title}>Call script</Text>
+        <Text style={styles.title}>Call script{on && person.is_commercial ? ' · Business' : ''}</Text>
         <Switch
           value={!!on}
           onValueChange={toggle}

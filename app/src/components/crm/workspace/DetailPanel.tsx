@@ -23,7 +23,16 @@ import { isUpcoming, type LeadAppointment } from '@/lib/leadAppointments';
 import { updateLead } from '@/lib/leads';
 import { useRole } from '@/lib/role';
 import { TEMPERATURE_META, TEMPERATURES, type LeadTemperature } from '@/lib/leadTemperature';
-import { assignLead, removeLeads, removeSummary, setLeadStatus, setLeadTemperature, VISIT_DRIVEN_STATUSES, type LeadStatus } from '@/lib/sales';
+import {
+  assignLead,
+  removeLeads,
+  removeSummary,
+  setLeadCommercial,
+  setLeadStatus,
+  setLeadTemperature,
+  VISIT_DRIVEN_STATUSES,
+  type LeadStatus,
+} from '@/lib/sales';
 import { type Task } from '@/lib/tasks';
 import { firstName } from '@/lib/staffNames';
 import { lastHailLabel } from '@/lib/storms';
@@ -160,6 +169,9 @@ export function DetailPanel({
   const [addingAppt, setAddingAppt] = useState(false);
   const [showPastAppts, setShowPastAppts] = useState(false);
   const [showAllJobs, setShowAllJobs] = useState(false);
+  // Commercial + panels (2026-10-12): typed in on the call; booking prices from them.
+  const [panels, setPanels] = useState('');
+  const [segmentBusy, setSegmentBusy] = useState(false);
 
   useEffect(() => {
     setEditing(false);
@@ -179,6 +191,33 @@ export function DetailPanel({
       address: record.address ?? '',
     });
   }, [record.key, record.name, record.phone, record.email, record.address]);
+
+  useEffect(() => {
+    setPanels(record.lead?.panel_count ? String(record.lead.panel_count) : '');
+  }, [record.key, record.lead?.panel_count]);
+
+  const setCommercial = async (on: boolean) => {
+    if (!record.lead || (record.lead.is_commercial === true) === on) return;
+    setSegmentBusy(true);
+    const result = await setLeadCommercial(record.id, { isCommercial: on });
+    setSegmentBusy(false);
+    if (result.ok) onChanged();
+    else setError(result.message);
+  };
+
+  const savePanels = async () => {
+    if (!record.lead) return;
+    const raw = panels.trim();
+    const next = raw ? Number(raw) : null;
+    if (next !== null && !(Number.isInteger(next) && next > 0 && next <= 100000)) {
+      setError('Panels is a whole number, e.g. 120.');
+      return;
+    }
+    if (next === (record.lead.panel_count ?? null)) return;
+    const result = await setLeadCommercial(record.id, { panelCount: next });
+    if (result.ok) onChanged();
+    else setError(result.message);
+  };
 
   const save = async () => {
     setSaving(true);
@@ -337,6 +376,9 @@ export function DetailPanel({
                 }`}
               />
             ) : null}
+            {record.kind === 'customer' && record.customer?.is_commercial ? (
+              <Fact label="Commercial" value={record.customer.panel_count ? `${record.customer.panel_count} panels` : 'Panels not recorded'} />
+            ) : null}
             {record.optedOut ? <Text style={styles.warn}>Replied STOP — texting is off. Calling is fine.</Text> : null}
             {record.duplicateOfName && !isSales ? (
               <Text style={styles.warn}>
@@ -412,6 +454,42 @@ export function DetailPanel({
               );
             })}
           </View>
+          <View style={styles.tempRow}>
+            <Text style={styles.factLabel}>Type</Text>
+            {([false, true] as const).map((on) => {
+              const active = (record.lead?.is_commercial === true) === on;
+              return (
+                <Pressable
+                  key={String(on)}
+                  onPress={() => void setCommercial(on)}
+                  disabled={segmentBusy}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  style={({ pressed }) => [styles.tempChip, active && styles.segmentOn, pressed && styles.pressed]}>
+                  <Ionicons name={on ? 'business' : 'home'} size={13} color={active ? colors.textInverse : colors.inkSoft} />
+                  <Text style={[styles.tempChipText, active && { color: colors.textInverse }]}>{on ? 'Business' : 'Home'}</Text>
+                </Pressable>
+              );
+            })}
+            <Text style={[styles.factLabel, styles.panelsLabel]}>Panels</Text>
+            <TextInput
+              value={panels}
+              onChangeText={setPanels}
+              onBlur={() => void savePanels()}
+              onSubmitEditing={() => void savePanels()}
+              placeholder="?"
+              placeholderTextColor={colors.inkSoft}
+              keyboardType="number-pad"
+              returnKeyType="done"
+              accessibilityLabel="Number of panels"
+              style={styles.panelsInput}
+            />
+          </View>
+          {record.lead.is_commercial ? (
+            <Text style={styles.factMuted}>
+              Commercial Solar Shield: Bronze $999 up to 100 panels · Silver $1,499 up to 250 · Gold $1,999 any size.
+            </Text>
+          ) : null}
           {isSales ? (
             <View style={styles.required}>
               {REQUIRED_FIELDS.map(([key, label]) => {
@@ -438,6 +516,7 @@ export function DetailPanel({
             booking ? (
               <BookVisitForm
                 leadId={record.id}
+                commercial={record.lead.is_commercial ? { panels: record.lead.panel_count ?? null } : null}
                 onCancel={() => setBooking(false)}
                 onBooked={(message) => {
                   setBooking(false);
@@ -808,6 +887,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.canvas,
     borderWidth: 1,
     borderColor: colors.line,
+  },
+  segmentOn: { backgroundColor: hubColors.crm.fg, borderColor: hubColors.crm.fg },
+  panelsLabel: { marginLeft: spacing.sm },
+  panelsInput: {
+    minWidth: 64,
+    backgroundColor: colors.canvas,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 4,
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   tempChipText: { color: colors.inkSoft, fontSize: 12, fontWeight: '700' },
   required: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },

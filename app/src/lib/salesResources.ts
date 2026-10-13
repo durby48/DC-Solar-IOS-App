@@ -12,6 +12,8 @@ const COMPANY = 'dc-solar';
 const BUCKET = 'sales-resources';
 
 export type ResourceKind = 'script' | 'situation' | 'objection' | 'file';
+/** Who a script is for (2026-10-12); null = everyone. */
+export type ResourceAudience = 'residential' | 'commercial' | null;
 
 export interface SalesResource {
   id: string;
@@ -21,6 +23,7 @@ export interface SalesResource {
   filePath: string | null;
   sort: number;
   updatedAt: string;
+  audience: ResourceAudience;
 }
 
 type Result = { ok: true } | { ok: false; message: string };
@@ -29,7 +32,7 @@ export async function fetchResources(): Promise<SalesResource[]> {
   try {
     const { data, error } = await supabase
       .from('sales_resources')
-      .select('id, kind, title, body, file_path, sort, updated_at')
+      .select('id, kind, title, body, file_path, sort, updated_at, audience')
       .eq('company', COMPANY)
       .order('sort')
       .order('title');
@@ -42,10 +45,22 @@ export async function fetchResources(): Promise<SalesResource[]> {
       filePath: (r.file_path as string | null) ?? null,
       sort: (r.sort as number) ?? 100,
       updatedAt: r.updated_at as string,
+      audience: (r.audience as ResourceAudience) ?? null,
     }));
   } catch {
     return [];
   }
+}
+
+/**
+ * The call script for this person (2026-10-12): a business gets the script
+ * marked 'commercial', a home the 'residential' one; a script for everyone
+ * (audience null) or, failing that, any script stands in.
+ */
+export function pickScript(items: SalesResource[], commercial: boolean): SalesResource | null {
+  const scripts = items.filter((r) => r.kind === 'script');
+  const want = commercial ? 'commercial' : 'residential';
+  return scripts.find((r) => r.audience === want) ?? scripts.find((r) => r.audience === null) ?? scripts[0] ?? null;
 }
 
 export async function fetchResource(id: string): Promise<SalesResource | null> {
@@ -59,6 +74,7 @@ export async function saveResource(input: {
   title: string;
   body: string;
   sort?: number;
+  audience?: ResourceAudience;
 }): Promise<Result> {
   try {
     const title = input.title.trim();
@@ -72,6 +88,7 @@ export async function saveResource(input: {
       updated_at: new Date().toISOString(),
       updated_by: session.session?.user.email ?? null,
       ...(input.sort !== undefined ? { sort: input.sort } : {}),
+      ...(input.audience !== undefined ? { audience: input.audience } : {}),
     };
     const { data, error } = input.id
       ? await supabase.from('sales_resources').update(row).eq('id', input.id).select('id')

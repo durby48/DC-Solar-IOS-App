@@ -56,6 +56,9 @@ export interface Customer {
   lat?: number | null;
   lng?: number | null;
   geocode_status?: string | null;
+  /** Commercial customer + panels (2026-10-12, copied from the lead at booking). */
+  is_commercial?: boolean;
+  panel_count?: number | null;
   /** Most recent hail ≥ 1 in within 3 mi (storm coverage, 2026-10-09). */
   last_hail_at?: string | null;
   last_hail_size?: number | null;

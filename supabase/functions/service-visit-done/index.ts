@@ -20,7 +20,8 @@
  *    records the same thing from invoice.paid, so either arriving first is fine.
  *
  * WHICH PRICE (2026-10-06, plans). The booking's `jobs.plan_tier`:
- *   bronze / silver / gold → that tier's Stripe price (`service_plans`);
+ *   bronze / silver / gold → that tier's Stripe price (`service_plans`), or its
+ *                            commercial price when jobs.plan_commercial (2026-10-12);
  *   custom                 → a yearly price made on the fly at the rep's
  *                            `plan_price_cents`, on the Solar Shield Custom
  *                            product (company_settings.stripe_custom_product_id,
@@ -119,7 +120,7 @@ Deno.serve(async (req) => {
     // --- 2. the charge ------------------------------------------------------
     const { data: job } = await admin
       .from('jobs')
-      .select('id, company, customer_id, plan_tier, plan_price_cents')
+      .select('id, company, customer_id, plan_tier, plan_price_cents, plan_commercial')
       .eq('id', jobId)
       .maybeSingle();
     const { data: customer } = job?.customer_id
@@ -173,13 +174,16 @@ Deno.serve(async (req) => {
     if (tier === 'bronze' || tier === 'silver' || tier === 'gold') {
       const { data: plan } = await admin
         .from('service_plans')
-        .select('stripe_price_id, amount_cents')
+        .select('stripe_price_id, amount_cents, commercial_stripe_price_id, commercial_amount_cents')
         .eq('company', job!.company)
         .eq('tier', tier)
         .maybeSingle();
-      if (!plan?.stripe_price_id) return await notSet(`The ${tier} plan has no Stripe price`);
-      item = { 'items[0][price]': plan.stripe_price_id as string };
-      planPrice = (plan.amount_cents as number) ?? planPrice;
+      // Commercial (2026-10-12): the tier's commercial price ($999 / $1,499 / $1,999).
+      const commercial = job!.plan_commercial === true;
+      const priceId = (commercial ? plan?.commercial_stripe_price_id : plan?.stripe_price_id) as string | null | undefined;
+      if (!priceId) return await notSet(`The ${commercial ? 'commercial ' : ''}${tier} plan has no Stripe price`);
+      item = { 'items[0][price]': priceId };
+      planPrice = ((commercial ? plan?.commercial_amount_cents : plan?.amount_cents) as number | null) ?? planPrice;
     } else if (tier === 'custom') {
       if (!planPrice || planPrice < 100) return await notSet('The custom price is missing');
       // Its own product, so the invoice does not call a custom deal "Bronze".

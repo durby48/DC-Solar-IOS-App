@@ -148,8 +148,14 @@ export default function BrochurePage() {
                 <Text style={[styles.planName, { color: TIER_TINT[p.tier] ?? INK }]}>Solar Shield {p.label}</Text>
                 <Text style={styles.planPrice}>
                   {dollars(p.amountCents)}
-                  <Text style={styles.planPer}> / year</Text>
+                  <Text style={styles.planPer}> / year for homes</Text>
                 </Text>
+                {p.commercial ? (
+                  <Text style={styles.business}>
+                    Businesses: {dollars(p.commercial.amountCents)} / year,{' '}
+                    {p.commercial.maxPanels ? `up to ${p.commercial.maxPanels} panels` : 'any size system'}
+                  </Text>
+                ) : null}
                 {(p.includes ?? '')
                   .split('\n')
                   .map((l) => l.trim().replace(/^[-•✓]\s*/, ''))
@@ -272,6 +278,7 @@ const styles = StyleSheet.create({
   },
   planName: { fontSize: 18, fontWeight: '800' },
   addOn: { color: SOFT, fontSize: 14, lineHeight: 21, fontStyle: 'italic' },
+  business: { color: INK, fontSize: 14, fontWeight: '700', marginTop: -4 },
   kicker: { color: SOFT, fontSize: 15, lineHeight: 22, marginTop: -8 },
   banner: { width: '100%', aspectRatio: 16 / 9, borderRadius: 14, backgroundColor: SKY },
   tierArt: { width: '100%', maxWidth: 260, alignSelf: 'center', aspectRatio: 4 / 5, borderRadius: 10, backgroundColor: SKY },

@@ -6,7 +6,7 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { AppText, Card, Screen } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { fetchArtUrls, TIER_ART, type ArtKey } from '@/lib/marketingArt';
-import { fetchServicePlans, formatCents, type ServicePlan } from '@/lib/servicePlans';
+import { commercialCovers, fetchServicePlans, formatCents, type ServicePlan } from '@/lib/servicePlans';
 
 /**
  * `/plans` — Plans & prices (2026-10-06): the rep's quick reference while on a
@@ -25,6 +25,7 @@ const TERMS = [
   'Nothing is charged when they save their card — the first year is charged after the first service visit.',
   'The second year renews automatically 12 months later.',
   'Panel cleaning is an optional add-on, never included: 5% off with Bronze, 10% with Silver, 15% with Gold — the same as removal & reinstall.',
+  'Commercial buildings use the commercial price: Bronze covers up to 100 panels, Silver up to 250, and anything over 250 panels is Gold. Put the panel count on the lead before booking.',
   'You can sell a custom yearly price; it is billed the same way.',
   'You earn 30% of every payment from customers you sold — first year and renewals.',
 ];
@@ -73,6 +74,11 @@ export default function PlansScreen() {
                   </AppText>
                 </AppText>
               </View>
+              {p.commercial ? (
+                <AppText variant="bodyStrong" color={colors.textPrimary}>
+                  Commercial: {formatCents(p.commercial.amountCents)} / year · {commercialCovers(p)}
+                </AppText>
+              ) : null}
               {p.includes ? (
                 p.includes
                   .split('\n')
