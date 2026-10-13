@@ -8,6 +8,7 @@ import { AppointmentComposer, AppointmentItem } from '@/components/crm/workspace
 import { CurrentJobCard, StagePillControl } from '@/components/crm/workspace/CurrentJobCard';
 import { BookVisitForm, VisitCard } from '@/components/crm/workspace/ServiceVisit';
 import { RecordMiniMap } from '@/components/map/RecordMiniMap';
+import { FieldMenuRow, FieldSelect } from '@/components/crm/workspace/FieldSelect';
 import { ScriptPanel } from '@/components/crm/workspace/ScriptPanel';
 import { TaskComposer } from '@/components/crm/workspace/TaskComposer';
 import { TaskItem } from '@/components/crm/workspace/TaskItem';
@@ -49,6 +50,17 @@ const ADMIN_STATUSES: LeadStatus[] = ['new', 'contacted', 'interested', 'lost', 
 /** A lead in one of these can be booked (B1); the database re-checks. */
 const BOOKABLE: readonly LeadStatus[] = ['new', 'contacted', 'interested'];
 const SALES_STATUS_LABEL: Partial<Record<LeadStatus, string>> = { new: 'Prospect', lost: 'Not interested' };
+/** Quick picks in the Panels dropdown; the box takes any exact count. */
+const PANEL_PICKS = [20, 50, 100, 150, 200, 250, 300, 500];
+
+/** Which commercial tiers a building's panel count allows (2026-10-12). */
+function commercialHint(panels: number | null): string {
+  if (!panels) return 'Commercial: Bronze $999 up to 100 panels · Silver $1,499 up to 250 · Gold $1,999 any size.';
+  if (panels <= 100) return 'Commercial: Bronze $999, Silver $1,499 or Gold $1,999 a year.';
+  if (panels <= 250) return 'Commercial: Silver $1,499 or Gold $1,999 a year.';
+  return 'Commercial: Gold $1,999 a year (over 250 panels).';
+}
+
 const REQUIRED_FIELDS = [
   ['name', 'Name'],
   ['phone', 'Phone'],
@@ -172,6 +184,8 @@ export function DetailPanel({
   // Commercial + panels (2026-10-12): typed in on the call; booking prices from them.
   const [panels, setPanels] = useState('');
   const [segmentBusy, setSegmentBusy] = useState(false);
+  const [panelsBusy, setPanelsBusy] = useState(false);
+  const [openField, setOpenField] = useState<'status' | 'temp' | 'type' | 'panels' | null>(null);
 
   useEffect(() => {
     setEditing(false);
@@ -184,6 +198,7 @@ export function DetailPanel({
     setAddingAppt(false);
     setShowPastAppts(false);
     setShowAllJobs(false);
+    setOpenField(null);
     setForm({
       name: record.name,
       phone: record.phone ?? '',
@@ -205,16 +220,19 @@ export function DetailPanel({
     else setError(result.message);
   };
 
-  const savePanels = async () => {
+  const savePanelCount = async (text: string) => {
     if (!record.lead) return;
-    const raw = panels.trim();
+    const raw = text.trim();
     const next = raw ? Number(raw) : null;
     if (next !== null && !(Number.isInteger(next) && next > 0 && next <= 100000)) {
       setError('Panels is a whole number, e.g. 120.');
       return;
     }
+    setOpenField(null);
     if (next === (record.lead.panel_count ?? null)) return;
+    setPanelsBusy(true);
     const result = await setLeadCommercial(record.id, { panelCount: next });
+    setPanelsBusy(false);
     if (result.ok) onChanged();
     else setError(result.message);
   };
@@ -268,11 +286,10 @@ export function DetailPanel({
     else onChanged();
   };
 
-  // Hot / Warm / Cold (2026-10-08): one tap sets it, tapping it again clears.
-  const setTemperature = async (t: LeadTemperature) => {
-    if (!record.lead) return;
-    const next = record.lead.temperature === t ? null : t;
-    setTempBusy(t);
+  // Hot / Warm / Cold (2026-10-08); a dropdown since 2026-10-12 ("Not set" clears).
+  const chooseTemperature = async (next: LeadTemperature | null) => {
+    if (!record.lead || (record.lead.temperature ?? null) === next) return;
+    setTempBusy(next ?? 'cold');
     const result = await setLeadTemperature(record.id, next);
     setTempBusy(null);
     if (result.ok) onChanged();
@@ -404,91 +421,102 @@ export function DetailPanel({
 
       {record.kind === 'lead' && record.lead ? (
         <Section title="Lead">
-          <View style={styles.statusRow}>
-            {(isSales ? SALES_STATUSES : ADMIN_STATUSES).map((s) => {
-              const active = record.lead?.status === s;
-              const visitDriven = VISIT_DRIVEN_STATUSES.includes(s);
-              return (
-                <Pressable
-                  key={s}
-                  onPress={() => void moveLead(s)}
-                  disabled={statusBusy !== null || visitDriven}
-                  style={({ pressed }) => [styles.statusChip, active && styles.statusChipActive, pressed && styles.pressed]}>
-                  {statusBusy === s ? (
-                    <ActivityIndicator size="small" color={colors.ink} />
-                  ) : (
-                    <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>
-                      {(isSales ? SALES_STATUS_LABEL[s] : undefined) ?? LEAD_STATUS_LABEL[s]}
-                    </Text>
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
-          <View style={styles.tempRow}>
-            <Text style={styles.factLabel}>Temperature</Text>
-            {TEMPERATURES.map((t) => {
-              const on = record.lead?.temperature === t;
-              const meta = TEMPERATURE_META[t];
-              return (
-                <Pressable
-                  key={t}
-                  onPress={() => void setTemperature(t)}
-                  disabled={tempBusy !== null}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                  style={({ pressed }) => [
-                    styles.tempChip,
-                    on && { backgroundColor: meta.color, borderColor: meta.color },
-                    pressed && styles.pressed,
-                  ]}>
-                  {tempBusy === t ? (
-                    <ActivityIndicator size="small" color={colors.ink} />
-                  ) : (
-                    <>
-                      <Ionicons name={meta.icon} size={13} color={on ? colors.textInverse : meta.color} />
-                      <Text style={[styles.tempChipText, on && { color: colors.textInverse }]}>{meta.label}</Text>
-                    </>
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
-          <View style={styles.tempRow}>
-            <Text style={styles.factLabel}>Type</Text>
-            {([false, true] as const).map((on) => {
-              const active = (record.lead?.is_commercial === true) === on;
-              return (
-                <Pressable
-                  key={String(on)}
-                  onPress={() => void setCommercial(on)}
-                  disabled={segmentBusy}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  style={({ pressed }) => [styles.tempChip, active && styles.segmentOn, pressed && styles.pressed]}>
-                  <Ionicons name={on ? 'business' : 'home'} size={13} color={active ? colors.textInverse : colors.inkSoft} />
-                  <Text style={[styles.tempChipText, active && { color: colors.textInverse }]}>{on ? 'Business' : 'Home'}</Text>
-                </Pressable>
-              );
-            })}
-            <Text style={[styles.factLabel, styles.panelsLabel]}>Panels</Text>
-            <TextInput
-              value={panels}
-              onChangeText={setPanels}
-              onBlur={() => void savePanels()}
-              onSubmitEditing={() => void savePanels()}
-              placeholder="?"
-              placeholderTextColor={colors.inkSoft}
-              keyboardType="number-pad"
-              returnKeyType="done"
-              accessibilityLabel="Number of panels"
-              style={styles.panelsInput}
+          {/* Dropdowns (2026-10-12, Devon): Lead, Temperature, Type, Panels. */}
+          <View style={styles.fields}>
+            <FieldSelect
+              label="Lead"
+              value={record.lead.status}
+              open={openField === 'status'}
+              onToggle={() => setOpenField((o) => (o === 'status' ? null : 'status'))}
+              busy={statusBusy !== null}
+              options={(isSales ? SALES_STATUSES : ADMIN_STATUSES).map((st) => ({
+                value: st,
+                label: (isSales ? SALES_STATUS_LABEL[st] : undefined) ?? LEAD_STATUS_LABEL[st],
+                disabled: VISIT_DRIVEN_STATUSES.includes(st),
+                hint: VISIT_DRIVEN_STATUSES.includes(st) ? 'auto' : undefined,
+              }))}
+              onSelect={(v) => {
+                setOpenField(null);
+                void moveLead(v as LeadStatus);
+              }}
             />
+            <FieldSelect
+              label="Temperature"
+              value={record.lead.temperature ?? ''}
+              open={openField === 'temp'}
+              onToggle={() => setOpenField((o) => (o === 'temp' ? null : 'temp'))}
+              busy={tempBusy !== null}
+              options={[
+                ...TEMPERATURES.map((t) => ({
+                  value: t,
+                  label: TEMPERATURE_META[t].label,
+                  icon: TEMPERATURE_META[t].icon,
+                  color: TEMPERATURE_META[t].color,
+                })),
+                { value: '', label: 'Not set' },
+              ]}
+              onSelect={(v) => {
+                setOpenField(null);
+                void chooseTemperature((v || null) as LeadTemperature | null);
+              }}
+            />
+            <FieldSelect
+              label="Type"
+              value={record.lead.is_commercial ? 'business' : 'home'}
+              open={openField === 'type'}
+              onToggle={() => setOpenField((o) => (o === 'type' ? null : 'type'))}
+              busy={segmentBusy}
+              options={[
+                { value: 'home', label: 'Home', icon: 'home' },
+                { value: 'business', label: 'Business', icon: 'business', hint: 'commercial prices' },
+              ]}
+              onSelect={(v) => {
+                setOpenField(null);
+                void setCommercial(v === 'business');
+              }}
+            />
+            <FieldSelect
+              label="Panels"
+              value={record.lead.panel_count ? String(record.lead.panel_count) : ''}
+              display={record.lead.panel_count ? `${record.lead.panel_count} panels` : undefined}
+              open={openField === 'panels'}
+              onToggle={() => setOpenField((o) => (o === 'panels' ? null : 'panels'))}
+              busy={panelsBusy}>
+              <View style={styles.panelsExact}>
+                <TextInput
+                  value={panels}
+                  onChangeText={setPanels}
+                  onSubmitEditing={() => void savePanelCount(panels)}
+                  placeholder="Exact count, e.g. 120"
+                  placeholderTextColor={colors.inkSoft}
+                  keyboardType="number-pad"
+                  returnKeyType="done"
+                  accessibilityLabel="Number of panels"
+                  style={[styles.input, styles.flexOne]}
+                />
+                <Pressable onPress={() => void savePanelCount(panels)} style={({ pressed }) => [styles.save, pressed && styles.pressed]}>
+                  <Text style={styles.saveText}>Set</Text>
+                </Pressable>
+              </View>
+              <View style={styles.panelPicks}>
+                {PANEL_PICKS.map((n) => (
+                  <Pressable
+                    key={n}
+                    onPress={() => void savePanelCount(String(n))}
+                    style={({ pressed }) => [
+                      styles.panelPick,
+                      record.lead?.panel_count === n && styles.panelPickOn,
+                      pressed && styles.pressed,
+                    ]}>
+                    <Text style={[styles.panelPickText, record.lead?.panel_count === n && styles.panelPickTextOn]}>{n}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {record.lead.panel_count ? <FieldMenuRow label="Clear the count" onPress={() => void savePanelCount('')} /> : null}
+            </FieldSelect>
           </View>
           {record.lead.is_commercial ? (
-            <Text style={styles.factMuted}>
-              Commercial Solar Shield: Bronze $999 up to 100 panels · Silver $1,499 up to 250 · Gold $1,999 any size.
-            </Text>
+            <Text style={styles.factMuted}>{commercialHint(record.lead.panel_count ?? null)}</Text>
           ) : null}
           {isSales ? (
             <View style={styles.required}>
@@ -875,35 +903,14 @@ const styles = StyleSheet.create({
   cancelText: { color: colors.inkSoft, fontSize: 13, fontWeight: '700' },
   save: { backgroundColor: colors.sun, paddingHorizontal: spacing.lg, paddingVertical: 6, borderRadius: radii.pill, minWidth: 70, alignItems: 'center' },
   saveText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
-  statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-  tempRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm },
-  tempChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 5,
-    borderRadius: radii.pill,
-    backgroundColor: colors.canvas,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  segmentOn: { backgroundColor: hubColors.crm.fg, borderColor: hubColors.crm.fg },
-  panelsLabel: { marginLeft: spacing.sm },
-  panelsInput: {
-    minWidth: 64,
-    backgroundColor: colors.canvas,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.line,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 4,
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  tempChipText: { color: colors.inkSoft, fontSize: 12, fontWeight: '700' },
+  fields: { gap: spacing.sm },
+  flexOne: { flex: 1 },
+  panelsExact: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, padding: spacing.sm },
+  panelPicks: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingBottom: spacing.sm },
+  panelPick: { paddingHorizontal: spacing.sm + 2, paddingVertical: 4, borderRadius: radii.pill, borderWidth: 1, borderColor: colors.line },
+  panelPickOn: { backgroundColor: colors.olive, borderColor: colors.olive },
+  panelPickText: { color: colors.ink, fontSize: 12, fontWeight: '700' },
+  panelPickTextOn: { color: colors.textInverse },
   required: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
   requiredItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   requiredText: { color: colors.ink, fontSize: 12, fontWeight: '700' },
@@ -921,10 +928,6 @@ const styles = StyleSheet.create({
   },
   bookButtonText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
   notice: { color: colors.olive, fontSize: 12, fontWeight: '700' },
-  statusChip: { paddingHorizontal: spacing.sm + 2, paddingVertical: 5, borderRadius: radii.pill, backgroundColor: colors.canvas, borderWidth: 1, borderColor: colors.line },
-  statusChipActive: { backgroundColor: colors.olive, borderColor: colors.olive },
-  statusChipText: { color: colors.inkSoft, fontSize: 12, fontWeight: '700' },
-  statusChipTextActive: { color: colors.textInverse },
   repButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   repList: { marginTop: spacing.xs, backgroundColor: colors.canvas, borderRadius: radii.sm, borderWidth: 1, borderColor: colors.line },
   repRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.sm },
