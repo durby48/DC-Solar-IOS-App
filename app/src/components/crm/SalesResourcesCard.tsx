@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { colors, hubColors, radii, shadows, spacing } from '@/constants/theme';
+import { SCRIPT_FIELDS } from '@/lib/callScript';
 import {
   deleteResource,
   fetchResources,
@@ -114,6 +115,12 @@ export function SalesResourcesCard() {
             multiline
             style={[styles.input, styles.bodyInput]}
           />
+          {editing.kind === 'script' ? (
+            // Filled in for the person on the call (2026-10-12, lib/callScript.ts).
+            <Text style={styles.small}>
+              Filled in on every call: {SCRIPT_FIELDS.map((f) => `{{${f.token}}} (${f.label.toLowerCase()})`).join(', ')}.
+            </Text>
+          ) : null}
           <View style={styles.buttons}>
             {editing.id ? (
               <Pressable

@@ -8,6 +8,7 @@ import { AppointmentComposer, AppointmentItem } from '@/components/crm/workspace
 import { CurrentJobCard, StagePillControl } from '@/components/crm/workspace/CurrentJobCard';
 import { BookVisitForm, VisitCard } from '@/components/crm/workspace/ServiceVisit';
 import { RecordMiniMap } from '@/components/map/RecordMiniMap';
+import { ScriptPanel } from '@/components/crm/workspace/ScriptPanel';
 import { TaskComposer } from '@/components/crm/workspace/TaskComposer';
 import { TaskItem } from '@/components/crm/workspace/TaskItem';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
@@ -284,6 +285,9 @@ export function DetailPanel({
           <Text style={styles.closeText}>Back to conversation</Text>
         </Pressable>
       ) : null}
+
+      {/* The call script (2026-10-12): one switch, filled in for this record. */}
+      {record.kind === 'lead' || isSales ? <ScriptPanel record={record} /> : null}
 
       <Section
         title="Contact"

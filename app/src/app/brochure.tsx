@@ -6,6 +6,7 @@ import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWi
 
 import { fetchPublicPlans, fetchRepContact, type PublicPlan } from '@/lib/brochure';
 import { formatPhone } from '@/lib/comms';
+import { fetchArtUrls, TIER_ART, type ArtKey } from '@/lib/marketingArt';
 import { COMPANY_PHONE } from '@/lib/company';
 
 /**
@@ -40,9 +41,11 @@ export default function BrochurePage() {
   const wide = width >= 820;
   const [plans, setPlans] = useState<PublicPlan[]>([]);
   const [contact, setContact] = useState<{ name: string; phone: string | null } | null>(null);
+  const [art, setArt] = useState<Partial<Record<ArtKey, string>>>({});
 
   useEffect(() => {
     void fetchPublicPlans().then(setPlans);
+    void fetchArtUrls(['shield-program', 'shield-bronze', 'shield-silver', 'shield-gold'], 960).then(setArt);
     if (typeof rep === 'string' && rep) void fetchRepContact(rep).then(setContact);
   }, [rep]);
 
@@ -111,11 +114,20 @@ export default function BrochurePage() {
             ))}
           </View>
 
-          <Text style={styles.h2}>Plans</Text>
+          {/* The plans are sold as the Solar Shield program (2026-10-12), with
+              Gemini-drawn art per tier (marketing-art). */}
+          <Text style={styles.h2}>The Solar Shield program</Text>
+          <Text style={styles.kicker}>Yearly protection for your solar, powered by DC Solar. Pick Bronze, Silver or Gold.</Text>
+          {art['shield-program'] ? (
+            <Image source={{ uri: art['shield-program'] }} style={styles.banner} contentFit="cover" transition={150} />
+          ) : null}
           <View style={[styles.grid, wide && styles.row]}>
             {plans.map((p) => (
               <View key={p.tier} style={[styles.plan, { borderTopColor: TIER_TINT[p.tier] ?? SUN }, wide && styles.flex]}>
-                <Text style={[styles.planName, { color: TIER_TINT[p.tier] ?? INK }]}>{p.label}</Text>
+                {art[TIER_ART[p.tier as keyof typeof TIER_ART]] ? (
+                  <Image source={{ uri: art[TIER_ART[p.tier as keyof typeof TIER_ART]] }} style={styles.tierArt} contentFit="cover" transition={150} />
+                ) : null}
+                <Text style={[styles.planName, { color: TIER_TINT[p.tier] ?? INK }]}>Solar Shield {p.label}</Text>
                 <Text style={styles.planPrice}>
                   {dollars(p.amountCents)}
                   <Text style={styles.planPer}> / year</Text>
@@ -241,6 +253,9 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   planName: { fontSize: 18, fontWeight: '800' },
+  kicker: { color: SOFT, fontSize: 15, lineHeight: 22, marginTop: -8 },
+  banner: { width: '100%', aspectRatio: 16 / 9, borderRadius: 14, backgroundColor: SKY },
+  tierArt: { width: '100%', maxWidth: 260, alignSelf: 'center', aspectRatio: 4 / 5, borderRadius: 10, backgroundColor: SKY },
   planPrice: { color: INK, fontSize: 28, fontWeight: '800' },
   planPer: { color: SOFT, fontSize: 15, fontWeight: '600' },
   about: { color: SOFT, fontSize: 15, lineHeight: 23 },

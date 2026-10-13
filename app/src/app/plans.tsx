@@ -1,9 +1,11 @@
+import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { AppText, Card, Screen } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
+import { fetchArtUrls, TIER_ART, type ArtKey } from '@/lib/marketingArt';
 import { fetchServicePlans, formatCents, type ServicePlan } from '@/lib/servicePlans';
 
 /**
@@ -28,15 +30,24 @@ const TERMS = [
 
 export default function PlansScreen() {
   const [plans, setPlans] = useState<ServicePlan[] | null>(null);
+  const [art, setArt] = useState<Partial<Record<ArtKey, string>>>({});
 
   useFocusEffect(
     useCallback(() => {
       void fetchServicePlans().then(setPlans);
+      void fetchArtUrls(['shield-program', ...Object.values(TIER_ART)], 640).then(setArt);
     }, []),
   );
 
   return (
     <Screen edges={[]} contentContainerStyle={styles.content}>
+      {/* Sold as the Solar Shield program (2026-10-12); art from marketing-art. */}
+      <AppText variant="heading" color={colors.textPrimary}>
+        Solar Shield · powered by DC Solar
+      </AppText>
+      {art['shield-program'] ? (
+        <Image source={{ uri: art['shield-program'] }} style={styles.banner} contentFit="cover" transition={150} />
+      ) : null}
       {plans === null ? (
         <ActivityIndicator color={hubColors.crm.fg} style={styles.loading} />
       ) : (
@@ -45,12 +56,15 @@ export default function PlansScreen() {
           return (
             <Card key={p.tier} style={[styles.plan, { borderColor: tint.fg }]}>
               <View style={styles.head}>
+                {art[TIER_ART[p.tier]] ? (
+                  <Image source={{ uri: art[TIER_ART[p.tier]] }} style={styles.thumb} contentFit="cover" transition={150} />
+                ) : null}
                 <View style={[styles.badge, { backgroundColor: tint.bg }]}>
                   <AppText variant="bodyStrong" color={tint.fg}>
                     {p.label}
                   </AppText>
                 </View>
-                <AppText variant="title" color={colors.textPrimary}>
+                <AppText variant="title" color={colors.textPrimary} style={styles.price}>
                   {formatCents(p.amountCents)}
                   <AppText variant="body" color={colors.textSecondary}>
                     {' '}
@@ -96,7 +110,10 @@ const styles = StyleSheet.create({
   content: { width: '100%', maxWidth: 640, alignSelf: 'center', gap: spacing.md, paddingBottom: spacing.xl },
   loading: { marginVertical: spacing.xl },
   plan: { gap: spacing.xs, borderWidth: 1.5, borderRadius: radii.md },
-  head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.xs },
+  head: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.xs },
+  banner: { width: '100%', aspectRatio: 16 / 9, borderRadius: radii.md, backgroundColor: colors.surface },
+  thumb: { width: 56, height: 70, borderRadius: radii.sm },
+  price: { marginLeft: 'auto' },
   badge: { paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: radii.pill },
   terms: { gap: spacing.xs },
 });

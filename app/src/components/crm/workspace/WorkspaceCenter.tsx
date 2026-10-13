@@ -15,6 +15,7 @@ import {
   type MessageTemplate,
 } from '@/lib/comms';
 import { addCustomerNote, type CustomerNote } from '@/lib/crm';
+import { rememberCallPerson, scriptPersonOf } from '@/lib/callScript';
 import { type RecordEmailResult } from '@/lib/crmEmail';
 import { Chip } from '@/components/ui';
 import { type ActivityEvent, type ActivityKind, type WorkspaceRecord } from '@/lib/crmWorkspace';
@@ -181,6 +182,8 @@ export function WorkspaceCenter({
       setCallNotice('Calls from your DC Solar number work in the DC Solar app or at app.dcsolarkc.com.');
       return;
     }
+    // The call screen's Script button fills in this record (2026-10-12).
+    rememberCallPerson(phone, scriptPersonOf(record));
     router.push({ pathname: inAppCallingSupported() ? '/call' : '/messages/thread', params } as never);
   };
 

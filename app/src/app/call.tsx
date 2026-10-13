@@ -23,6 +23,8 @@ import {
 } from '@/lib/callSession';
 import { formatDuration, formatPhone, placeBridgeCall } from '@/lib/comms';
 import { takeIncomingCall } from '@/lib/incomingCall';
+import { callPersonFor, scriptFieldsFor, type ScriptFields } from '@/lib/callScript';
+import { getRole } from '@/lib/role';
 import { fetchResources } from '@/lib/salesResources';
 import { inAppCallingSupported } from '@/lib/voice';
 
@@ -96,12 +98,19 @@ export default function CallScreen() {
   // leaves the call. Loaded the first time it is opened.
   const [showScript, setShowScript] = useState(false);
   const [script, setScript] = useState<string | null | undefined>(undefined);
+  // Filled in for whoever is on the line (2026-10-12): the CRM record when the
+  // call started there, else just the name on the call.
+  const [scriptFields, setScriptFields] = useState<ScriptFields | undefined>(undefined);
   const toggleScript = () => {
     const next = !showScript;
     setShowScript(next);
     if (next) setShowKeys(false);
     if (next && script === undefined) {
       void fetchResources().then((items) => setScript(items.find((r) => r.kind === 'script')?.body ?? null));
+    }
+    if (next && scriptFields === undefined) {
+      const person = callPersonFor(to, /\d{3}/.test(name) ? null : name);
+      void getRole().then((r) => scriptFieldsFor(person, r?.displayName ?? null)).then(setScriptFields);
     }
   };
   const [dialed, setDialed] = useState('');
@@ -236,7 +245,7 @@ export default function CallScreen() {
             {script === undefined ? (
               <ActivityIndicator color={colors.textOnDark} />
             ) : (
-              <ResourceText body={script} compact />
+              <ResourceText body={script} compact fields={scriptFields} />
             )}
           </ScrollView>
         ) : null}

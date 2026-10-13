@@ -3,13 +3,13 @@
   "configurations": [
     {
       "name": "expo",
-      "runtimeExecutable": "C:\\Durbin Enterprises\\dev\\DC-Solar-IOS-App\\scripts\\dev-native.cmd",
+      "runtimeExecutable": "C:\\Durbin Enterprises\\DC-Solar-IOS-App\\scripts\\dev-native.cmd",
       "runtimeArgs": [],
       "port": 8081
     },
     {
       "name": "expo-web",
-      "runtimeExecutable": "C:\\Durbin Enterprises\\dev\\DC-Solar-IOS-App\\scripts\\dev-web.cmd",
+      "runtimeExecutable": "C:\\Durbin Enterprises\\DC-Solar-IOS-App\\scripts\\dev-web.cmd",
       "runtimeArgs": [],
       "port": 8082
     }
