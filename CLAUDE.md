@@ -2,7 +2,7 @@
 
 Start every session with `git pull --ff-only` (two developers push to `main`), then read HANDOFF.md — its **START HERE** section is the current state; the dated paragraphs above it are the change log — and PLAN.md (roadmap). The Expo app lives in `app/` — see `app/AGENTS.md` for Expo SDK 57 docs guidance. Verify with `npx tsc --noEmit` + `npx expo export --platform web` (run inside `app/`) before any EAS build or OTA. A JS change is not shipped until BOTH `git push` (web) and `eas update` (phones) have run; the current OTA runtime is in START HERE.
 
-On Devon's Windows PC the repo lives at `C:\Durbin Enterprises\dev\DC-Solar-IOS-App` — never move it or `node_modules` under OneDrive (Files-On-Demand breaks Metro).
+On Devon's Windows PC the repo lives at `C:\Durbin Enterprises\DC-Solar-IOS-App` — never move it or `node_modules` under OneDrive (Files-On-Demand breaks Metro).
 
 ## Database changes
 
