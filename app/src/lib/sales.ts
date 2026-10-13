@@ -81,6 +81,15 @@ export interface Lead {
   is_commercial?: boolean;
   /** Panels on the system, from the call — picks which commercial tier fits. */
   panel_count?: number | null;
+  /**
+   * Owner-occupancy check (2026-10-13): 'verified' = the business owns the
+   * building it operates from; 'unverified' = kept, confirm on the call.
+   */
+  occupancy?: 'verified' | 'unverified' | null;
+  occupancy_note?: string | null;
+  /** County assessor owner of record. */
+  building_owner?: string | null;
+  website?: string | null;
 }
 
 export interface SalesRep {
@@ -159,7 +168,7 @@ export async function fetchSalesData(): Promise<SalesData | null> {
       supabase
         .from('leads')
         .select(
-          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by, last_hail_at, last_hail_size, last_hail_miles, is_commercial, panel_count',
+          'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by, last_hail_at, last_hail_size, last_hail_miles, is_commercial, panel_count, occupancy, occupancy_note, building_owner, website',
         )
         .eq('company', COMPANY)
         .is('removed_at', null)
@@ -309,7 +318,7 @@ export async function fetchOpenLeads(): Promise<Lead[]> {
     const { data, error } = await supabase
       .from('leads')
       .select(
-        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by, last_hail_at, last_hail_size, last_hail_miles, is_commercial, panel_count',
+        'id, created_at, name, phone, email, address, source, status, assigned_to, estimated_value, notes, converted_job_id, lost_reason, source_ref, sms_opt_in_at, sms_opt_in_source, call_first, import_batch, lat, lng, geocode_status, installer, temperature, created_by, last_hail_at, last_hail_size, last_hail_miles, is_commercial, panel_count, occupancy, occupancy_note, building_owner, website',
       )
       .eq('company', COMPANY)
       .is('removed_at', null)

@@ -122,6 +122,10 @@ function PagerChip({
 
 export default function HoursScreen() {
   const role = useRole();
+  // Employees (2026-10-13): everyone signed in sees the screen. Admins get the
+  // whole crew, pay and payroll runs; anyone else gets their OWN hours (RLS
+  // returns only their rows) by pay period — no pay figures, no logging.
+  const isAdmin = role?.isAdmin === true;
   const [data, setData] = useState<HoursData | null>(null);
   const [loaded, setLoaded] = useState(false);
   // Recorded Gusto runs, one per receipt (see payroll_runs); runsForPeriod
@@ -156,6 +160,13 @@ export default function HoursScreen() {
       const [hoursData, runList] = await Promise.all([fetchHoursData(), fetchPayrollRuns()]);
       setData(hoursData);
       setRuns(runList);
+    } else if (role) {
+      // Own rows only. Clock-in shifts carry the email and logged hours the
+      // name, so fold them into one card.
+      const own = await fetchHoursData();
+      const me = role.displayName || 'My hours';
+      setData(own ? { ...own, entries: own.entries.map((e) => ({ ...e, name: me })) } : null);
+      setRuns([]);
     } else {
       setData(null);
     }
@@ -277,8 +288,6 @@ export default function HoursScreen() {
           <SkeletonList count={4} height={110} />
         ) : !role ? (
           placeholder('Sign in to see crew hours.')
-        ) : !role.isAdmin ? (
-          placeholder('Hours are available to owners and operators.')
         ) : !overview ? (
           placeholder('Hours are not available right now.')
         ) : (
@@ -312,21 +321,32 @@ export default function HoursScreen() {
 
               <View style={styles.tileRow}>
                 <StatTile
-                  label="Crew hours"
+                  label={isAdmin ? 'Crew hours' : 'Your hours'}
                   value={overview.totalPeriodHours}
                   suffix=" h"
                   decimals={1}
                   tone="olive"
                   countUp
                 />
-                <StatTile
-                  label={isPaid ? 'Payroll paid' : 'Payroll due'}
-                  value={overview.totalPeriodPay}
-                  prefix="$"
-                  decimals={2}
-                  tone={5}
-                  countUp
-                />
+                {isAdmin ? (
+                  <StatTile
+                    label={isPaid ? 'Payroll paid' : 'Payroll due'}
+                    value={overview.totalPeriodPay}
+                    prefix="$"
+                    decimals={2}
+                    tone={5}
+                    countUp
+                  />
+                ) : (
+                  <StatTile
+                    label={`${period.end.slice(0, 4)} so far`}
+                    value={overview.employees[0]?.ytdHours ?? 0}
+                    suffix=" h"
+                    decimals={1}
+                    tone={5}
+                    countUp
+                  />
+                )}
               </View>
 
               {period.pre ? (
@@ -335,13 +355,17 @@ export default function HoursScreen() {
                 </AppText>
               ) : (
                 <View style={styles.cycleRow}>
-                  <View style={styles.cycleItem}>
-                    <AppText variant="section" color={colors.textMuted}>
-                      Submit
-                    </AppText>
-                    <AppText variant="bodyStrong">{formatPayrollDate(period.submitOn)}</AppText>
-                  </View>
-                  <View style={styles.cycleDivider} />
+                  {isAdmin ? (
+                    <>
+                      <View style={styles.cycleItem}>
+                        <AppText variant="section" color={colors.textMuted}>
+                          Submit
+                        </AppText>
+                        <AppText variant="bodyStrong">{formatPayrollDate(period.submitOn)}</AppText>
+                      </View>
+                      <View style={styles.cycleDivider} />
+                    </>
+                  ) : null}
                   <View style={styles.cycleItem}>
                     <AppText variant="section" color={colors.textMuted}>
                       Payday
@@ -354,14 +378,15 @@ export default function HoursScreen() {
               )}
 
               <AppText variant="caption" color={colors.textMuted}>
-                Two-week periods. Payroll is submitted the Wednesday after a period closes and
-                paid the Friday after. Use the arrows to review past payrolls.
+                {isAdmin
+                  ? 'Two-week periods, Monday to Sunday. Payroll is submitted the Wednesday after a period closes and paid that Friday. Use the arrows to review past payrolls.'
+                  : 'Two-week pay periods, Monday to Sunday, paid the Friday after the period ends. Use the arrows to see earlier periods.'}
               </AppText>
 
               {/* Recorded Gusto run for this period — the Financials labor
                   figure uses the ACTUAL withdrawal instead of the tax
                   estimate once this exists (see payroll_runs). */}
-              {!period.pre ? (
+              {isAdmin && !period.pre ? (
                 runFormOpen ? (
                   <View style={styles.runForm}>
                     <AppText variant="section" color={colors.textMuted}>
@@ -514,7 +539,7 @@ export default function HoursScreen() {
 
             {/* Manual logging — one sheet, any number of people, one save.
                 Replaces "write the hours, pick a person, save, repeat". */}
-            {logOpen ? (
+            {!isAdmin ? null : logOpen ? (
               <LogHoursSheet
                 title="Log hours"
                 onCancel={() => {
@@ -555,7 +580,7 @@ export default function HoursScreen() {
             )}
 
             {overview.employees.length === 0
-              ? placeholder('No hours in this period.')
+              ? placeholder(isAdmin ? 'No hours in this period.' : 'You have no hours in this period.')
               : overview.employees.map((emp, index) => {
                   const open = openNames.has(emp.name);
                   return (
@@ -589,6 +614,7 @@ export default function HoursScreen() {
                                 {formatHours(emp.periodHours)}
                               </AppText>
                             </View>
+                            {isAdmin ? (
                             <View style={styles.employeeTile}>
                               <AppText variant="section" color={colors.textMuted}>
                                 {isPaid ? 'Paid' : 'Pay due'}
@@ -602,6 +628,7 @@ export default function HoursScreen() {
                                 {emp.periodPayIncomplete ? '*' : ''}
                               </AppText>
                             </View>
+                            ) : null}
                             <View style={styles.employeeTile}>
                               <AppText variant="section" color={colors.textMuted}>
                                 YTD
@@ -615,7 +642,7 @@ export default function HoursScreen() {
                               </AppText>
                             </View>
                           </View>
-                          {emp.periodPayIncomplete ? (
+                          {isAdmin && emp.periodPayIncomplete ? (
                             <AppText
                               variant="caption"
                               color={colors.textMuted}

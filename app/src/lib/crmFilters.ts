@@ -31,6 +31,8 @@ export type Stage = 'prospect' | 'contacted' | 'interested' | 'booked' | 'custom
 export type ContactFilter = 'never' | 'stale' | 'overdue' | 'call_first';
 export type SortKey = 'activity' | 'newest' | 'oldest' | 'name' | 'zip' | 'stale' | 'hail';
 export type HasFilter = 'phone' | 'email';
+/** Owner-occupancy check on commercial leads (2026-10-13). */
+export type OwnershipFilter = 'verified' | 'unverified';
 
 export interface CrmFilters {
   zips: string[];
@@ -41,6 +43,7 @@ export interface CrmFilters {
   reps: string[];
   has: HasFilter[];
   temps: LeadTemperature[];
+  ownership: OwnershipFilter[];
   /** Hail within this many days (2026-10-09); null = any. */
   hail: number | null;
   sort: SortKey;
@@ -55,6 +58,7 @@ export const EMPTY_FILTERS: CrmFilters = {
   reps: [],
   has: [],
   temps: [],
+  ownership: [],
   hail: null,
   sort: 'activity',
 };
@@ -147,7 +151,7 @@ function sourceOf(r: WorkspaceRecord): string | null {
 export function activeCount(f: CrmFilters): number {
   return (
     f.zips.length + f.stages.length + f.contact.length + f.sources.length + f.installers.length + f.reps.length + f.has.length +
-    (f.temps?.length ?? 0) + (f.hail ? 1 : 0)
+    (f.temps?.length ?? 0) + (f.ownership?.length ?? 0) + (f.hail ? 1 : 0)
   );
 }
 
@@ -188,6 +192,7 @@ export function applyFilters(records: WorkspaceRecord[], f: CrmFilters, tasks: T
       if (!f.reps.includes(rep)) return false;
     }
     if (f.temps?.length && !(r.lead?.temperature && f.temps.includes(r.lead.temperature))) return false;
+    if (f.ownership?.length && !(r.lead?.occupancy && f.ownership.includes(r.lead.occupancy))) return false;
     if (f.hail) {
       const at = lastHailAt(r);
       if (!at || now - new Date(at).getTime() > f.hail * 86400000) return false;

@@ -192,6 +192,23 @@ export function FilterPanel({
           ))}
         </View>
 
+        <Text style={styles.section}>Ownership</Text>
+        <View style={styles.wrap}>
+          {(
+            [
+              ['verified', 'Owner-occupied (verified)'],
+              ['unverified', 'Ownership unverified'],
+            ] as const
+          ).map(([value, label]) => (
+            <Pill
+              key={value}
+              label={label}
+              on={(filters.ownership ?? []).includes(value)}
+              onPress={() => set({ ownership: toggle(filters.ownership ?? [], value) })}
+            />
+          ))}
+        </View>
+
         <Text style={styles.section}>Contact</Text>
         <View style={styles.wrap}>
           {CONTACT_ORDER.map((c) => (
@@ -284,6 +301,11 @@ export function ActiveFilters({
       ? [{ key: 'hail', label: `Hail · ${HAIL_WINDOWS.find((w) => w.days === filters.hail)?.label ?? `${filters.hail} days`}`, remove: () => onChange({ ...filters, hail: null }) }]
       : []),
     ...(filters.temps ?? []).map((t) => ({ key: `t:${t}`, label: TEMPERATURE_META[t].label, remove: () => onChange({ ...filters, temps: filters.temps.filter((x) => x !== t) }) })),
+    ...(filters.ownership ?? []).map((o) => ({
+      key: `o:${o}`,
+      label: o === 'verified' ? 'Owner-occupied' : 'Ownership unverified',
+      remove: () => onChange({ ...filters, ownership: (filters.ownership ?? []).filter((x) => x !== o) }),
+    })),
     ...filters.has.map((h) => ({ key: `h:${h}`, label: HAS_LABEL[h], remove: () => onChange({ ...filters, has: filters.has.filter((x) => x !== h) }) })),
   ];
   if (filters.sort !== 'activity') {

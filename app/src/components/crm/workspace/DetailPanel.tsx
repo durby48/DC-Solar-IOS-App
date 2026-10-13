@@ -518,6 +518,24 @@ export function DetailPanel({
           {record.lead.is_commercial ? (
             <Text style={styles.factMuted}>{commercialHint(record.lead.panel_count ?? null)}</Text>
           ) : null}
+          {record.lead.occupancy ? (
+            // Owner-occupancy check (2026-10-13): owner of the building = the business there.
+            <View style={styles.ownership}>
+              <Ionicons
+                name={record.lead.occupancy === 'verified' ? 'shield-checkmark' : 'help-circle'}
+                size={15}
+                color={record.lead.occupancy === 'verified' ? colors.olive : colors.amberDeep}
+              />
+              <View style={styles.flexOne}>
+                <Text style={styles.ownershipTitle}>
+                  {record.lead.occupancy === 'verified' ? 'Owner-occupied (verified)' : 'Ownership unverified — confirm on the call'}
+                </Text>
+                {record.lead.building_owner ? <Text style={styles.factMuted}>Building owner: {record.lead.building_owner}</Text> : null}
+                {record.lead.occupancy_note ? <Text style={styles.factMuted}>{record.lead.occupancy_note}</Text> : null}
+                {record.lead.website ? <Text style={styles.factMuted}>{record.lead.website}</Text> : null}
+              </View>
+            </View>
+          ) : null}
           {isSales ? (
             <View style={styles.required}>
               {REQUIRED_FIELDS.map(([key, label]) => {
@@ -904,6 +922,8 @@ const styles = StyleSheet.create({
   save: { backgroundColor: colors.sun, paddingHorizontal: spacing.lg, paddingVertical: 6, borderRadius: radii.pill, minWidth: 70, alignItems: 'center' },
   saveText: { color: colors.textOnAction, fontSize: 13, fontWeight: '800' },
   fields: { gap: spacing.sm },
+  ownership: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', backgroundColor: colors.canvas, borderRadius: radii.sm, padding: spacing.sm },
+  ownershipTitle: { color: colors.ink, fontSize: 13, fontWeight: '800' },
   flexOne: { flex: 1 },
   panelsExact: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, padding: spacing.sm },
   panelPicks: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, paddingHorizontal: spacing.sm, paddingBottom: spacing.sm },

@@ -1,21 +1,21 @@
 /**
- * Hours tab data — admin-only payroll overview (Devon + Isaiah).
+ * Hours tab data — the payroll overview for admins (Devon + Isaiah), and each
+ * employee's own hours (RLS returns only their rows) since 2026-10-13.
  *
  * Combines BOTH hour sources the app already uses for labor math:
  *   - employee_hours rows (manual logs; hours × their stamped rate)
  *   - completed time_entries (clock in/out; duration × roster pay_rate)
  *
- * Pay cycle (confirmed by Devon 2026-08-04): a period is SUBMITTED the
- * Wednesday after it closes and PAID the Friday after it closes. The period
- * that ended Mon 2026-08-03 is submitted Wed 08-05 and paid Fri 08-07.
+ * Pay cycle: a period is SUBMITTED the Wednesday after it closes and PAID the
+ * Friday after it closes. Since 2026-10-13 every period is two weeks, Monday
+ * to Sunday (see HISTORICAL_PERIODS / BIWEEKLY_ANCHOR below): Sep 28 – Oct 11
+ * was paid Fri Oct 16, Oct 12 – 25 is paid Fri Oct 30.
  *
- * Payroll periods: everything before 2026-07-18 was paid out and
- * reconciled before this tab existed — it appears as one "Before Jul 18"
- * bucket. The first tracked period is the catch-up 2026-07-18 →
- * 2026-08-03; after that, clean 14-day periods start 2026-08-04
- * (Aug 4–17, Aug 18–31, …). The tab can page through every period; jobs
- * that span periods (e.g. DC-26011 removal paid before 7/18, reinstall
- * after) show a per-job split of hours already paid vs. this period.
+ * Everything before 2026-07-18 was paid out and reconciled before this tab
+ * existed — it appears as one "Before Jul 18" bucket. The tab can page
+ * through every period; jobs that span periods (e.g. DC-26011 removal paid
+ * before 7/18, reinstall after) show a per-job split of hours already paid
+ * vs. this period.
  */
 
 import { todayISO } from '@/lib/dates';
@@ -36,9 +36,24 @@ function localDay(timestamp: string): string {
 
 /** Everything before this date was paid/reconciled outside the app. */
 const FIRST_PERIOD_START = '2026-07-18';
-const FIRST_PERIOD_END = '2026-08-03';
-/** Biweekly periods begin the day after the catch-up period ends. */
-const BIWEEKLY_ANCHOR = '2026-08-04';
+/**
+ * PAY PERIODS (2026-10-13, Devon): two weeks, Monday → SUNDAY, paid the
+ * Friday after the period ends (submitted the Wednesday before that). The
+ * Sep 28 – Oct 11 period was paid Fri Oct 16; the next ends Sun Oct 25 and
+ * is paid Fri Oct 30.
+ *
+ * The first three periods are kept exactly as they were actually paid (the
+ * recorded Gusto runs match them by period_end): the Jul 18 – Aug 3 catch-up,
+ * Aug 4 – 17, and the Aug 18 – 28 transition run, stretched to Sun Aug 30 so
+ * the weekend belongs somewhere. From Aug 31 every period ends on a Sunday.
+ */
+const HISTORICAL_PERIODS: [string, string][] = [
+  ['2026-07-18', '2026-08-03'],
+  ['2026-08-04', '2026-08-17'],
+  ['2026-08-18', '2026-08-30'],
+];
+/** First Monday of the regular two-week Monday–Sunday cycle. */
+const BIWEEKLY_ANCHOR = '2026-08-31';
 const DAY_MS = 86_400_000;
 
 export interface PayrollPeriod {
@@ -141,16 +156,19 @@ export function listPayrollPeriods(todayIso?: string): PayrollPeriod[] {
       submitOn: null,
       payOn: null,
     },
-    {
-      start: FIRST_PERIOD_START,
-      end: FIRST_PERIOD_END,
-      label: rangeLabel(FIRST_PERIOD_START, FIRST_PERIOD_END),
-      current: today <= FIRST_PERIOD_END,
-      pre: false,
-      submitOn: nextDayOfWeek(FIRST_PERIOD_END, WEDNESDAY),
-      payOn: nextDayOfWeek(FIRST_PERIOD_END, FRIDAY),
-    },
   ];
+  // The periods as they were actually paid before payroll settled on Sundays.
+  for (const [start, end] of HISTORICAL_PERIODS) {
+    periods.push({
+      start,
+      end,
+      label: rangeLabel(start, end),
+      current: today >= start && today <= end,
+      pre: false,
+      submitOn: nextDayOfWeek(end, WEDNESDAY),
+      payOn: nextDayOfWeek(end, FRIDAY),
+    });
+  }
   let startMs = dayMs(BIWEEKLY_ANCHOR);
   while (isoFromMs(startMs) <= today) {
     const start = isoFromMs(startMs);

@@ -135,7 +135,7 @@ export const HUB_ITEMS: readonly HubItem[] = [
   { key: 'calendar', title: 'Calendar', icon: 'calendar', href: '/calendar', hub: 'operations', tone: 'operations', gate: 'all', subtitle: 'Week and month views' },
 
   // ---- Human Resources ----
-  { key: 'hours', title: 'Hours', icon: 'time', href: '/hours', hub: 'hr', tone: 'hr', gate: 'admin', subtitle: 'Payroll periods and logging' },
+  { key: 'hours', title: 'Hours', icon: 'time', href: '/hours', hub: 'hr', tone: 'hr', gate: 'all', subtitle: 'Your hours by pay period' },
   { key: 'paystubs', title: 'Paystubs', icon: 'cash', href: '/more/paystubs', hub: 'hr', tone: 6, gate: 'all' },
   { key: 'time-off', title: 'Time Off', icon: 'airplane', href: '/more/time-off', hub: 'hr', tone: 2, gate: 'all' },
   { key: 'cards', title: 'Trading Cards', icon: 'albums', href: '/cards', hub: 'hr', tone: 3, gate: 'all', subtitle: 'One pack per ten hours' },
