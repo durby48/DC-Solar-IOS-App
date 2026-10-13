@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { DetailPanel } from '@/components/crm/workspace/DetailPanel';
+import { CrmRail, CrmSectionPane, useCrmRail, WORKSPACE_SECTION } from '@/components/crm/workspace/CrmRail';
 import { ActiveFilters, FilterPanel } from '@/components/crm/workspace/FilterPanel';
 import { ProspectForm } from '@/components/crm/workspace/ProspectForm';
 import { RecordList, type ListMode } from '@/components/crm/workspace/RecordList';
@@ -145,6 +146,10 @@ export function CrmWorkspace() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const layout: 'wide' | 'medium' | 'narrow' = width >= WIDE ? 'wide' : width >= MEDIUM ? 'medium' : 'narrow';
+  // The CRM rail (2026-10-12): admins, where the columns fit.
+  const rail = useCrmRail();
+  const showRail = role?.isAdmin === true && layout !== 'narrow';
+  const inSection = showRail && rail.section !== WORKSPACE_SECTION;
 
   const [records, setRecords] = useState<WorkspaceRecord[]>([]);
   const [hasMoney, setHasMoney] = useState(false);
@@ -817,9 +822,27 @@ export function CrmWorkspace() {
 
   const listColumn = list;
 
+  const railBar = showRail ? (
+    <CrmRail
+      section={rail.section}
+      collapsed={rail.collapsed}
+      onSection={rail.setSection}
+      onToggleCollapsed={rail.toggleCollapsed}
+    />
+  ) : null;
+  if (inSection) {
+    return (
+      <View style={styles.row}>
+        {railBar}
+        <CrmSectionPane section={rail.section} />
+      </View>
+    );
+  }
+
   if (layout === 'wide') {
     return (
       <View style={styles.row}>
+        {railBar}
         <View style={[styles.col, styles.listCol]}>{listColumn}</View>
         {kind === 'jobs' ? (
           <View style={[styles.col, styles.centerCol]}>{boardPane}</View>
@@ -838,6 +861,7 @@ export function CrmWorkspace() {
   if (layout === 'medium') {
     return (
       <View style={styles.row}>
+        {railBar}
         <View style={[styles.col, styles.listColMedium]}>{listColumn}</View>
         <View style={[styles.col, styles.centerCol]}>
           {kind === 'jobs' ? boardPane : detailOpen && detail && !prospectForm ? detail : center}
