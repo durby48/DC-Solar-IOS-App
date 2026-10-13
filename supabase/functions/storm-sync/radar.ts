@@ -19,7 +19,7 @@ export const MRMS = 'https://noaa-mrms-pds.s3.amazonaws.com';
 export const CROP = { north: 39.6, south: 38.38, west: -95.56, east: -93.42 };
 
 /** Swath steps, inches. A hit needs >= storm_min_hail() (1 in) in the database. */
-export const BANDS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+export const BANDS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
 
 const MM_PER_IN = 25.4;
 
@@ -266,6 +266,54 @@ export function swathBands(grid: Grid): { band: number; geometry: { type: 'Multi
     }
   }
   return out;
+}
+
+/**
+ * GROUND TRUTH (2026-10-12, the March 10 Parkville storm): MESH can badly
+ * undersize giant hail — that evening radar said ~1–1.7″ where spotters
+ * measured 3–4.5″ (KSHB: 4″ in Parkville). So hail REPORTS raise the grid,
+ * never lower it:
+ *   within RAISE_MILES of a report, every cell where radar shows hail
+ *   (≥ 0.5″) goes up to the reported size;
+ *   within CORE_MILES of the report, every cell does (the spotter saw it there).
+ */
+export const RAISE_MILES = 3;
+export const CORE_MILES = 1;
+
+export interface GroundReport {
+  lat: number;
+  lng: number;
+  /** Inches. */
+  size: number;
+}
+
+export function applyReports(grid: Grid, reports: GroundReport[]): number {
+  const kmPerDegLat = 111.2;
+  let raised = 0;
+  for (const r of reports) {
+    if (!(r.size >= 0.75)) continue;
+    const sizeMm = Math.min(255, Math.round(r.size * MM_PER_IN));
+    const kmPerDegLng = kmPerDegLat * Math.cos((r.lat * Math.PI) / 180);
+    const raiseKm = RAISE_MILES * 1.609344;
+    const coreKm = CORE_MILES * 1.609344;
+    const dy = Math.ceil(raiseKm / kmPerDegLat / grid.step);
+    const dx = Math.ceil(raiseKm / kmPerDegLng / grid.step);
+    const cy = Math.round((grid.lat0 - r.lat) / grid.step);
+    const cx = Math.round((r.lng - grid.lon0) / grid.step);
+    for (let y = Math.max(0, cy - dy); y <= Math.min(grid.height - 1, cy + dy); y++) {
+      for (let x = Math.max(0, cx - dx); x <= Math.min(grid.width - 1, cx + dx); x++) {
+        const km = Math.hypot((y - cy) * grid.step * kmPerDegLat, (x - cx) * grid.step * kmPerDegLng);
+        if (km > raiseKm) continue;
+        const i = y * grid.width + x;
+        if (grid.mm[i] >= sizeMm) continue;
+        if (km <= coreKm || grid.mm[i] >= 0.5 * MM_PER_IN) {
+          grid.mm[i] = sizeMm;
+          raised++;
+        }
+      }
+    }
+  }
+  return raised;
 }
 
 /** Cell-wise max of two grids with the same crop. */

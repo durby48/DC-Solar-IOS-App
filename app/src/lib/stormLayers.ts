@@ -125,6 +125,7 @@ export const STORM_WINDOWS: { key: StormWindow; label: string; days: number }[] 
 
 /** Swath colour by band (inches) — the usual hail-map ramp. */
 const BAND_COLORS: [number, string][] = [
+  [4, '#4B1F70'],
   [3, '#8E3FBF'],
   [2.5, '#C2306E'],
   [2, '#E5484D'],
@@ -151,7 +152,8 @@ export const SWATH_LEGEND: { color: string; label: string }[] = [
   { color: '#F2D33D', label: '1″' },
   { color: '#F5962B', label: '1½″' },
   { color: '#E5484D', label: '2″' },
-  { color: '#C2306E', label: '2½″+' },
+  { color: '#C2306E', label: '2½″' },
+  { color: '#4B1F70', label: '4″+' },
 ];
 export const ZONE_LEGEND = SWATH_LEGEND;
 
@@ -265,7 +267,9 @@ function miles(aLat: number, aLng: number, bLat: number, bLng: number): number {
 
 function reportLabel(r: StormReport): string {
   const when = new Date(r.occurredAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  const what = r.kind === 'hail' ? `${hailLabel(r.size)} hail (spotter)` : r.size ? `${r.size} mph wind` : 'Damaging wind';
+  // Entered news reports (id 'manual|…', e.g. Parkville 4″ on 2026-03-10) are labelled as such.
+  const source = r.id.startsWith('manual|') ? 'news report' : 'spotter';
+  const what = r.kind === 'hail' ? `${hailLabel(r.size)} hail (${source})` : r.size ? `${r.size} mph wind` : 'Damaging wind';
   return `${what} · ${when}${r.location ? ` · ${r.location}` : ''}`;
 }
 

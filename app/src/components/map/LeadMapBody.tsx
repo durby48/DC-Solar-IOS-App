@@ -224,7 +224,7 @@ export function LeadMapBody({
     } else if (pickedWindow) {
       const days = STORM_WINDOWS.find((w) => w.key === pickedWindow)?.days ?? 30;
       const from = new Date(Date.now() - days * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
-      void fetchSwaths(from, today, [0.75, 1, 1.5, 2, 2.5]).then((r) => !cancelled && setSwathRows(r));
+      void fetchSwaths(from, today, [0.75, 1, 1.5, 2, 2.5, 4]).then((r) => !cancelled && setSwathRows(r));
     }
     return () => {
       cancelled = true;

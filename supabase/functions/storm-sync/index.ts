@@ -30,6 +30,8 @@
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 
 import {
+  applyReports,
+  CROP,
   decodeCrop,
   fetchGrib,
   fileAtOrAfter,
@@ -173,7 +175,34 @@ function dayStartUtc(day: string): Date {
   return new Date(new Date(`${day}T00:00:00Z`).getTime() - off * 3600000);
 }
 
-async function storeSwaths(admin: SupabaseClient, day: string, grid: Grid, source: string, final: boolean) {
+/** That day's hail reports inside the crop (spotters + entered news reports). */
+async function groundReports(admin: SupabaseClient, day: string) {
+  const { data } = await admin
+    .from('storm_reports')
+    .select('lat, lng, size')
+    .eq('storm_day', day)
+    .eq('kind', 'hail')
+    .gte('size', 0.75)
+    .gte('lat', CROP.south)
+    .lte('lat', CROP.north)
+    .gte('lng', CROP.west)
+    .lte('lng', CROP.east);
+  return ((data ?? []) as { lat: number; lng: number; size: number }[]).map((r) => ({
+    lat: Number(r.lat),
+    lng: Number(r.lng),
+    size: Number(r.size),
+  }));
+}
+
+/** Radar raised to the ground truth (a copy — the live running grid stays pure radar). */
+async function withReports(admin: SupabaseClient, day: string, grid: Grid): Promise<Grid> {
+  const copy = { ...grid, mm: new Uint8Array(grid.mm) };
+  applyReports(copy, await groundReports(admin, day));
+  return copy;
+}
+
+async function storeSwaths(admin: SupabaseClient, day: string, radarGrid: Grid, source: string, final: boolean) {
+  const grid = await withReports(admin, day, radarGrid);
   const { data, error } = await admin.rpc('hail_store_swaths', {
     p_day: day,
     p_bands: swathBands(grid),
@@ -229,7 +258,7 @@ async function liveToday(admin: SupabaseClient, now: Date): Promise<string> {
   if (error) throw new Error(`hail_live_grids: ${error.message}`);
   const max = maxInches(grid);
   // Nothing to draw yet (and nothing was): skip the recompute.
-  if (max < 0.75 && !hadHail) return `max ${max} in`;
+  if (max < 0.75 && !hadHail && (await groundReports(admin, day)).length === 0) return `max ${max} in`;
   await storeSwaths(admin, day, grid, key, false);
   return `max ${max} in (live)`;
 }
