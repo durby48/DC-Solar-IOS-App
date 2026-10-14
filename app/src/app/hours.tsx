@@ -435,8 +435,8 @@ export default function HoursScreen() {
 
               <AppText variant="caption" color={colors.textMuted}>
                 {isAdmin
-                  ? 'Two-week periods, Monday to Sunday. Payroll is submitted the Wednesday after a period closes and paid that Friday. Use the arrows to review past payrolls.'
-                  : 'Two-week pay periods, Monday to Sunday, paid the Friday after the period ends. Use the arrows to see earlier periods.'}
+                  ? 'Gusto\'s two-week periods, Saturday to Friday. Payroll is submitted the Wednesday after a period closes and paid that Friday. Use the arrows to review past payrolls.'
+                  : 'Two-week pay periods, Saturday to Friday, paid the Friday a week after the period ends. Use the arrows to see earlier periods.'}
               </AppText>
 
               {/* Recorded Gusto run for this period — the Financials labor

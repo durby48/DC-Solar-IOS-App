@@ -7,9 +7,9 @@
  *   - completed time_entries (clock in/out; duration × roster pay_rate)
  *
  * Pay cycle: a period is SUBMITTED the Wednesday after it closes and PAID the
- * Friday after it closes. Since 2026-10-13 every period is two weeks, Monday
- * to Sunday (see HISTORICAL_PERIODS / BIWEEKLY_ANCHOR below): Sep 28 – Oct 11
- * was paid Fri Oct 16, Oct 12 – 25 is paid Fri Oct 30.
+ * Friday a week after it closes. Since 2026-10-14 the periods are Gusto's own:
+ * two weeks, Saturday to Friday (see HISTORICAL_PERIODS / BIWEEKLY_ANCHOR
+ * below): Sep 26 – Oct 9 was paid Fri Oct 16, Oct 10 – 23 is paid Fri Oct 30.
  *
  * Everything before 2026-07-18 was paid out and reconciled before this tab
  * existed — it appears as one "Before Jul 18" bucket. The tab can page
@@ -37,23 +37,23 @@ function localDay(timestamp: string): string {
 /** Everything before this date was paid/reconciled outside the app. */
 const FIRST_PERIOD_START = '2026-07-18';
 /**
- * PAY PERIODS (2026-10-13, Devon): two weeks, Monday → SUNDAY, paid the
- * Friday after the period ends (submitted the Wednesday before that). The
- * Sep 28 – Oct 11 period was paid Fri Oct 16; the next ends Sun Oct 25 and
- * is paid Fri Oct 30.
+ * PAY PERIODS (2026-10-14, Devon: "the Gusto period dates are gold standard"):
+ * two weeks, SATURDAY → FRIDAY, exactly as Gusto prints them, paid the Friday
+ * a week after the period closes (submitted the Wednesday before that):
+ * Aug 29 – Sep 11 (paid Sep 18), Sep 12 – 25 (Oct 2), Sep 26 – Oct 9 (Oct 16),
+ * Oct 10 – 23 (Oct 30), …  Recorded runs carry the same dates (payroll_runs).
  *
- * The first three periods are kept exactly as they were actually paid (the
- * recorded Gusto runs match them by period_end): the Jul 18 – Aug 3 catch-up,
- * Aug 4 – 17, and the Aug 18 – 28 transition run, stretched to Sun Aug 30 so
- * the weekend belongs somewhere. From Aug 31 every period ends on a Sunday.
+ * Before Aug 29 the periods are the ones Gusto actually ran: the Jul 18 – Aug 3
+ * catch-up, Aug 4 – 17 and the Aug 18 – 28 transition run.
+ * (Until 2026-10-14 the app used Monday → Sunday from Aug 31.)
  */
 const HISTORICAL_PERIODS: [string, string][] = [
   ['2026-07-18', '2026-08-03'],
   ['2026-08-04', '2026-08-17'],
-  ['2026-08-18', '2026-08-30'],
+  ['2026-08-18', '2026-08-28'],
 ];
-/** First Monday of the regular two-week Monday–Sunday cycle. */
-const BIWEEKLY_ANCHOR = '2026-08-31';
+/** First Saturday of the regular two-week Saturday–Friday cycle (Gusto's). */
+const BIWEEKLY_ANCHOR = '2026-08-29';
 const DAY_MS = 86_400_000;
 
 export interface PayrollPeriod {
@@ -157,7 +157,7 @@ export function listPayrollPeriods(todayIso?: string): PayrollPeriod[] {
       payOn: null,
     },
   ];
-  // The periods as they were actually paid before payroll settled on Sundays.
+  // The periods as Gusto actually ran them before the Saturday–Friday cycle.
   for (const [start, end] of HISTORICAL_PERIODS) {
     periods.push({
       start,

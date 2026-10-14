@@ -36,7 +36,7 @@ export function CommissionSettingsCard() {
         const row = data as { commission_rate?: number; pay_period_anchor?: string; pay_period_days?: number } | null;
         const next = {
           rate: String(Math.round(Number(row?.commission_rate ?? 0.3) * 10000) / 100),
-          anchor: row?.pay_period_anchor ?? '2026-08-04',
+          anchor: row?.pay_period_anchor ?? '2026-08-29',
           days: String(row?.pay_period_days ?? 14),
         };
         setRate(next.rate);
