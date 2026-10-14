@@ -6,6 +6,7 @@
  * so the screen can degrade to a friendly placeholder.
  */
 
+import { isProfitExpense } from '@/lib/books';
 import { todayISO } from '@/lib/dates';
 import { loadedLaborCost } from '@/lib/laborCost';
 import { isCompanyJob, stageOrDefault } from '@/lib/stages';
@@ -298,8 +299,12 @@ export async function fetchFinancials(): Promise<FinancialsData | null> {
         contractedYtd += row.amount;
       }
       if (row.type === 'expense') {
-        expenses += row.amount;
-        if ((row.occurred_on ?? '').startsWith(thisMonth)) expensesThisMonth += row.amount;
+        // Vehicles/equipment bought are company property and owner draws are not
+        // costs (2026-10-14, matching QuickBooks) — listed, but not in profit.
+        if (isProfitExpense(row.extracted)) {
+          expenses += row.amount;
+          if ((row.occurred_on ?? '').startsWith(thisMonth)) expensesThisMonth += row.amount;
+        }
         expenseEntries.push(row);
       }
     }

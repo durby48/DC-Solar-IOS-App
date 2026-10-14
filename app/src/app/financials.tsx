@@ -18,11 +18,13 @@ import { MirrorTiles } from '@/components/financials/MirrorTiles';
 import { OverviewTiles, type OverviewMonth } from '@/components/financials/OverviewTiles';
 import { PnlSheet, type PnlRow } from '@/components/financials/PnlSheet';
 import { ReceivablesLedger } from '@/components/financials/ReceivablesLedger';
+import { CashBridgeCard, type OwedRow } from '@/components/financials/CashBridgeCard';
 import { CompanyAssets } from '@/components/financials/CompanyAssets';
 import { StockChart } from '@/components/financials/StockChart';
 import { AppText, Button, Card, EmptyState, SectionHeader, SkeletonList } from '@/components/ui';
 import { colors, hubColors, spacing } from '@/constants/theme';
 import { useAdminOnlyScreen } from '@/lib/adminGate';
+import { computeCashBridge, isOwedOutOfPocket, isProfitExpense } from '@/lib/books';
 import { formatShortDate, todayISO } from '@/lib/dates';
 import { deleteFinanceEntry, updateFinanceEntry } from '@/lib/documents';
 import {
@@ -284,7 +286,7 @@ export default function FinancialsScreen() {
     for (const e of data?.allEntries ?? []) {
       if (!(e.occurred_on ?? '').startsWith(ym)) continue;
       if (e.type === 'payment') paid += e.amount;
-      else if (e.type === 'expense') expenses += e.amount;
+      else if (e.type === 'expense' && isProfitExpense(e.extracted)) expenses += e.amount;
     }
     // Labor lands in the month its PAYDAY falls in; the open accrual belongs
     // to the current month by construction (payroll_through is current).
@@ -416,7 +418,7 @@ export default function FinancialsScreen() {
       if (!entry.job_id) continue;
       if (entry.type === 'payment') {
         paidByJob.set(entry.job_id, (paidByJob.get(entry.job_id) ?? 0) + entry.amount);
-      } else if (entry.type === 'expense') {
+      } else if (entry.type === 'expense' && isProfitExpense(entry.extracted)) {
         expByJob.set(entry.job_id, (expByJob.get(entry.job_id) ?? 0) + entry.amount);
       }
     }
@@ -457,7 +459,7 @@ export default function FinancialsScreen() {
     if (!data || !companyJobId) return 0;
     let total = 0;
     for (const entry of data.allEntries) {
-      if (entry.job_id === companyJobId && entry.type === 'expense') total += entry.amount;
+      if (entry.job_id === companyJobId && entry.type === 'expense' && isProfitExpense(entry.extracted)) total += entry.amount;
     }
     return total;
   }, [data, companyJobId]);
@@ -499,7 +501,8 @@ export default function FinancialsScreen() {
    */
   const owedOutOfPocket = useMemo(() => {
     if (!data) return { total: 0, entries: [] as CashDetailEntry[] };
-    const rows = data.expenseEntries.filter((e) => !e.paid_from_bank);
+    // Paid back (extracted.reimbursement) no longer counts, even when Devon paid personally.
+    const rows = data.expenseEntries.filter((e) => isOwedOutOfPocket(e));
     return {
       total: rows.reduce((sum, e) => sum + e.amount, 0),
       entries: rows.map((e) => ({
@@ -510,6 +513,39 @@ export default function FinancialsScreen() {
       })),
     };
   }, [data]);
+
+  /** Profit → cash since the books start, line for line with QuickBooks (lib/books.ts). */
+  const cashBridge = useMemo(
+    () => (data ? computeCashBridge(data.allEntries, data.laborRuns) : null),
+    [data],
+  );
+
+  /** The out-of-pocket items behind the bridge's "owed" line, with whose pocket. */
+  const owedRows = useMemo<OwedRow[]>(() => {
+    if (!data) return [];
+    const jobNumber = new Map(jobsFull.map((j) => [j.id, j.job_number ?? null]));
+    return data.expenseEntries
+      .filter((e) => isOwedOutOfPocket(e))
+      .map((e) => {
+        const text = `${e.description ?? ''} ${e.counterparty ?? ''}`;
+        const who = /isaiah|inettleton/i.test(text)
+          ? 'Isaiah'
+          : /devon/i.test(text)
+            ? 'Devon'
+            : (text.match(/\[([^\]—-]+)/)?.[1]?.trim() ?? e.counterparty ?? 'Out of pocket');
+        return {
+          id: e.id,
+          occurred_on: e.occurred_on,
+          label: (e.description ?? 'Expense').replace(/\s*\[.*\]\s*/, '').trim() || 'Expense',
+          who,
+          job: e.job_id && !isCompanyJob(jobsFull.find((j) => j.id === e.job_id) as Job) ? (jobNumber.get(e.job_id) ?? null) : null,
+          amount: e.amount,
+          description: e.description,
+          extracted: e.extracted ?? null,
+        };
+      })
+      .sort((a, b) => (a.occurred_on ?? '').localeCompare(b.occurred_on ?? ''));
+  }, [data, jobsFull]);
 
   /**
    * Payments recorded whose money has not arrived — a card payment is taken
@@ -827,6 +863,9 @@ export default function FinancialsScreen() {
             capitalEntries={capitalInvested.entries}
             owedEntries={owedOutOfPocket.entries}
           />
+          {cashBridge ? (
+            <CashBridgeCard bridge={cashBridge} owed={owedRows} onChanged={() => void load()} />
+          ) : null}
           {totals ? (
             <MirrorTiles totals={totals} expensesYtd={data.expenses} laborYtd={data.labor} />
           ) : null}

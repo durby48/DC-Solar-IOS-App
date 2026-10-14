@@ -218,10 +218,15 @@ const journals = [];
 const cashMoves = [];
 for (const e of entries.filter((r) => inBooks(r) && !r.paid_from_bank)) {
   const x = ext(e);
-  if (e.type === 'expense' && /isaiah|inettleton/i.test(`${e.description} ${e.counterparty}`)) {
+  // Paid back by Devon personally (Financials → Profit → cash → Pay back, "Me, personally"):
+  // the cost stays, and the money counts as owner investment instead of a debt.
+  const ownerPaid = x.reimbursement?.from === 'owner';
+  if (e.type === 'expense' && (ownerPaid || /isaiah|inettleton/i.test(`${e.description} ${e.counterparty}`))) {
     journals.push({ kind: 'isaiah', appId: e.id, date: e.occurred_on, lines: [
       { posting: 'Debit', account: BOOK_QBO[x.book_account ?? 'uncategorized'], amount: money(e.amount), project: isOnJob(e.job_id) ? jobById.get(e.job_id).job_number : null, description: e.description },
-      { posting: 'Credit', account: ACCT.dueIsaiah, amount: money(e.amount), description: 'Owed to Isaiah (paid out of pocket)' },
+      ownerPaid
+        ? { posting: 'Credit', account: ACCT.ownerInv, amount: money(e.amount), description: `Paid back by Devon personally ${x.reimbursement.paid_on} (${x.reimbursement.method})` }
+        : { posting: 'Credit', account: ACCT.dueIsaiah, amount: money(e.amount), description: 'Owed to Isaiah (paid out of pocket)' },
     ] });
   } else if (e.type === 'payment') {
     const inv = invoiceForJob.get(e.job_id);

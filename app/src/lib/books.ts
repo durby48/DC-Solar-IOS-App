@@ -18,6 +18,180 @@ import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
 
+/** The QuickBooks books start here (Devon, 2026-10-14). */
+export const BOOKS_START = '2026-06-26';
+/** Money already in the accounts on BOOKS_START — QuickBooks' opening balances. */
+export const OPENING_CASH = [
+  { label: 'Chase checking (7086)', amount: 2029 },
+  { label: 'Chase savings (1900)', amount: 100 },
+] as const;
+
+type Extracted = Record<string, unknown> | null | undefined;
+const bookKey = (x: Extracted) => (x?.book_account as string | undefined) ?? null;
+
+/** A vehicle or equipment bought — company property, not an expense. */
+export function isAssetPurchase(x: Extracted): boolean {
+  const k = bookKey(x);
+  return k === 'vehicle_purchase' || k === 'equipment_purchase';
+}
+
+/** Money the owner took out that was booked as an expense row. */
+export function isOwnerDraw(x: Extracted): boolean {
+  return bookKey(x) === 'owner_draw';
+}
+
+/** Counts toward profit: an expense that is neither an asset purchase nor an owner draw. */
+export function isProfitExpense(x: Extracted): boolean {
+  return !isAssetPurchase(x) && !isOwnerDraw(x);
+}
+
+export interface Reimbursement {
+  paid_on: string;
+  /** 'bank' = paid from the company account; 'owner' = Devon paid it personally. */
+  from: 'bank' | 'owner';
+  method: string;
+  total: number;
+  batch: string;
+}
+
+/** An expense someone paid out of pocket and has not been paid back for. */
+export function isOwedOutOfPocket(e: { type: string; paid_from_bank: boolean; extracted?: Extracted }): boolean {
+  return e.type === 'expense' && !e.paid_from_bank && !(e.extracted as { reimbursement?: unknown } | null)?.reimbursement;
+}
+
+export interface BridgeEntry {
+  type: string;
+  direction: 'in' | 'out' | null;
+  amount: number;
+  occurred_on: string | null;
+  paid_from_bank: boolean;
+  extracted?: Extracted;
+}
+
+export interface CashBridge {
+  income: number;
+  expenses: number;
+  payroll: number;
+  netProfit: number;
+  opening: number;
+  ownerIn: number;
+  ownerOut: number;
+  assets: number;
+  owed: number;
+  cash: number;
+}
+
+/**
+ * Profit → cash since the books start, the way QuickBooks' Statement of Cash
+ * Flows walks it (verified to the cent against QuickBooks on 2026-10-14):
+ * cash-basis net profit, plus the opening balances, plus owner money in, minus
+ * owner money out, minus vehicles/equipment bought, plus what is still owed out
+ * of pocket (counted as a cost, not yet paid) = cash in checking + savings.
+ */
+export function computeCashBridge(entries: BridgeEntry[], payrollRuns: { payday: string; totalWithdrawn: number }[]): CashBridge {
+  let income = 0;
+  let expenses = 0;
+  let ownerIn = 0;
+  let ownerOut = 0;
+  let assets = 0;
+  let owed = 0;
+  for (const e of entries) {
+    if ((e.occurred_on ?? '') < BOOKS_START) continue;
+    const reimb = (e.extracted as { reimbursement?: Reimbursement } | null)?.reimbursement;
+    if (e.type === 'payment') income += e.amount;
+    else if (e.type === 'investment') {
+      if (e.direction === 'out') ownerOut += e.amount;
+      else ownerIn += e.amount;
+    } else if (e.type === 'expense') {
+      if (isAssetPurchase(e.extracted)) assets += e.amount;
+      else if (isOwnerDraw(e.extracted)) ownerOut += e.amount;
+      else expenses += e.amount;
+      if (isOwedOutOfPocket(e)) owed += e.amount;
+      // Paid back by the owner personally: the owner put that money in.
+      if (!e.paid_from_bank && reimb?.from === 'owner') ownerIn += e.amount;
+    }
+  }
+  const payroll = payrollRuns.filter((r) => r.payday >= BOOKS_START).reduce((s, r) => s + r.totalWithdrawn, 0);
+  const opening = OPENING_CASH.reduce((s, o) => s + o.amount, 0);
+  const round = (n: number) => Math.round(n * 100) / 100;
+  const netProfit = round(income - expenses - payroll);
+  return {
+    income: round(income),
+    expenses: round(expenses),
+    payroll: round(payroll),
+    netProfit,
+    opening,
+    ownerIn: round(ownerIn),
+    ownerOut: round(ownerOut),
+    assets: round(assets),
+    owed: round(owed),
+    cash: round(netProfit + opening + ownerIn - ownerOut - assets + owed),
+  };
+}
+
+export type PayBackResult = { ok: true; voidedAlert: boolean } | { ok: false; message: string };
+
+/**
+ * Record that out-of-pocket expenses were paid back.
+ *   from 'bank'  → the rows become bank-paid (one bank line, `bank_ref` built from
+ *                  the date and total), exactly like check #8089 and the 9/14 Venmo;
+ *                  a Chase "You sent $…" alert already logged for the same total is
+ *                  voided so the money is not counted twice (a database trigger
+ *                  voids one that arrives later).
+ *   from 'owner' → Devon paid personally: the rows stay off the bank and count as
+ *                  owner money put in.
+ */
+export async function payBackOutOfPocket(
+  rows: { id: string; amount: number; description: string | null; extracted?: Extracted }[],
+  params: { paidOn: string; from: 'bank' | 'owner'; method: string },
+): Promise<PayBackResult> {
+  if (!rows.length) return { ok: false, message: 'Pick at least one expense.' };
+  const total = Math.round(rows.reduce((s, r) => s + r.amount, 0) * 100) / 100;
+  const batch = `${params.paidOn}-${Math.random().toString(36).slice(2, 8)}`;
+  const reimbursement: Reimbursement = { paid_on: params.paidOn, from: params.from, method: params.method, total, batch };
+  const bankRef = `${params.paidOn}|-${total.toFixed(2)}|REIMBURSEMENT ${params.method.toUpperCase()}`;
+  for (const r of rows) {
+    const extracted = {
+      ...(r.extracted ?? {}),
+      reimbursement,
+      reimbursed: true,
+      ...(params.from === 'bank' ? { bank_ref: bankRef } : {}),
+    };
+    const description = (r.description ?? '').replace(/NOT yet reimbursed/i, `paid back ${params.paidOn} (${params.method})`);
+    const { error } = await supabase
+      .from('finance_entries')
+      .update({ extracted, description, ...(params.from === 'bank' ? { paid_from_bank: true } : {}) })
+      .eq('id', r.id);
+    if (error) return { ok: false, message: error.message };
+  }
+  let voidedAlert = false;
+  if (params.from === 'bank') {
+    // The bank alert for this payment, if the email scanner already logged it.
+    const from = new Date(`${params.paidOn}T12:00:00`);
+    const lo = new Date(from.getTime() - 3 * 86_400_000).toISOString().slice(0, 10);
+    const hi = new Date(from.getTime() + 5 * 86_400_000).toISOString().slice(0, 10);
+    const { data: alerts } = await supabase
+      .from('finance_entries')
+      .select('id, extracted')
+      .eq('type', 'expense')
+      .neq('status', 'void')
+      .eq('amount', total)
+      .gte('occurred_on', lo)
+      .lte('occurred_on', hi);
+    const alert = ((alerts as { id: string; extracted: Extracted }[] | null) ?? []).find(
+      (a) => a.extracted?.source === 'email-scanner' && !rows.some((r) => r.id === a.id),
+    );
+    if (alert) {
+      const { error } = await supabase
+        .from('finance_entries')
+        .update({ status: 'void', extracted: { ...(alert.extracted ?? {}), void_reason: `bank side of out-of-pocket pay-back ${batch}` } })
+        .eq('id', alert.id);
+      voidedAlert = !error;
+    }
+  }
+  return { ok: true, voidedAlert };
+}
+
 export type BookGroup = 'Job costs' | 'Overhead' | 'Vehicles & equipment' | 'Other';
 
 export const BOOK_ACCOUNTS = {

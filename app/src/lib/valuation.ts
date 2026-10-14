@@ -24,6 +24,7 @@
  *     the loaded estimate for hours after the newest run's period end.
  */
 
+import { isProfitExpense } from '@/lib/books';
 import { loadedLaborCost } from '@/lib/laborCost';
 import type { LaborRun, LedgerEntry } from '@/lib/financials';
 import { CONTRACTED_STAGES } from '@/lib/pipeline';
@@ -407,7 +408,8 @@ export function buildValuationSeries(inputs: ValuationInputs): ValuationSeries {
     if (e.type === 'payment') {
       revenueDelta[b] += e.amount;
       if (e.job_id) perJob(paidByJob, e.job_id)[b] += e.amount;
-    } else if (e.type === 'expense') {
+    } else if (e.type === 'expense' && isProfitExpense(e.extracted)) {
+      // Vehicles/equipment bought are assets (company_assets carries them), not costs.
       expenseDelta[b] += e.amount;
     } else if (e.type === 'invoice' && e.job_id) {
       perJob(invoicedByJob, e.job_id)[b] += e.amount;
