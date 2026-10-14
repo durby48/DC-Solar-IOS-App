@@ -554,7 +554,9 @@ if (process.argv.includes('--apply')) {
     }, [m.appId]);
   }
 
-  console.log(`\nDone: ${created} QuickBooks objects created (projects as ${projectMode ?? 'n/a'}).`);
+  // The API accepts IsProject:true but (2026-10) does not honour it — check what really happened.
+  const flagged = (await query('select * from Customer')).filter((c) => c.IsProject).length;
+  console.log(`\nDone: ${created} QuickBooks objects created. Jobs flagged as Projects: ${flagged} of ${projects.length} (the rest are sub-customers).`);
   const bank = (await query(`select * from Account where Name = '${ACCT.bank}'`))[0];
   console.log(`QuickBooks now shows ${ACCT.bank} at ${fmt(Number(bank.CurrentBalance))} (projected ${fmt(money(STATEMENT_CHECK.opening + bankEffect('2099-12-31')))}).`);
 }
