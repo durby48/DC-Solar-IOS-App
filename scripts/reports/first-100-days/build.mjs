@@ -218,8 +218,8 @@ table.pl tr.total td { border-top: 1.5px solid ${C.tan}; border-bottom: none; fo
     <h1>Our First<br><em>100 Days</em></h1>
     <div class="dates">${longDate(D.start)} — ${longDate(D.today)}</div>
   </div>
-  <div class="ring"><b>${D.day}</b><span>days in</span></div>
-  <div class="foot">Solar removal · reinstall · installation · critter guard</div>
+  <div class="ring"><b>100</b><span>days in</span></div>
+  <div class="foot">Solar removal · reinstall · residential &amp; commercial installations</div>
 </section>
 
 <!-- 2. Letter -->
@@ -231,10 +231,10 @@ table.pl tr.total td { border-top: 1.5px solid ${C.tan}; border-bottom: none; fo
     <h2>One hundred days of grace</h2>
     <div class="rule"></div>
     <div class="salute">To our crew, our customers, and everyone who has stood behind us,</div>
-    <p>On July 1st we opened the doors of DC Solar KC with a simple plan: do honest work, take care of our people, and treat every roof like it was our own. ${D.day} days later, all I can say is that God has been faithful far beyond anything we planned or deserved.</p>
-    <p>In these first months our crew logged more than ${num(Math.floor(S.hours / 50) * 50)} hours on rooftops from Kansas City to Wichita, Salina, Lawrence, Topeka, Oberlin, Pittsburg and Eldon. Together we installed and reinstalled ${num(S.panels)} solar panels, laid critter guard around ${num(S.critter)} more, finished ${S.projectsCompleted} projects for ${S.customers} customers, and added a van and two trucks to the fleet. None of that happens without the people named on this page.</p>
+    <p>On July 1st we opened the doors of DC Solar KC with a simple plan: do honest work, take care of our people, and treat every solar system like it was our own. ${D.day} days later, all I can say is that God has been faithful far beyond anything we planned or deserved.</p>
+    <p>In these first months our crew logged more than ${num(Math.floor(S.hours / 50) * 50)} hours on rooftops from Wichita to Lawrence, Parkville, Blue Springs, Harrisonville, and plenty of other surrounding towns. Together we installed and reinstalled ${num(S.panels)} solar panels, laid critter guard around ${num(S.critter)} more, finished ${S.projectsCompleted} projects for ${S.customers} customers, and added a van and two trucks to the fleet. None of that happens without the men I want to thank next.</p>
     <blockquote>“Commit thy works unto the LORD, and thy thoughts shall be established.”<cite>Proverbs 16:3</cite></blockquote>
-    <p>Thank you to <span class="names">${crewNames.slice(0, -1).join(', ')} and ${crewNames.at(-1)}</span> — you carried the panels, drove the miles, worked the long days in the heat, and showed up ready again the next morning. Thank you to <span class="names">Ken Crum, Carson and Clark Lynch</span> for the calls, the relationships, and for believing in what we are building before there was much to see. Every one of you is part of this story.</p>
+    <p>Thank you to <span class="names">${crewNames.slice(0, -1).join(', ')} and ${crewNames.at(-1)}</span> — you carried the panels, drove the miles, worked the long days in the heat, and showed up ready again the next morning. Thank you to <span class="names">Ken Crum, Carson Keating and Clark Lynch</span> for the calls, the relationships, and for believing in what we are building before there was much to see. Every one of you is part of this story.</p>
     <p>To our customers and partners — <span class="names">Cromwell Environmental, SunSmart, Your Neighborhood Roofer, Kansas Solar Systems, Elevation Roofing and Trusted Roofing</span> — thank you for trusting a brand-new company with your projects and your homeowners. We do not take that trust lightly, and we intend to keep earning it.</p>
     <p>We are still learning, and the next hundred days will bring their own challenges. But we will keep working the way Scripture asks us to:</p>
     <blockquote>“And whatsoever ye do, do it heartily, as to the Lord, and not unto men.”<cite>Colossians 3:23</cite></blockquote>
@@ -351,5 +351,6 @@ table.pl tr.total td { border-top: 1.5px solid ${C.tan}; border-bottom: none; fo
 
 writeFileSync(here('report.html'), html);
 console.log('report.html written');
+
 
 
