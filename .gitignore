@@ -21,3 +21,6 @@ statements/
 # Plaid — keys and the bank access token live in secrets/, never here.
 plaid*.txt
 *plaid-access-token*
+
+# QuickBooks import plans hold company financial data
+scripts/qbo/out/
