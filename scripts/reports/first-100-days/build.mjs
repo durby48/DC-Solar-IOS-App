@@ -233,7 +233,7 @@ table.pl tr.total td { border-top: 1.5px solid ${C.tan}; border-bottom: none; fo
     <div class="salute">To our crew, our customers, and everyone who has stood behind us,</div>
     <p>On July 1st we opened the doors of DC Solar KC with a simple plan: do honest work, take care of our people, and treat every solar system like it was our own. 100 days later, all I can say is that God has been faithful far beyond anything we planned or deserved.</p>
     <p>When Isaiah and I started DC Solar, we honestly were not sure we would survive the leap of faith the Lord had led us to. So for these first 100 days we took our stress and our fears to Christ, asking Him to help us steward a company modeled after His heart — one that serves others and glorifies the Father. And on top of 100-degree roofs, with our knees ready to buckle underneath us, He kept our phones ringing and our emails chiming. Day after day He showed us that our work is valuable to others, and that our services are in higher demand than we ever thought possible.</p>
-    <p>In these first months our crew logged more than ${num(Math.floor(S.hours / 50) * 50)} hours on rooftops from Wichita to Lawrence, Parkville, Blue Springs, Harrisonville, and plenty of other surrounding towns. Together we installed and reinstalled ${num(S.panels)} solar panels, laid critter guard around ${num(S.critter)} more, finished ${S.projectsCompleted} projects for ${S.customers} customers, and added a van and two trucks to the fleet. None of that happens without the men I want to thank next.</p>
+    <p>In these first months our crew logged more than ${num(Math.floor(S.hours / 50) * 50)} hours on rooftops from Wichita to Lawrence, Parkville, Blue Springs, Harrisonville, and plenty of other surrounding towns. Together we facilitated the installation, removal, and reinstallation of ${num(S.panels)} panels, laid critter guard around ${num(S.critter)} more, finished ${S.projectsCompleted} projects for ${S.customers} customers, and added a van and two trucks to the fleet. None of that happens without the men I want to thank next.</p>
     <blockquote>“Commit thy works unto the LORD, and thy thoughts shall be established.”<cite>Proverbs 16:3</cite></blockquote>
     <p>Thank you to <span class="names">${crewNames.slice(0, -1).join(', ')} and ${crewNames.at(-1)}</span> — you carried the panels, drove the miles, worked the long days in the heat, and showed up ready again the next morning. Thank you to <span class="names">Ken Crum, Carson Keating and Clark Lynch</span> for the calls, the relationships, and for believing in what we are building before there was much to see. Every one of you is part of this story.</p>
   </div>
@@ -362,6 +362,7 @@ table.pl tr.total td { border-top: 1.5px solid ${C.tan}; border-bottom: none; fo
 
 writeFileSync(here('report.html'), html);
 console.log('report.html written');
+
 
 
 
