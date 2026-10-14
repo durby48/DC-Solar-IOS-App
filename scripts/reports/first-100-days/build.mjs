@@ -231,7 +231,7 @@ table.pl tr.total td { border-top: 1.5px solid ${C.tan}; border-bottom: none; fo
     <h2>One hundred days of grace</h2>
     <div class="rule"></div>
     <div class="salute">To our crew, our customers, and everyone who has stood behind us,</div>
-    <p>On July 1st we opened the doors of DC Solar KC with a simple plan: do honest work, take care of our people, and treat every solar system like it was our own. ${D.day} days later, all I can say is that God has been faithful far beyond anything we planned or deserved.</p>
+    <p>On July 1st we opened the doors of DC Solar KC with a simple plan: do honest work, take care of our people, and treat every solar system like it was our own. 100 days later, all I can say is that God has been faithful far beyond anything we planned or deserved.</p>
     <p>In these first months our crew logged more than ${num(Math.floor(S.hours / 50) * 50)} hours on rooftops from Wichita to Lawrence, Parkville, Blue Springs, Harrisonville, and plenty of other surrounding towns. Together we installed and reinstalled ${num(S.panels)} solar panels, laid critter guard around ${num(S.critter)} more, finished ${S.projectsCompleted} projects for ${S.customers} customers, and added a van and two trucks to the fleet. None of that happens without the men I want to thank next.</p>
     <blockquote>“Commit thy works unto the LORD, and thy thoughts shall be established.”<cite>Proverbs 16:3</cite></blockquote>
     <p>Thank you to <span class="names">${crewNames.slice(0, -1).join(', ')} and ${crewNames.at(-1)}</span> — you carried the panels, drove the miles, worked the long days in the heat, and showed up ready again the next morning. Thank you to <span class="names">Ken Crum, Carson Keating and Clark Lynch</span> for the calls, the relationships, and for believing in what we are building before there was much to see. Every one of you is part of this story.</p>
@@ -251,7 +251,7 @@ table.pl tr.total td { border-top: 1.5px solid ${C.tan}; border-bottom: none; fo
     <h2 style="font-size:34pt">By the numbers</h2>
     <div class="rule"></div>
     <div class="stats">
-      <div class="stat dark"><div class="l">Days in business</div><div class="v">${D.day}</div><div class="n">Open since July 1, 2026</div></div>
+      <div class="stat dark"><div class="l">Days in business</div><div class="v">100</div><div class="n">Open since July 1, 2026</div></div>
       <div class="stat"><div class="l">Hours worked</div><div class="v">${num(S.hours)}</div><div class="n">Logged by the crew on site and in the shop</div></div>
       <div class="stat"><div class="l">Panels installed</div><div class="v">${num(S.panels)}</div><div class="n">New installs plus removals and reinstalls, completed</div></div>
       <div class="stat"><div class="l">Critter guard laid</div><div class="v">${num(S.critter)}</div><div class="n">Panels protected from birds and rodents</div></div>
@@ -351,6 +351,7 @@ table.pl tr.total td { border-top: 1.5px solid ${C.tan}; border-bottom: none; fo
 
 writeFileSync(here('report.html'), html);
 console.log('report.html written');
+
 
 
 
