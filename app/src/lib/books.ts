@@ -78,7 +78,12 @@ export interface CashBridge {
   ownerOut: number;
   assets: number;
   owed: number;
+  /** All the cash: checking + savings + cash on hand. */
   cash: number;
+  /** Cash taken but never deposited (cash payments kept, net of cash handed out). */
+  cashOnHand: number;
+  /** cash − cashOnHand: what should be in checking + savings. */
+  bank: number;
 }
 
 /**
@@ -95,9 +100,14 @@ export function computeCashBridge(entries: BridgeEntry[], payrollRuns: { payday:
   let ownerOut = 0;
   let assets = 0;
   let owed = 0;
+  let cashOnHand = 0;
   for (const e of entries) {
     if ((e.occurred_on ?? '') < BOOKS_START) continue;
     const reimb = (e.extracted as { reimbursement?: Reimbursement } | null)?.reimbursement;
+    if (!e.paid_from_bank && e.type !== 'expense') {
+      // Cash that never reached the bank: a customer paid cash, or cash went back to an owner.
+      cashOnHand += (e.type === 'payment' || (e.type === 'investment' && e.direction !== 'out') ? 1 : -1) * e.amount;
+    }
     if (e.type === 'payment') income += e.amount;
     else if (e.type === 'investment') {
       if (e.direction === 'out') ownerOut += e.amount;
@@ -115,6 +125,7 @@ export function computeCashBridge(entries: BridgeEntry[], payrollRuns: { payday:
   const opening = OPENING_CASH.reduce((s, o) => s + o.amount, 0);
   const round = (n: number) => Math.round(n * 100) / 100;
   const netProfit = round(income - expenses - payroll);
+  const cash = round(netProfit + opening + ownerIn - ownerOut - assets + owed);
   return {
     income: round(income),
     expenses: round(expenses),
@@ -125,7 +136,9 @@ export function computeCashBridge(entries: BridgeEntry[], payrollRuns: { payday:
     ownerOut: round(ownerOut),
     assets: round(assets),
     owed: round(owed),
-    cash: round(netProfit + opening + ownerIn - ownerOut - assets + owed),
+    cash,
+    cashOnHand: round(cashOnHand),
+    bank: round(cash - cashOnHand),
   };
 }
 

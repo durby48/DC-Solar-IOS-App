@@ -263,6 +263,9 @@ export default function FinancialsScreen() {
       // fetchFinancials already drops voided rows; guard here too so a
       // cancelled deposit can never move the bank figure.
       if (e.status === 'void' || !after(e)) continue;
+      // Cash that never touched the bank (paid_from_bank false — a cash payment kept
+      // on hand, cash handed back to an owner) does not move the bank balance.
+      if (e.paid_from_bank === false && e.type !== 'expense') continue;
       const inflow = e.type === 'payment' || (e.type === 'investment' && e.direction !== 'out');
       const outflow =
         (e.type === 'expense' && e.paid_from_bank) || (e.type === 'investment' && e.direction === 'out');

@@ -202,10 +202,13 @@ export function CashBridgeCard({ bridge, owed, onChanged }: { bridge: CashBridge
         <View style={styles.total}>
           <View style={styles.flex}>
             <AppText variant="bodyStrong" color={colors.oliveDeep}>
-              = Cash in the accounts
+              = Cash
             </AppText>
             <AppText variant="caption" color={colors.textMuted}>
-              checking + savings, per the books — same walk as QuickBooks' Statement of Cash Flows
+              {bridge.cashOnHand
+                ? `checking + savings ${formatMoney(bridge.bank)} · cash on hand (not deposited) ${formatMoney(bridge.cashOnHand)}`
+                : 'checking + savings, per the books'}{' '}
+              — same walk as QuickBooks' Statement of Cash Flows
             </AppText>
           </View>
           <AppText variant="numeric">{formatMoney(bridge.cash)}</AppText>
