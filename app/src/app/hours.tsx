@@ -200,6 +200,17 @@ export default function HoursScreen() {
   const taxEstimate = useMemo(() => (data ? estimateEmployerTaxes(data, period) : null), [data, period]);
   const accrued = useMemo(() => (data ? accruedPayroll(data, runs, periods) : null), [data, runs, periods]);
 
+  // Every run for this period (regular + off-cycle) and what they cost the company.
+  const periodRuns = useMemo(() => {
+    const { regular, offCycle } = runsForPeriod(runs, period);
+    return [...(regular ? [regular] : []), ...offCycle];
+  }, [runs, period]);
+  const periodCost = useMemo(() => {
+    const gross = periodRuns.reduce((s, r) => s + r.gross_wages, 0);
+    const total = periodRuns.reduce((s, r) => s + r.total_withdrawn, 0);
+    return { gross, total, taxes: Math.max(0, total - gross) };
+  }, [periodRuns]);
+
   const { regular: recordedRun, offCycle: offCycleRuns } = useMemo(
     () => runsForPeriod(runs, period),
     [runs, period],
@@ -356,19 +367,31 @@ export default function HoursScreen() {
                 )}
               </View>
 
-              {isAdmin && !period.pre && taxEstimate && (taxEstimate.gross > 0 || recordedRun) ? (
+              {isAdmin && !period.pre && taxEstimate && (taxEstimate.gross > 0 || periodRuns.length > 0) ? (
                 <View style={styles.taxBox}>
-                  {recordedRun ? (
+                  {periodRuns.length > 0 ? (
                     <>
+                      {/* Total company cost = every Gusto run for this period, as it left Chase
+                          (wages + all payroll taxes). Reimbursements in the same withdrawal are shown
+                          but are not labor. 2026-10-14. */}
                       <View style={styles.taxRow}>
-                        <AppText variant="body">Company payroll taxes (actual)</AppText>
-                        <AppText variant="bodyStrong">
-                          {formatMoney(Math.max(0, recordedRun.total_withdrawn - recordedRun.gross_wages))}
-                        </AppText>
+                        <AppText variant="bodyStrong">Total company cost</AppText>
+                        <AppText variant="bodyStrong">{formatMoney(periodCost.total)}</AppText>
                       </View>
                       <AppText variant="caption" color={colors.textMuted}>
-                        {`Gross ${formatMoney(recordedRun.gross_wages)} + company taxes = ${formatMoney(recordedRun.total_withdrawn)} withdrawn by Gusto (estimate was ${formatMoney(taxEstimate.employerTaxes)})`}
+                        {`Gross wages ${formatMoney(periodCost.gross)} + company payroll taxes ${formatMoney(periodCost.taxes)}${
+                          taxEstimate.gross > 0 ? ` (forecast was ${formatMoney(taxEstimate.employerTaxes)})` : ''
+                        }`}
                       </AppText>
+                      {periodRuns.map((run) => (
+                        <AppText key={run.id} variant="caption" color={colors.textSecondary}>
+                          {`${run.kind === 'off_cycle' ? 'Off-cycle run' : 'Gusto run'}: Chase withdrawal ${formatMoney(run.total_withdrawn + run.reimbursements)} ${
+                            run.bank_withdrawn_on
+                              ? `on ${formatPayrollDate(run.bank_withdrawn_on)}`
+                              : `pending — payday ${formatPayrollDate(run.payday)}`
+                          }${run.reimbursements ? ` (includes ${formatMoney(run.reimbursements)} reimbursement, not wages)` : ''}`}
+                        </AppText>
+                      ))}
                     </>
                   ) : (
                     <>
@@ -407,7 +430,7 @@ export default function HoursScreen() {
 
               {period.pre ? (
                 <AppText variant="caption" color={colors.textMuted}>
-                  Paid through the old spreadsheet, before the app tracked hours.
+                  Paid before Gusto payroll and before the app tracked hours.
                 </AppText>
               ) : (
                 <View style={styles.cycleRow}>

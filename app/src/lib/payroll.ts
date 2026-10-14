@@ -34,8 +34,8 @@ function localDay(timestamp: string): string {
   return new Date(timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 }
 
-/** Everything before this date was paid/reconciled outside the app. */
-const FIRST_PERIOD_START = '2026-07-18';
+/** Gusto's first pay period starts here (2026-10-14: the app's hours go back to it and match the stubs). */
+const FIRST_PERIOD_START = '2026-06-18';
 /**
  * PAY PERIODS (2026-10-14, Devon: "the Gusto period dates are gold standard"):
  * two weeks, SATURDAY → FRIDAY, exactly as Gusto prints them, paid the Friday
@@ -43,11 +43,14 @@ const FIRST_PERIOD_START = '2026-07-18';
  * Aug 29 – Sep 11 (paid Sep 18), Sep 12 – 25 (Oct 2), Sep 26 – Oct 9 (Oct 16),
  * Oct 10 – 23 (Oct 30), …  Recorded runs carry the same dates (payroll_runs).
  *
- * Before Aug 29 the periods are the ones Gusto actually ran: the Jul 18 – Aug 3
- * catch-up, Aug 4 – 17 and the Aug 18 – 28 transition run.
+ * Before Aug 29 the periods are the ones Gusto actually ran: Jun 18 – Jul 3,
+ * Jul 4 – 17, the Jul 18 – Aug 3 catch-up, Aug 4 – 17 and the Aug 18 – 28
+ * transition run.
  * (Until 2026-10-14 the app used Monday → Sunday from Aug 31.)
  */
 const HISTORICAL_PERIODS: [string, string][] = [
+  ['2026-06-18', '2026-07-03'],
+  ['2026-07-04', '2026-07-17'],
   ['2026-07-18', '2026-08-03'],
   ['2026-08-04', '2026-08-17'],
   ['2026-08-18', '2026-08-28'],
@@ -498,6 +501,10 @@ export interface PayrollRun {
   receipt_id: string | null;
   /** regular = scheduled crew period; off_cycle = a correction / transition run. */
   kind: 'regular' | 'off_cycle';
+  /** When the Chase withdrawal for this run posted (null = not yet). */
+  bank_withdrawn_on: string | null;
+  /** Non-wage money in the same withdrawal (expense reimbursements). Chase = total_withdrawn + this. */
+  reimbursements: number;
 }
 
 /**
@@ -511,7 +518,7 @@ export async function fetchPayrollRuns(): Promise<PayrollRun[]> {
   try {
     const { data, error } = await supabase
       .from('payroll_runs')
-      .select('id, period_start, period_end, payday, gross_wages, total_withdrawn, receipt_id, kind')
+      .select('id, period_start, period_end, payday, gross_wages, total_withdrawn, receipt_id, kind, bank_withdrawn_on, reimbursements')
       .eq('company', COMPANY)
       .order('payday', { ascending: false });
     if (error || !data) return [];
@@ -522,6 +529,8 @@ export async function fetchPayrollRuns(): Promise<PayrollRun[]> {
       payday: row.payday as string,
       gross_wages: Number(row.gross_wages) || 0,
       total_withdrawn: Number(row.total_withdrawn) || 0,
+      bank_withdrawn_on: (row.bank_withdrawn_on as string | null) ?? null,
+      reimbursements: Number(row.reimbursements) || 0,
       receipt_id: (row.receipt_id as string | null) ?? null,
       kind: row.kind === 'off_cycle' ? 'off_cycle' : 'regular',
     }));
