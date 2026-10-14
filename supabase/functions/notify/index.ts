@@ -603,12 +603,30 @@ Deno.serve(async (req) => {
       }
       const label = await jobLabel(record.job_id);
       const when = `${prettyDate(record.work_date)}${prettyTime(record.start_time)}`;
-      const body =
+      let body =
         op === 'INSERT'
           ? `${label} scheduled for ${when}.`
           : op === 'UPDATE'
             ? `${label} moved to ${when}.`
             : `${label}: the ${prettyDate(record.work_date)} work day was removed.`;
+      // "Several days" (2026-10-14) inserts many days in one statement — they share a
+      // created_at. Send ONE push, from the earliest day of the batch, naming the range.
+      if (op === 'INSERT') {
+        const at = new Date(String(record.created_at ?? new Date().toISOString())).getTime();
+        const lo = encodeURIComponent(new Date(at - 15_000).toISOString());
+        const hi = encodeURIComponent(new Date(at + 15_000).toISOString());
+        const batch = (await rest(
+          `job_schedule_dates?job_id=eq.${record.job_id}&created_at=gte.${lo}&created_at=lte.${hi}&select=id,work_date,start_time&order=work_date.asc`,
+        )) as unknown as { id: string; work_date: string; start_time: string | null }[] | null;
+        if (batch && batch.length > 1) {
+          if (String(batch[0].id) !== String(record.id)) {
+            return json(200, { sent: 0, skipped: 'part of a multi-day batch; its first day sends the push' });
+          }
+          body = `${label} scheduled for ${batch.length} days: ${prettyDate(batch[0].work_date)} – ${prettyDate(
+            batch[batch.length - 1].work_date,
+          )}${prettyTime(record.start_time)}.`;
+        }
+      }
       message = {
         title: op === 'DELETE' ? '📅 Schedule change' : '📅 Job scheduled',
         body: truncate(body, 200),

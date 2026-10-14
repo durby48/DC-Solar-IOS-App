@@ -444,6 +444,46 @@ export async function addJobScheduleDate(params: {
   }
 }
 
+export type AddScheduleDatesResult =
+  | { ok: true; dates: ScheduleDate[] }
+  | { ok: false; message: string };
+
+/**
+ * Insert several scheduled days for one job in a single statement (2026-10-14,
+ * "Several days"). Days already on the schedule are skipped by the caller; one
+ * statement means the crew gets one "scheduled for N days" push (notify groups a
+ * batch by its shared created_at). Admin-only per RLS. Never throws.
+ */
+export async function addJobScheduleDates(params: {
+  jobId: string;
+  workDates: string[]; // YYYY-MM-DD
+  startTime: string | null; // HH:MM (24h) or null = TBD
+}): Promise<AddScheduleDatesResult> {
+  if (params.workDates.length === 0) return { ok: false, message: 'No days to add.' };
+  try {
+    const { data, error } = await supabase
+      .from('job_schedule_dates')
+      .insert(
+        params.workDates.map((workDate) => ({
+          company: COMPANY,
+          job_id: params.jobId,
+          work_date: workDate,
+          start_time: params.startTime ? `${params.startTime}:00` : null,
+        })),
+      )
+      .select('id, job_id, company, work_date, start_time, note');
+    if (error || !data) {
+      const message = error?.code === '23505'
+        ? 'One of those days is already on the schedule for this job.'
+        : (error?.message ?? 'Could not add the days.');
+      return { ok: false, message };
+    }
+    return { ok: true, dates: data as ScheduleDate[] };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not add the days.' };
+  }
+}
+
 export type UpdateScheduleDateResult =
   | { ok: true; date: ScheduleDate }
   | { ok: false; message: string };

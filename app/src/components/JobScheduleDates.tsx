@@ -8,6 +8,7 @@ import {
   AppText,
   Button,
   Card,
+  Chip,
   EmptyState,
   SectionHeader,
   SkeletonList,
@@ -15,6 +16,7 @@ import {
 import { colors, radii, spacing, typography } from '@/constants/theme';
 import {
   addJobScheduleDate,
+  addJobScheduleDates,
   deleteJobScheduleDate,
   fetchJobScheduleDates,
   updateJobScheduleDate,
@@ -32,6 +34,34 @@ import {
 
 function sortDates(dates: ScheduleDate[]): ScheduleDate[] {
   return [...dates].sort((a, b) => a.work_date.localeCompare(b.work_date));
+}
+
+/** ISO weekday (1 = Mon … 7 = Sun) labels for the "Several days" picker. */
+const WEEKDAYS: { iso: number; label: string }[] = [
+  { iso: 1, label: 'Mon' },
+  { iso: 2, label: 'Tue' },
+  { iso: 3, label: 'Wed' },
+  { iso: 4, label: 'Thu' },
+  { iso: 5, label: 'Fri' },
+  { iso: 6, label: 'Sat' },
+  { iso: 7, label: 'Sun' },
+];
+/** Longest range one save may add — a typo'd year must not create 300 days. */
+const MAX_RANGE_DAYS = 62;
+
+/** Every YYYY-MM-DD from `start` to `end` (inclusive) whose weekday is ticked. */
+function datesInRange(start: string, end: string, weekdays: Set<number>): string[] {
+  if (!isValidISODate(start) || !isValidISODate(end) || end < start) return [];
+  const out: string[] = [];
+  const d = parseISODate(start);
+  for (let i = 0; i <= MAX_RANGE_DAYS; i += 1) {
+    const iso = toISODate(d);
+    if (iso > end) break;
+    const dow = d.getDay() === 0 ? 7 : d.getDay();
+    if (weekdays.has(dow)) out.push(iso);
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
 }
 
 /** 'HH:MM' or 'HH:MM:SS' → a Date today at that wall-clock time. */
@@ -66,6 +96,14 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
   // Web text-input state
   const [dateText, setDateText] = useState('');
   const [timeText, setTimeText] = useState('');
+  // "Several days" (2026-10-14): a first/last day range filtered by weekday, one save.
+  const [mode, setMode] = useState<'one' | 'range'>('one');
+  const [rangeStartText, setRangeStartText] = useState('');
+  const [rangeEndText, setRangeEndText] = useState('');
+  const [rangeStart, setRangeStart] = useState<Date | null>(null); // native
+  const [rangeEnd, setRangeEnd] = useState<Date | null>(null); // native
+  const [rangePicker, setRangePicker] = useState<'start' | 'end' | null>(null); // native
+  const [weekdays, setWeekdays] = useState<Set<number>>(new Set([1, 2, 3, 4, 5, 6]));
 
   // Edit-time state (admins tap an existing row to change its start time)
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -97,6 +135,12 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
     setPickerMode(null);
     setDateText('');
     setTimeText('');
+    setMode('one');
+    setRangeStartText('');
+    setRangeEndText('');
+    setRangeStart(null);
+    setRangeEnd(null);
+    setRangePicker(null);
     setError(null);
   }, []);
 
@@ -106,6 +150,58 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
     const result = await addJobScheduleDate({ jobId, workDate, startTime });
     if (result.ok) {
       setDates((prev) => sortDates([...prev, result.date]));
+      haptics.success();
+      resetForm();
+    } else {
+      setSaving(false);
+      setError(result.message);
+    }
+  };
+
+  // The range as YYYY-MM-DD strings, from whichever inputs this platform uses.
+  const rangeStartISO = Platform.OS === 'web' ? rangeStartText.trim() : rangeStart ? toISODate(rangeStart) : '';
+  const rangeEndISO = Platform.OS === 'web' ? rangeEndText.trim() : rangeEnd ? toISODate(rangeEnd) : '';
+  const rangeDays = datesInRange(rangeStartISO, rangeEndISO, weekdays);
+  const alreadyScheduled = new Set(dates.map((d) => d.work_date));
+  const rangeNew = rangeDays.filter((d) => !alreadyScheduled.has(d));
+
+  const toggleWeekday = (iso: number) =>
+    setWeekdays((cur) => {
+      const next = new Set(cur);
+      if (next.has(iso)) next.delete(iso);
+      else next.add(iso);
+      return next;
+    });
+
+  const saveRange = async () => {
+    if (!isValidISODate(rangeStartISO) || !isValidISODate(rangeEndISO)) {
+      setError(Platform.OS === 'web' ? 'Enter the first and last day as YYYY-MM-DD.' : 'Pick the first and last day.');
+      return;
+    }
+    if (rangeEndISO < rangeStartISO) {
+      setError('The last day is before the first day.');
+      return;
+    }
+    let startTime: string | null;
+    if (Platform.OS === 'web') {
+      const time = timeText.trim();
+      if (time && !isValidHHMM(time)) {
+        setError('Enter the time as HH:MM (24h), or leave it blank for TBD.');
+        return;
+      }
+      startTime = time || null;
+    } else {
+      startTime = draftTime ? toHHMM(draftTime) : null;
+    }
+    if (rangeNew.length === 0) {
+      setError(rangeDays.length ? 'Every one of those days is already scheduled.' : 'No days match — tick at least one weekday.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const result = await addJobScheduleDates({ jobId, workDates: rangeNew, startTime });
+    if (result.ok) {
+      setDates((prev) => sortDates([...prev, ...result.dates]));
       haptics.success();
       resetForm();
     } else {
@@ -364,7 +460,7 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
 
       {canEdit && !showForm ? (
         <Button
-          label="Add day"
+          label="Add days"
           onPress={() => {
             cancelEdit();
             setShowForm(true);
@@ -377,21 +473,124 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
 
       {canEdit && showForm ? (
         <Card style={styles.formCard}>
+          <View style={styles.modeRow}>
+            <Chip label="One day" tone="olive" selected={mode === 'one'} onPress={() => setMode('one')} />
+            <Chip label="Several days" tone="olive" selected={mode === 'range'} onPress={() => setMode('range')} />
+          </View>
+          {mode === 'range' ? (
+            <View style={styles.rangeBlock}>
+              {Platform.OS === 'web' ? (
+                <>
+                  <View style={styles.fieldRow}>
+                    <AppText variant="section" color={colors.textMuted}>
+                      First day
+                    </AppText>
+                    <TextInput
+                      value={rangeStartText}
+                      onChangeText={setRangeStartText}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor={colors.textMuted}
+                      style={styles.input}
+                      autoCapitalize="none"
+                    />
+                  </View>
+                  <View style={styles.fieldRow}>
+                    <AppText variant="section" color={colors.textMuted}>
+                      Last day
+                    </AppText>
+                    <TextInput
+                      value={rangeEndText}
+                      onChangeText={setRangeEndText}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor={colors.textMuted}
+                      style={styles.input}
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </>
+              ) : (
+                <>
+                  <AnimatedPressable
+                    onPress={() => setRangePicker(rangePicker === 'start' ? null : 'start')}
+                    haptic="tapLight"
+                    style={styles.fieldRow}>
+                    <AppText variant="section" color={colors.textMuted}>
+                      First day
+                    </AppText>
+                    <AppText variant="bodyStrong" color={colors.accentPrimary}>
+                      {rangeStart ? formatShortDate(toISODate(rangeStart)) : 'Pick a date'}
+                    </AppText>
+                  </AnimatedPressable>
+                  <AnimatedPressable
+                    onPress={() => setRangePicker(rangePicker === 'end' ? null : 'end')}
+                    haptic="tapLight"
+                    style={styles.fieldRow}>
+                    <AppText variant="section" color={colors.textMuted}>
+                      Last day
+                    </AppText>
+                    <AppText variant="bodyStrong" color={colors.accentPrimary}>
+                      {rangeEnd ? formatShortDate(toISODate(rangeEnd)) : 'Pick a date'}
+                    </AppText>
+                  </AnimatedPressable>
+                  {rangePicker ? (
+                    <DateTimePicker
+                      value={(rangePicker === 'start' ? rangeStart : rangeEnd) ?? rangeStart ?? parseISODate(toISODate(new Date()))}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      themeVariant="dark"
+                      onChange={(event, selected) => {
+                        const which = rangePicker;
+                        if (Platform.OS !== 'ios') setRangePicker(null);
+                        if (event.type === 'set' && selected) {
+                          if (which === 'start') setRangeStart(selected);
+                          else setRangeEnd(selected);
+                        }
+                      }}
+                    />
+                  ) : null}
+                </>
+              )}
+              <View style={styles.modeRow}>
+                {WEEKDAYS.map((w) => (
+                  <Chip
+                    key={w.iso}
+                    label={w.label}
+                    tone="sun"
+                    selected={weekdays.has(w.iso)}
+                    onPress={() => toggleWeekday(w.iso)}
+                  />
+                ))}
+              </View>
+              <AppText variant="caption" color={colors.textMuted}>
+                {rangeDays.length === 0
+                  ? 'Pick the first and last day; only the ticked weekdays are scheduled.'
+                  : `Adds ${rangeNew.length} ${rangeNew.length === 1 ? 'day' : 'days'}${
+                      rangeNew.length
+                        ? `: ${rangeNew.slice(0, 8).map((d) => formatShortDate(d)).join(', ')}${rangeNew.length > 8 ? ', …' : ''}`
+                        : ''
+                    }${
+                      rangeDays.length > rangeNew.length ? ` (${rangeDays.length - rangeNew.length} already scheduled)` : ''
+                    }. The crew gets one notification.`}
+              </AppText>
+            </View>
+          ) : null}
           {Platform.OS === 'web' ? (
             <>
-              <View style={styles.fieldRow}>
-                <AppText variant="section" color={colors.textMuted}>
-                  Date
-                </AppText>
-                <TextInput
-                  value={dateText}
-                  onChangeText={setDateText}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={colors.textMuted}
-                  style={styles.input}
-                  autoCapitalize="none"
-                />
-              </View>
+              {mode === 'one' ? (
+                <View style={styles.fieldRow}>
+                  <AppText variant="section" color={colors.textMuted}>
+                    Date
+                  </AppText>
+                  <TextInput
+                    value={dateText}
+                    onChangeText={setDateText}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor={colors.textMuted}
+                    style={styles.input}
+                    autoCapitalize="none"
+                  />
+                </View>
+              ) : null}
               <View style={styles.fieldRow}>
                 <AppText variant="section" color={colors.textMuted}>
                   Start time
@@ -408,17 +607,19 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
             </>
           ) : (
             <>
-              <AnimatedPressable
-                onPress={() => setPickerMode(pickerMode === 'date' ? null : 'date')}
-                haptic="tapLight"
-                style={styles.fieldRow}>
-                <AppText variant="section" color={colors.textMuted}>
-                  Date
-                </AppText>
-                <AppText variant="bodyStrong" color={colors.accentPrimary}>
-                  {draftDate ? formatShortDate(toISODate(draftDate)) : 'Pick a date'}
-                </AppText>
-              </AnimatedPressable>
+              {mode === 'one' ? (
+                <AnimatedPressable
+                  onPress={() => setPickerMode(pickerMode === 'date' ? null : 'date')}
+                  haptic="tapLight"
+                  style={styles.fieldRow}>
+                  <AppText variant="section" color={colors.textMuted}>
+                    Date
+                  </AppText>
+                  <AppText variant="bodyStrong" color={colors.accentPrimary}>
+                    {draftDate ? formatShortDate(toISODate(draftDate)) : 'Pick a date'}
+                  </AppText>
+                </AnimatedPressable>
+              ) : null}
               <AnimatedPressable
                 onPress={() => setPickerMode(pickerMode === 'time' ? null : 'time')}
                 haptic="tapLight"
@@ -468,8 +669,14 @@ export function JobScheduleDates({ jobId, isAdmin }: { jobId: string; isAdmin: b
               disabled={saving}
             />
             <Button
-              label="Save day"
-              onPress={Platform.OS === 'web' ? submitWeb : submitNative}
+              label={
+                mode === 'range'
+                  ? rangeNew.length
+                    ? `Save ${rangeNew.length} ${rangeNew.length === 1 ? 'day' : 'days'}`
+                    : 'Save days'
+                  : 'Save day'
+              }
+              onPress={mode === 'range' ? () => void saveRange() : Platform.OS === 'web' ? submitWeb : submitNative}
               loading={saving}
               size="sm"
             />
@@ -527,6 +734,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   formCard: {
+    gap: spacing.sm,
+  },
+  modeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  rangeBlock: {
     gap: spacing.sm,
   },
   fieldRow: {
