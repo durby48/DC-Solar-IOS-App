@@ -388,6 +388,35 @@ if (process.argv.includes('--apply')) {
   const UPDATABLE = new Set(['invoice', 'payment', 'sales_receipt', 'deposit', 'purchase', 'journal', 'cash_move']);
   const count = { created: 0, updated: 0, rekeyed: 0, deleted: 0, seeded: 0 };
   const fp = (body) => createHash('sha1').update(JSON.stringify(body)).digest('hex');
+  /**
+   * A full update replaces every line; QuickBooks refuses when a replaced line is
+   * matched to a bank-feed transaction ("Matched Transaction Delete Error"). Give each
+   * new line the Id of the existing line it corresponds to — same detail type and
+   * account/item (and posting side), exact amount preferred — so those lines are
+   * edited in place and the bank match survives.
+   */
+  function carryLineIds(body, current) {
+    if (!Array.isArray(body.Line) || !Array.isArray(current.Line)) return body;
+    const keyOf = (l) => {
+      const d = l.JournalEntryLineDetail ?? l.AccountBasedExpenseLineDetail ?? l.DepositLineDetail ?? l.SalesItemLineDetail ?? {};
+      const ref = d.AccountRef?.value ?? d.ItemRef?.value ?? (l.LinkedTxn?.[0] ? `${l.LinkedTxn[0].TxnType}:${l.LinkedTxn[0].TxnId}` : '');
+      return `${l.DetailType ?? 'linked'}|${ref}|${d.PostingType ?? ''}`;
+    };
+    const pool = current.Line.filter((l) => l.Id && l.DetailType !== 'SubTotalLineDetail');
+    const used = new Set();
+    const take = (pred) => {
+      const hit = pool.find((l) => !used.has(l.Id) && pred(l));
+      if (hit) used.add(hit.Id);
+      return hit;
+    };
+    const Line = body.Line.map((l) => {
+      const k = keyOf(l);
+      const hit = take((c) => keyOf(c) === k && Number(c.Amount) === Number(l.Amount)) ?? take((c) => keyOf(c) === k);
+      return hit ? { ...l, Id: hit.Id } : l;
+    });
+    return { ...body, Line };
+  }
+
   const seedSql = [];
   const sameSet = (a, b) => a.length > 0 && a.length === b.length && a.every((x) => b.includes(x));
 
@@ -427,7 +456,7 @@ if (process.argv.includes('--apply')) {
     if (link) {
       if (!UPDATABLE.has(kind) || link.fingerprint === print) return link.qbo_id;
       const current = (await qbo('GET', `${entity.toLowerCase()}/${link.qbo_id}`))[entity];
-      const res = await qbo('POST', entity.toLowerCase(), { ...body, Id: link.qbo_id, SyncToken: current.SyncToken });
+      const res = await qbo('POST', entity.toLowerCase(), { ...carryLineIds(body, current), Id: link.qbo_id, SyncToken: current.SyncToken });
       const obj = res[entity];
       await sql(`update public.qbo_links set sync_token = ${lit(obj.SyncToken)}, fingerprint = ${lit(print)}, app_ids = ${uuidArray(appIds)}, synced_at = now()
         where company = 'dc-solar' and app_kind = ${lit(kind)} and app_key = ${lit(key)}`);
