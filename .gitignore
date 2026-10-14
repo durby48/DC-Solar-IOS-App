@@ -24,3 +24,7 @@ plaid*.txt
 
 # QuickBooks import plans hold company financial data
 scripts/qbo/out/
+
+scripts/reports/**/data.json
+scripts/reports/**/report.html
+scripts/reports/**/logo.png
