@@ -191,7 +191,7 @@ for (const [ref, rows] of groups) {
       } else {
         const who = r.job_id ? jobById.get(r.job_id)?.job_number : custById.get(r.customer_id)?.name;
         const item = r.job_id ? incomeKind(jobById.get(r.job_id)) : 'service';
-        salesReceipts.push({ appId: r.id, date: r.occurred_on, who, item, amount: money(r.amount), description: r.description });
+        salesReceipts.push({ appId: r.id, date: r.occurred_on, who, jobId: r.job_id, customerId: r.customer_id, item, amount: money(r.amount), description: r.description });
         linked.push({ kind: 'salesReceipt', appId: r.id, amount: money(r.amount) });
         if (r.job_id && !salesReceiptJobs.has(r.job_id)) warn(`payment ${r.id} on ${who}: job has an invoice that is not being created — sales receipt used`);
       }
@@ -354,3 +354,207 @@ if (unbilled.length) {
 console.log(`\nWarnings (${warnings.length}):`);
 for (const w of warnings) console.log('  - ' + w);
 console.log(`\nFull plan: ${join(OUT, 'plan.json')}`);
+
+// =========================================================================== APPLY
+if (process.argv.includes('--apply')) {
+  if (warnings.length) {
+    console.error('\nRefusing to apply with warnings. Fix them first.');
+    process.exit(1);
+  }
+  const { qbo } = await import('./qbo.mjs');
+  const lit = (v) => (v == null ? 'null' : `'${String(v).replace(/'/g, "''")}'`);
+  const links = new Map(
+    (await sql(`select app_kind, app_key, qbo_id from public.qbo_links where company = 'dc-solar'`)).map((l) => [`${l.app_kind}|${l.app_key}`, l.qbo_id]),
+  );
+  const linked = (kind, key) => links.get(`${kind}|${key}`);
+  let created = 0;
+  /** Create once: skip when already linked, else POST and record the link. */
+  async function ensure(kind, key, entity, body, appIds = []) {
+    const have = linked(kind, key);
+    if (have) return have;
+    const res = await qbo('POST', entity.toLowerCase(), body);
+    const obj = res[entity];
+    await sql(`insert into public.qbo_links (app_kind, app_key, qbo_type, qbo_id, sync_token, app_ids)
+      values (${lit(kind)}, ${lit(key)}, ${lit(entity)}, ${lit(obj.Id)}, ${lit(obj.SyncToken)},
+              array[${appIds.filter(Boolean).map((id) => `${lit(id)}::uuid`).join(',')}]::uuid[])
+      on conflict (company, app_kind, app_key) do nothing`);
+    links.set(`${kind}|${key}`, obj.Id);
+    created += 1;
+    if (created % 25 === 0) console.log(`  … ${created} created`);
+    return obj.Id;
+  }
+  const acct = (name) => {
+    const a = accountByName.get(name);
+    if (!a) throw new Error(`QuickBooks account missing: ${name}`);
+    return { value: a.Id, name: a.Name };
+  };
+  const jobByNumber = new Map(jobs.map((j) => [j.job_number, j]));
+  const note = (ids) => `DC Solar app import 2026-10-14 · ${ids.filter(Boolean).join(', ')}`.slice(0, 4000);
+
+  console.log('\nAPPLYING to QuickBooks …');
+
+  // Items (one service per income account)
+  const itemId = {};
+  for (const [kind, it] of Object.entries(INCOME_ITEMS)) {
+    const existing = (await query(`select * from Item where Name = '${it.name.replace(/'/g, "\\'")}'`))[0];
+    itemId[kind] = existing?.Id ?? (await ensure('item', kind, 'Item', { Name: it.name, Type: 'Service', IncomeAccountRef: acct(it.account) }));
+  }
+
+  // Customers (DisplayName must be unique across customers, vendors and employees)
+  const custQbo = new Map();
+  for (const id of neededCustomers) {
+    const c = custById.get(id);
+    const body = { DisplayName: c.name.slice(0, 100), CompanyName: c.name.slice(0, 100) };
+    if (c.email && /@/.test(c.email)) body.PrimaryEmailAddr = { Address: c.email };
+    if (c.phone) body.PrimaryPhone = { FreeFormNumber: c.phone };
+    if (c.address) body.BillAddr = { Line1: c.address.slice(0, 500) };
+    let qid;
+    try {
+      qid = await ensure('customer', id, 'Customer', body, [id]);
+    } catch (e) {
+      if (!/Duplicate Name/i.test(e.message)) throw e;
+      qid = await ensure('customer', id, 'Customer', { ...body, DisplayName: `${c.name} (customer)`.slice(0, 100) }, [id]);
+    }
+    custQbo.set(id, qid);
+  }
+
+  // Projects: a sub-customer marked IsProject (falls back to a plain sub-customer)
+  const projQbo = new Map();
+  let projectMode = null;
+  for (const j of projects) {
+    const parent = custQbo.get(j.customer_id);
+    const base = { DisplayName: projectName(j), Job: true, BillWithParent: false, ParentRef: { value: parent } };
+    if (j.address) base.ShipAddr = { Line1: j.address.slice(0, 500) };
+    let qid;
+    if (projectMode !== 'subcustomer') {
+      try {
+        qid = await ensure('project', j.id, 'Customer', { ...base, IsProject: true }, [j.id]);
+        projectMode = 'project';
+      } catch (e) {
+        if (projectMode === 'project') throw e;
+        console.log(`  projects: IsProject refused (${e.message.slice(0, 120)}) — using sub-customers`);
+        projectMode = 'subcustomer';
+      }
+    }
+    if (!qid) qid = await ensure('project', j.id, 'Customer', base, [j.id]);
+    projQbo.set(j.id, qid);
+  }
+  const projectRef = (jobNumber) => (jobNumber ? { value: projQbo.get(jobByNumber.get(jobNumber).id) } : undefined);
+
+  // Invoices
+  const invQbo = new Map();
+  const invRemaining = new Map();
+  for (const inv of invoices) {
+    const qid = await ensure('invoice', inv.appId, 'Invoice', {
+      CustomerRef: { value: projQbo.get(inv.jobId) },
+      TxnDate: inv.date,
+      DocNumber: inv.docNumber,
+      PrivateNote: note([inv.appId]),
+      Line: inv.lines.map((l) => ({
+        DetailType: 'SalesItemLineDetail', Amount: l.amount, Description: l.description?.slice(0, 4000),
+        SalesItemLineDetail: { ItemRef: { value: itemId[inv.item] }, Qty: l.qty, UnitPrice: l.rate },
+      })),
+    }, [inv.appId]);
+    invQbo.set(inv.appId, qid);
+    invRemaining.set(inv.appId, inv.total);
+  }
+
+  // Customer payments → Undeposited Funds (or Cash for the cash one)
+  const payQbo = new Map();
+  for (const p of receivePayments.sort((a, b) => a.date.localeCompare(b.date))) {
+    const inv = invoices.find((i) => i.appId === p.invoiceApp);
+    const apply = money(Math.min(p.amount, invRemaining.get(p.invoiceApp) ?? 0));
+    invRemaining.set(p.invoiceApp, money((invRemaining.get(p.invoiceApp) ?? 0) - apply));
+    const qid = await ensure('payment', p.appId, 'Payment', {
+      CustomerRef: { value: projQbo.get(inv.jobId) },
+      TotalAmt: p.amount,
+      TxnDate: p.date,
+      DepositToAccountRef: acct(p.depositTo ?? ACCT.undeposited),
+      PrivateNote: note([p.appId]),
+      Line: apply > 0 ? [{ Amount: apply, LinkedTxn: [{ TxnId: invQbo.get(p.invoiceApp), TxnType: 'Invoice' }] }] : [],
+    }, [p.appId]);
+    payQbo.set(p.appId, qid);
+  }
+
+  // Sales receipts (money with no invoice — the extended warranty)
+  const srQbo = new Map();
+  for (const s of salesReceipts) {
+    const customer = s.jobId ? projQbo.get(s.jobId) : custQbo.get(s.customerId);
+    const qid = await ensure('sales_receipt', s.appId, 'SalesReceipt', {
+      CustomerRef: { value: customer },
+      TxnDate: s.date,
+      DepositToAccountRef: acct(ACCT.undeposited),
+      PrivateNote: note([s.appId]),
+      Line: [{ DetailType: 'SalesItemLineDetail', Amount: s.amount, Description: s.description?.slice(0, 4000),
+        SalesItemLineDetail: { ItemRef: { value: itemId[s.item] }, Qty: 1, UnitPrice: s.amount } }],
+    }, [s.appId]);
+    srQbo.set(s.appId, qid);
+  }
+
+  // Deposits — one per bank line
+  for (const d of deposits.sort((a, b) => a.date.localeCompare(b.date))) {
+    const lines = [
+      ...d.linked.map((l) => ({
+        Amount: l.amount,
+        LinkedTxn: [{ TxnId: l.kind === 'payment' ? payQbo.get(l.appId) : srQbo.get(l.appId), TxnType: l.kind === 'payment' ? 'Payment' : 'SalesReceipt', TxnLineId: '0' }],
+      })),
+      ...d.other.map((o) => ({
+        Amount: o.direction === 'in' ? o.amount : -o.amount,
+        DetailType: 'DepositLineDetail',
+        Description: o.description?.slice(0, 4000),
+        DepositLineDetail: { AccountRef: acct(o.account), ...(o.project ? { Entity: { value: projectRef(o.project).value, type: 'Customer' } } : {}) },
+      })),
+    ];
+    await ensure('deposit', d.ref, 'Deposit', {
+      DepositToAccountRef: acct(ACCT.bank), TxnDate: d.date, PrivateNote: note([d.ref]), Line: lines,
+    }, [...d.linked.map((l) => l.appId), ...d.other.map((o) => o.appId)]);
+  }
+
+  // Purchases — one per bank line
+  for (const p of purchases.sort((a, b) => a.date.localeCompare(b.date))) {
+    await ensure('purchase', p.ref, 'Purchase', {
+      PaymentType: p.paymentType,
+      AccountRef: acct(ACCT.bank),
+      TxnDate: p.date,
+      ...(p.docNumber ? { DocNumber: p.docNumber } : {}),
+      PrivateNote: note([p.ref]),
+      Line: p.lines.map((l) => ({
+        Amount: l.amount,
+        DetailType: 'AccountBasedExpenseLineDetail',
+        Description: l.description?.slice(0, 4000),
+        AccountBasedExpenseLineDetail: { AccountRef: acct(l.account), BillableStatus: 'NotBillable', ...(l.project ? { CustomerRef: projectRef(l.project) } : {}) },
+      })),
+    }, p.lines.map((l) => l.appId));
+  }
+
+  // Journal entries — payroll runs and money owed to Isaiah
+  for (const j of journals) {
+    await ensure('journal', j.appId, 'JournalEntry', {
+      TxnDate: j.date,
+      PrivateNote: note([j.kind === 'payroll' ? `Gusto ${j.receipt ?? ''}` : 'Isaiah out of pocket', j.appId]),
+      Line: j.lines.map((l) => ({
+        Amount: l.amount,
+        DetailType: 'JournalEntryLineDetail',
+        Description: (l.description ?? (j.kind === 'payroll' ? `Gusto payroll, payday ${j.date}` : ''))?.slice(0, 4000),
+        JournalEntryLineDetail: {
+          PostingType: l.posting,
+          AccountRef: acct(l.account),
+          ...(l.project ? { Entity: { Type: 'Customer', EntityRef: projectRef(l.project) } } : {}),
+        },
+      })),
+    }, [j.appId]);
+  }
+
+  // Cash handed back to Devon from the DC-26002 cash payment
+  for (const m of cashMoves) {
+    await ensure('cash_move', m.appId, 'Purchase', {
+      PaymentType: 'Cash', AccountRef: acct(m.from), TxnDate: m.date, PrivateNote: note([m.appId]),
+      Line: [{ Amount: m.amount, DetailType: 'AccountBasedExpenseLineDetail', Description: m.description?.slice(0, 4000),
+        AccountBasedExpenseLineDetail: { AccountRef: acct(m.account) } }],
+    }, [m.appId]);
+  }
+
+  console.log(`\nDone: ${created} QuickBooks objects created (projects as ${projectMode ?? 'n/a'}).`);
+  const bank = (await query(`select * from Account where Name = '${ACCT.bank}'`))[0];
+  console.log(`QuickBooks now shows ${ACCT.bank} at ${fmt(Number(bank.CurrentBalance))} (projected ${fmt(money(STATEMENT_CHECK.opening + bankEffect('2099-12-31')))}).`);
+}
