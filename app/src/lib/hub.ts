@@ -145,6 +145,7 @@ export const HUB_ITEMS: readonly HubItem[] = [
 
   // ---- Systems Management ----
   { key: 'financials', title: 'Financials', icon: 'wallet', href: '/financials', hub: 'systems', tone: 'hr', gate: 'admin', subtitle: 'P&L, ledger, cash position' },
+  { key: 'quickbooks', title: 'QuickBooks', icon: 'link', href: '/quickbooks' as never, hub: 'systems', tone: 5, gate: 'admin', subtitle: 'Connect the books' },
   { key: 'receipts', title: 'Receipts', icon: 'receipt', href: '/more/receipts', hub: 'systems', tone: 4, gate: 'all', subtitle: 'Upload and approve' },
   { key: 'inventory', title: 'Inventory', icon: 'cube', href: '/more/inventory', hub: 'systems', tone: 1, gate: 'all' },
   { key: 'checklist', title: 'Vehicle Checklist', icon: 'clipboard', href: '/more/checklist', hub: 'systems', tone: 2, gate: 'all' },
