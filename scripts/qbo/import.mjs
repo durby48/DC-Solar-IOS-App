@@ -163,7 +163,6 @@ for (const [ref, rows] of groups) {
   const lineFor = (r) => {
     const x = ext(r);
     const key = r.type === 'investment' ? (r.direction === 'in' ? 'owner_investment' : 'owner_draw') : (x.book_account ?? 'uncategorized');
-    if (r.type === 'expense' && !x.book_account) warn(`expense ${r.id} (${r.occurred_on} ${fmt(money(r.amount))}) has no book_account`);
     return {
       appId: r.id,
       account: key === 'owner_investment' ? ACCT.ownerInv : BOOK_QBO[key] ?? 'Uncategorized Expense',
@@ -357,30 +356,89 @@ console.log(`\nFull plan: ${join(OUT, 'plan.json')}`);
 
 // =========================================================================== APPLY
 if (process.argv.includes('--apply')) {
-  if (warnings.length) {
+  if (warnings.length && !process.argv.includes('--seed-from')) {
     console.error('\nRefusing to apply with warnings. Fix them first.');
     process.exit(1);
   }
   const { qbo } = await import('./qbo.mjs');
+  const { createHash } = await import('node:crypto');
+  const { readFileSync } = await import('node:fs');
   const lit = (v) => (v == null ? 'null' : `'${String(v).replace(/'/g, "''")}'`);
-  const links = new Map(
-    (await sql(`select app_kind, app_key, qbo_id from public.qbo_links where company = 'dc-solar'`)).map((l) => [`${l.app_kind}|${l.app_key}`, l.qbo_id]),
-  );
-  const linked = (kind, key) => links.get(`${kind}|${key}`);
-  let created = 0;
-  /** Create once: skip when already linked, else POST and record the link. */
+  const uuidArray = (ids) => `array[${ids.filter(Boolean).filter((id) => /^[0-9a-f-]{36}$/.test(id)).map((id) => `${lit(id)}::uuid`).join(',')}]::uuid[]`;
+
+  // --seed-from <plan.json>: record fingerprints for what the import created from that
+  // plan, without touching QuickBooks. Run once after an import made before fingerprints.
+  const seedIdx = process.argv.indexOf('--seed-from');
+  const SEED = seedIdx > 0 ? JSON.parse(readFileSync(process.argv[seedIdx + 1], 'utf8')) : null;
+  if (SEED) {
+    for (const k of ['invoices', 'receivePayments', 'salesReceipts', 'deposits', 'purchases', 'journals', 'cashMoves']) {
+      const target = { invoices, receivePayments, salesReceipts, deposits, purchases, journals, cashMoves }[k];
+      target.splice(0, target.length, ...SEED[k]);
+    }
+  }
+
+  const linkRows = await sql(`select app_kind, app_key, qbo_type, qbo_id, sync_token, fingerprint, app_ids from public.qbo_links where company = 'dc-solar'`);
+  const links = new Map(linkRows.map((l) => [`${l.app_kind}|${l.app_key}`, l]));
+  const touched = new Set();
+  const UPDATABLE = new Set(['invoice', 'payment', 'sales_receipt', 'deposit', 'purchase', 'journal', 'cash_move']);
+  const count = { created: 0, updated: 0, rekeyed: 0, deleted: 0, seeded: 0 };
+  const fp = (body) => createHash('sha1').update(JSON.stringify(body)).digest('hex');
+  const seedSql = [];
+  const sameSet = (a, b) => a.length > 0 && a.length === b.length && a.every((x) => b.includes(x));
+
+  /**
+   * Create, update or leave one QuickBooks object so it matches the app.
+   *   linked + same fingerprint → nothing; linked + changed → full update;
+   *   not linked but an unclaimed link covers exactly the same app rows → re-key it, then update;
+   *   otherwise → create. Customers, projects and items are create-only.
+   */
   async function ensure(kind, key, entity, body, appIds = []) {
-    const have = linked(kind, key);
-    if (have) return have;
+    const id = `${kind}|${key}`;
+    const print = fp(body);
+    let link = links.get(id);
+    if (!link && !SEED && UPDATABLE.has(kind)) {
+      const ids = appIds.filter(Boolean).map(String).sort();
+      const orphan = [...links.values()].find((l) => l.app_kind === kind && !touched.has(`${l.app_kind}|${l.app_key}`)
+        && sameSet((l.app_ids ?? []).map(String).sort(), ids));
+      if (orphan) {
+        await sql(`update public.qbo_links set app_key = ${lit(key)} where company = 'dc-solar' and app_kind = ${lit(kind)} and app_key = ${lit(orphan.app_key)}`);
+        links.delete(`${kind}|${orphan.app_key}`);
+        orphan.app_key = key;
+        links.set(id, orphan);
+        link = orphan;
+        count.rekeyed += 1;
+      }
+    }
+    touched.add(id);
+    if (SEED) {
+      if (link && !link.fingerprint) {
+        seedSql.push(`update public.qbo_links set fingerprint = ${lit(print)} where company = 'dc-solar' and app_kind = ${lit(kind)} and app_key = ${lit(key)};`);
+        if (seedSql.length >= 100) await sql(seedSql.splice(0).join('\n'));
+        link.fingerprint = print;
+        count.seeded += 1;
+      }
+      return link?.qbo_id ?? null;
+    }
+    if (link) {
+      if (!UPDATABLE.has(kind) || link.fingerprint === print) return link.qbo_id;
+      const current = (await qbo('GET', `${entity.toLowerCase()}/${link.qbo_id}`))[entity];
+      const res = await qbo('POST', entity.toLowerCase(), { ...body, Id: link.qbo_id, SyncToken: current.SyncToken });
+      const obj = res[entity];
+      await sql(`update public.qbo_links set sync_token = ${lit(obj.SyncToken)}, fingerprint = ${lit(print)}, app_ids = ${uuidArray(appIds)}, synced_at = now()
+        where company = 'dc-solar' and app_kind = ${lit(kind)} and app_key = ${lit(key)}`);
+      Object.assign(link, { fingerprint: print, sync_token: obj.SyncToken });
+      count.updated += 1;
+      console.log(`  ~ updated ${entity} ${link.qbo_id} (${key.slice(0, 60)})`);
+      return link.qbo_id;
+    }
     const res = await qbo('POST', entity.toLowerCase(), body);
     const obj = res[entity];
-    await sql(`insert into public.qbo_links (app_kind, app_key, qbo_type, qbo_id, sync_token, app_ids)
-      values (${lit(kind)}, ${lit(key)}, ${lit(entity)}, ${lit(obj.Id)}, ${lit(obj.SyncToken)},
-              array[${appIds.filter(Boolean).map((id) => `${lit(id)}::uuid`).join(',')}]::uuid[])
+    await sql(`insert into public.qbo_links (app_kind, app_key, qbo_type, qbo_id, sync_token, app_ids, fingerprint)
+      values (${lit(kind)}, ${lit(key)}, ${lit(entity)}, ${lit(obj.Id)}, ${lit(obj.SyncToken)}, ${uuidArray(appIds)}, ${lit(print)})
       on conflict (company, app_kind, app_key) do nothing`);
-    links.set(`${kind}|${key}`, obj.Id);
-    created += 1;
-    if (created % 25 === 0) console.log(`  … ${created} created`);
+    links.set(id, { app_kind: kind, app_key: key, qbo_type: entity, qbo_id: obj.Id, sync_token: obj.SyncToken, fingerprint: print, app_ids: appIds });
+    count.created += 1;
+    console.log(`  + created ${entity} ${obj.Id} (${key.slice(0, 60)})`);
     return obj.Id;
   }
   const acct = (name) => {
@@ -554,9 +612,32 @@ if (process.argv.includes('--apply')) {
     }, [m.appId]);
   }
 
+  if (seedSql.length) await sql(seedSql.splice(0).join('\n'));
+
+  // Anything linked that the app no longer has (a deleted row, a re-grouped bank line)
+  // is deleted from QuickBooks — deposits before the payments they hold.
+  if (!SEED) {
+    const ORDER = ['deposit', 'purchase', 'cash_move', 'journal', 'payment', 'sales_receipt', 'invoice'];
+    const orphans = [...links.values()]
+      .filter((l) => UPDATABLE.has(l.app_kind) && !touched.has(`${l.app_kind}|${l.app_key}`))
+      .sort((a, b) => ORDER.indexOf(a.app_kind) - ORDER.indexOf(b.app_kind));
+    for (const l of orphans) {
+      const entity = l.qbo_type;
+      try {
+        const current = (await qbo('GET', `${entity.toLowerCase()}/${l.qbo_id}`))[entity];
+        await qbo('POST', `${entity.toLowerCase()}?operation=delete`, { Id: l.qbo_id, SyncToken: current.SyncToken });
+      } catch (e) {
+        if (!/Object Not Found|deleted/i.test(e.message)) throw e;
+      }
+      await sql(`delete from public.qbo_links where company = 'dc-solar' and app_kind = ${lit(l.app_kind)} and app_key = ${lit(l.app_key)}`);
+      count.deleted += 1;
+      console.log(`  - deleted ${entity} ${l.qbo_id} (${l.app_key.slice(0, 60)})`);
+    }
+  }
+
   // The API accepts IsProject:true but (2026-10) does not honour it — check what really happened.
   const flagged = (await query('select * from Customer')).filter((c) => c.IsProject).length;
-  console.log(`\nDone: ${created} QuickBooks objects created. Jobs flagged as Projects: ${flagged} of ${projects.length} (the rest are sub-customers).`);
+  console.log(`\nDone: ${JSON.stringify(count)}. Jobs flagged as Projects: ${flagged} of ${projects.length} (the rest are sub-customers).`);
   const bank = (await query(`select * from Account where Name = '${ACCT.bank}'`))[0];
   console.log(`QuickBooks now shows ${ACCT.bank} at ${fmt(Number(bank.CurrentBalance))} (projected ${fmt(money(STATEMENT_CHECK.opening + bankEffect('2099-12-31')))}).`);
 }

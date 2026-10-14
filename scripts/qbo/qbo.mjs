@@ -36,14 +36,21 @@ const lit = (v) => (v == null ? 'null' : `'${String(v).replace(/'/g, "''")}'`);
 
 /** Run SQL as the database owner through the Management API. */
 export async function sql(query) {
-  const res = await fetch(`https://api.supabase.com/v1/projects/${PROJECT}/database/query`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
-  });
-  const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(`SQL ${res.status}: ${JSON.stringify(body)}`);
-  return body;
+  // The Management API rate-limits (429); back off and retry rather than fail mid-sync.
+  for (let attempt = 1; ; attempt += 1) {
+    const res = await fetch(`https://api.supabase.com/v1/projects/${PROJECT}/database/query`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+    const body = await res.json().catch(() => null);
+    if (res.status === 429 && attempt < 8) {
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+      continue;
+    }
+    if (!res.ok) throw new Error(`SQL ${res.status}: ${JSON.stringify(body)}`);
+    return body;
+  }
 }
 
 let conn = null;
