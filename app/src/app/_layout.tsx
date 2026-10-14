@@ -227,6 +227,8 @@ export default function RootLayout() {
             <Stack.Screen name="storm-reports/[day]" options={{ title: 'Storm' }} />
             {/* QuickBooks connection (2026-10-14) — admins; Intuit redirects back here. */}
             <Stack.Screen name="quickbooks" options={{ title: 'QuickBooks' }} />
+            {/* Books review (2026-10-14) — every expense's job + QuickBooks account before import. */}
+            <Stack.Screen name="books-review" options={{ title: 'Review for QuickBooks' }} />
             <Stack.Screen name="resources/index" options={{ title: 'Sales resources' }} />
             <Stack.Screen name="resources/[id]" options={{ title: 'Sales resources' }} />
             {/* Public: where a customer lands from the Stripe card page (B2). */}
