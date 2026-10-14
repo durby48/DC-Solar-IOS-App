@@ -406,6 +406,84 @@ export function summarizePeriod(data: HoursData, period: PayrollPeriod): HoursOv
 }
 
 // ---------------------------------------------------------------------------
+// Company payroll taxes (employer burden) — forecast per period (2026-10-14)
+// ---------------------------------------------------------------------------
+
+/**
+ * Employer payroll taxes, 2026. Social Security + Medicare apply to every dollar;
+ * the two unemployment taxes stop once an employee's wages for the year pass the
+ * wage base — which is why the burden on Gusto receipts falls through the year
+ * (10.63% in July, 9.4% on the Oct 16 run). Checked against the Oct 16 receipt:
+ * this model lands within ~2% of Gusto's employer taxes (it slightly overstates,
+ * because wages paid before the app tracked hours are not in the YTD).
+ * Missouri's UI wage base is $9,000 for 2026 (Missouri DES; was $9,500 in 2025).
+ */
+export const EMPLOYER_TAX_2026 = {
+  ssMedicare: 0.0765,
+  futaRate: 0.006,
+  futaWageBase: 7000,
+  moUiRate: 0.02376,
+  moUiWageBase: 9000,
+} as const;
+
+export interface PayrollTaxEstimate {
+  gross: number;
+  ssMedicare: number;
+  futa: number;
+  moUi: number;
+  employerTaxes: number;
+  /** gross + employer taxes — roughly what Gusto will withdraw (net pay + all taxes). */
+  totalCost: number;
+}
+
+/** Forecast the company's payroll taxes for one period from logged hours. */
+export function estimateEmployerTaxes(data: HoursData, period: PayrollPeriod): PayrollTaxEstimate {
+  const t = EMPLOYER_TAX_2026;
+  const year = period.end.slice(0, 4);
+  const ytdBefore = new Map<string, number>();
+  const inPeriod = new Map<string, number>();
+  for (const e of data.entries) {
+    if (!e.date.startsWith(year) || e.rate == null || e.rate <= 0) continue;
+    const pay = e.hours * e.rate;
+    if (period.start && e.date < period.start) ytdBefore.set(e.name, (ytdBefore.get(e.name) ?? 0) + pay);
+    else if (e.date <= period.end && (!period.start || e.date >= period.start)) inPeriod.set(e.name, (inPeriod.get(e.name) ?? 0) + pay);
+  }
+  let gross = 0;
+  let futaWages = 0;
+  let moWages = 0;
+  for (const [name, pay] of inPeriod) {
+    const before = ytdBefore.get(name) ?? 0;
+    gross += pay;
+    futaWages += Math.max(0, Math.min(pay, t.futaWageBase - before));
+    moWages += Math.max(0, Math.min(pay, t.moUiWageBase - before));
+  }
+  const round = (n: number) => Math.round(n * 100) / 100;
+  const ssMedicare = round(gross * t.ssMedicare);
+  const futa = round(futaWages * t.futaRate);
+  const moUi = round(moWages * t.moUiRate);
+  const employerTaxes = round(ssMedicare + futa + moUi);
+  return { gross: round(gross), ssMedicare, futa, moUi, employerTaxes, totalCost: round(gross + employerTaxes) };
+}
+
+/**
+ * Payroll the company owes but has not paid: every period that has started and has
+ * no recorded regular Gusto run — wages from logged hours plus the forecast taxes.
+ */
+export function accruedPayroll(
+  data: HoursData,
+  runs: PayrollRun[],
+  periods: PayrollPeriod[],
+): { periods: { period: PayrollPeriod; estimate: PayrollTaxEstimate }[]; gross: number; employerTaxes: number; total: number } {
+  const today = todayISO();
+  const open = periods
+    .filter((p) => !p.pre && (p.start === '' || p.start <= today) && !runsForPeriod(runs, p).regular)
+    .map((period) => ({ period, estimate: estimateEmployerTaxes(data, period) }))
+    .filter((x) => x.estimate.gross > 0);
+  const sum = (f: (e: PayrollTaxEstimate) => number) => Math.round(open.reduce((s, x) => s + f(x.estimate), 0) * 100) / 100;
+  return { periods: open, gross: sum((e) => e.gross), employerTaxes: sum((e) => e.employerTaxes), total: sum((e) => e.totalCost) };
+}
+
+// ---------------------------------------------------------------------------
 // Recorded payroll runs (payroll_runs table, admin-only)
 // ---------------------------------------------------------------------------
 

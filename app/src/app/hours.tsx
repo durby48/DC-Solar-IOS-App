@@ -19,6 +19,8 @@ import {
 } from '@/components/ui';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import {
+  accruedPayroll,
+  estimateEmployerTaxes,
   fetchHoursData,
   fetchPayrollRuns,
   formatPayrollDate,
@@ -193,6 +195,11 @@ export default function HoursScreen() {
     [data, period],
   );
 
+  // Company payroll taxes (2026-10-14): forecast for this period, and everything accrued
+  // (worked, not yet paid) across periods. A recorded run shows the ACTUAL taxes instead.
+  const taxEstimate = useMemo(() => (data ? estimateEmployerTaxes(data, period) : null), [data, period]);
+  const accrued = useMemo(() => (data ? accruedPayroll(data, runs, periods) : null), [data, runs, periods]);
+
   const { regular: recordedRun, offCycle: offCycleRuns } = useMemo(
     () => runsForPeriod(runs, period),
     [runs, period],
@@ -348,6 +355,55 @@ export default function HoursScreen() {
                   />
                 )}
               </View>
+
+              {isAdmin && !period.pre && taxEstimate && (taxEstimate.gross > 0 || recordedRun) ? (
+                <View style={styles.taxBox}>
+                  {recordedRun ? (
+                    <>
+                      <View style={styles.taxRow}>
+                        <AppText variant="body">Company payroll taxes (actual)</AppText>
+                        <AppText variant="bodyStrong">
+                          {formatMoney(Math.max(0, recordedRun.total_withdrawn - recordedRun.gross_wages))}
+                        </AppText>
+                      </View>
+                      <AppText variant="caption" color={colors.textMuted}>
+                        {`Gross ${formatMoney(recordedRun.gross_wages)} + company taxes = ${formatMoney(recordedRun.total_withdrawn)} withdrawn by Gusto (estimate was ${formatMoney(taxEstimate.employerTaxes)})`}
+                      </AppText>
+                    </>
+                  ) : (
+                    <>
+                      <View style={styles.taxRow}>
+                        <AppText variant="body">Company payroll taxes (est.)</AppText>
+                        <AppText variant="bodyStrong">{formatMoney(taxEstimate.employerTaxes)}</AppText>
+                      </View>
+                      <AppText variant="caption" color={colors.textMuted}>
+                        {`Social Security + Medicare ${formatMoney(taxEstimate.ssMedicare)} · federal unemployment ${formatMoney(taxEstimate.futa)} · Missouri unemployment ${formatMoney(taxEstimate.moUi)}`}
+                      </AppText>
+                      <View style={styles.taxRow}>
+                        <AppText variant="body">Total payroll cost</AppText>
+                        <AppText variant="bodyStrong">{formatMoney(taxEstimate.totalCost)}</AppText>
+                      </View>
+                      <AppText variant="caption" color={colors.textMuted}>
+                        wages + company taxes — about what Gusto withdraws for this period
+                      </AppText>
+                    </>
+                  )}
+                </View>
+              ) : null}
+
+              {isAdmin && accrued && accrued.periods.length > 0 ? (
+                <View style={styles.taxBox}>
+                  <View style={styles.taxRow}>
+                    <AppText variant="bodyStrong">Accrued, not yet paid</AppText>
+                    <AppText variant="bodyStrong" color={colors.danger}>
+                      {formatMoney(accrued.total)}
+                    </AppText>
+                  </View>
+                  <AppText variant="caption" color={colors.textMuted}>
+                    {`${accrued.periods.map((x) => `${x.period.label}: ${formatMoney(x.estimate.totalCost)}`).join(' · ')} — wages ${formatMoney(accrued.gross)} + company taxes ${formatMoney(accrued.employerTaxes)} (est.)`}
+                  </AppText>
+                </View>
+              ) : null}
 
               {period.pre ? (
                 <AppText variant="caption" color={colors.textMuted}>
@@ -809,6 +865,18 @@ const styles = StyleSheet.create({
   },
   stateChip: {
     marginTop: 2,
+  },
+  taxBox: {
+    gap: 2,
+    padding: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+  },
+  taxRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    gap: spacing.md,
   },
   tileRow: {
     flexDirection: 'row',

@@ -143,7 +143,10 @@ for (const j of projects) {
 const invoiceForJob = new Map(invoices.map((i) => [i.jobId, i]));
 
 // --------------------------------------------------------------------------- bank groups
-const bankRows = entries.filter((e) => inBooks(e) && e.paid_from_bank && ['expense', 'payment', 'investment'].includes(e.type));
+// Expenses reimbursed through a Gusto run (extracted.paid_via_payroll = receipt id) leave the bank
+// inside that run's withdrawal, so they ride on the payroll journal entry, not a bank group.
+const viaPayroll = (e) => Boolean(ext(e).paid_via_payroll);
+const bankRows = entries.filter((e) => inBooks(e) && e.paid_from_bank && !viaPayroll(e) && ['expense', 'payment', 'investment'].includes(e.type));
 const groups = new Map();
 for (const e of bankRows) {
   const ref = ext(e).bank_ref ?? `row:${e.id}`;
@@ -281,8 +284,14 @@ for (const run of runs) {
   // Rounding: the job split is rounded per line; true the debits up to the credit on the largest one.
   const drift = money(withdrawn - lines.reduce((s, l) => s + l.amount, 0));
   if (drift !== 0 && lines.length) lines.reduce((a, b) => (b.amount > a.amount ? b : a)).amount = money(lines.reduce((a, b) => (b.amount > a.amount ? b : a)).amount + drift);
-  lines.push({ posting: 'Credit', account: ACCT.bank, amount: withdrawn });
-  journals.push({ kind: 'payroll', appId: run.id, date: run.payday, receipt: run.receipt_id, gross, withdrawn, lines });
+  // Reimbursements paid in this run (same Chase withdrawal).
+  const reimb = entries.filter((e) => e.type === 'expense' && ext(e).paid_via_payroll === run.receipt_id);
+  for (const e of reimb) {
+    lines.push({ posting: 'Debit', account: BOOK_QBO[ext(e).book_account ?? 'uncategorized'], project: isOnJob(e.job_id) ? jobById.get(e.job_id).job_number : null, amount: money(e.amount), description: e.description });
+  }
+  const bankOut = money(withdrawn + reimb.reduce((s, e) => s + money(e.amount), 0));
+  lines.push({ posting: 'Credit', account: ACCT.bank, amount: bankOut });
+  journals.push({ kind: 'payroll', appId: run.id, date: run.payday, receipt: run.receipt_id, gross, withdrawn: bankOut, lines, extraAppIds: reimb.map((e) => e.id) });
 }
 
 // --------------------------------------------------------------------------- checks
