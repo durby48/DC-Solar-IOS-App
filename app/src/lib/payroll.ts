@@ -192,15 +192,43 @@ export function listPayrollPeriods(todayIso?: string): PayrollPeriod[] {
 
 /** One normalized hour entry from either source. */
 export interface RawHourEntry {
+  /** Row id in its source table (employee_hours or time_entries). */
+  id: string;
+  /** 'logged' = employee_hours (total hours), 'clock' = a completed time_entries shift. */
+  source: 'logged' | 'clock';
+  /**
+   * Who it belongs to. Grouping key on the Hours tab: the login email when the
+   * row has one, else the stored name. (2026-11-07: grouping by the NAME stored
+   * on each row split one person into two cards whenever a logged row's name
+   * differed from the roster's — Harry's hours "not synced".)
+   */
+  personKey: string;
+  email: string | null;
   name: string;
   date: string; // YYYY-MM-DD
   hours: number;
   rate: number | null;
   jobId: string | null;
+  note: string | null;
+  /** Clock shifts only. */
+  clockIn?: string;
+  clockOut?: string;
+}
+
+/** A punch still open (clocked in, never out). Shown so it can be fixed; never counted. */
+export interface OpenShift {
+  id: string;
+  personKey: string;
+  email: string | null;
+  name: string;
+  clockIn: string;
+  jobId: string | null;
+  note: string | null;
 }
 
 export interface HoursData {
   entries: RawHourEntry[];
+  openShifts: OpenShift[];
   /** job id → DC-26### (or name) label. */
   jobLabels: Map<string, string>;
 }
@@ -220,11 +248,11 @@ export async function fetchHoursData(): Promise<HoursData | null> {
     const [hoursRes, timeRes, employeesRes, jobsRes] = await Promise.all([
       supabase
         .from('employee_hours')
-        .select('employee, email, hours, rate, occurred_on, job_id')
+        .select('id, employee, email, hours, rate, occurred_on, job_id, description')
         .eq('company', COMPANY),
       supabase
         .from('time_entries')
-        .select('employee, clock_in, clock_out, job_id')
+        .select('id, employee, clock_in, clock_out, job_id, note')
         .eq('company', COMPANY),
       supabase.from('employees').select('email, display_name, pay_rate').eq('is_test', false),
       supabase.from('jobs').select('id, job_number, name').eq('company', COMPANY),
@@ -254,50 +282,83 @@ export async function fetchHoursData(): Promise<HoursData | null> {
     }
 
     const entries: RawHourEntry[] = [];
+    const openShifts: OpenShift[] = [];
+
+    // Rows with no email (P&L import / console rows) can still match a roster
+    // person by name, so they join that person's card instead of a twin.
+    const emailByName = new Map<string, string>();
+    for (const [email, name] of nameByEmail) emailByName.set(name.trim().toLowerCase(), email);
 
     for (const row of (hoursRes.data ?? []) as {
+      id: string;
       employee: string | null;
       email: string | null;
       hours: unknown;
       rate: unknown;
       occurred_on: string | null;
       job_id: string | null;
+      description: string | null;
     }[]) {
       const hours = num(row.hours);
       if (!(hours > 0) || !row.occurred_on) continue;
-      const email = row.email?.toLowerCase();
+      const email =
+        row.email?.toLowerCase() ??
+        (row.employee ? (emailByName.get(row.employee.trim().toLowerCase()) ?? null) : null);
+      // The roster name wins over the name stored on the row: one person, one card.
       const name =
-        row.employee ?? (email ? (nameByEmail.get(email) ?? row.email) : null) ?? 'Unassigned';
+        (email ? nameByEmail.get(email) : undefined) ?? row.employee ?? row.email ?? 'Unassigned';
       const rate = num(row.rate) > 0 ? num(row.rate) : (email ? rateByEmail.get(email) : undefined);
       entries.push({
+        id: row.id,
+        source: 'logged',
+        personKey: email ?? `name:${name.trim().toLowerCase()}`,
+        email,
         name,
         date: row.occurred_on,
         hours,
         rate: rate ?? null,
         jobId: row.job_id,
+        note: row.description,
       });
     }
 
     for (const row of (timeRes.data ?? []) as {
+      id: string;
       employee: string | null; // email
       clock_in: string | null;
       clock_out: string | null;
       job_id: string | null;
+      note: string | null;
     }[]) {
-      if (!row.clock_in || !row.clock_out) continue; // only completed shifts
+      if (!row.clock_in) continue;
+      const email = row.employee?.toLowerCase() ?? null;
+      const name = (email ? nameByEmail.get(email) : null) ?? row.employee ?? 'Unassigned';
+      const personKey = email ?? `name:${name.trim().toLowerCase()}`;
+      if (!row.clock_out) {
+        // Still clocked in. Never counted (no end), but surfaced so an admin
+        // can close or delete it — a forgotten clock-out used to just vanish.
+        openShifts.push({ id: row.id, personKey, email, name, clockIn: row.clock_in, jobId: row.job_id, note: row.note });
+        continue;
+      }
       const ms = new Date(row.clock_out).getTime() - new Date(row.clock_in).getTime();
       if (!Number.isFinite(ms) || ms <= 0) continue;
-      const email = row.employee?.toLowerCase() ?? null;
       entries.push({
-        name: (email ? nameByEmail.get(email) : null) ?? row.employee ?? 'Unassigned',
+        id: row.id,
+        source: 'clock',
+        personKey,
+        email,
+        name,
         date: localDay(row.clock_in),
         hours: ms / 3_600_000,
         rate: email ? (rateByEmail.get(email) ?? null) : null,
         jobId: row.job_id,
+        note: row.note,
+        clockIn: row.clock_in,
+        clockOut: row.clock_out,
       });
     }
 
-    return { entries, jobLabels };
+    return { entries, openShifts, jobLabels };
   } catch {
     return null;
   }
@@ -319,7 +380,14 @@ export interface EmployeeJobHours {
 }
 
 export interface EmployeeHoursSummary {
+  /** Stable per-person key (email, or name: when the rows carry no email). */
+  key: string;
+  email: string | null;
   name: string;
+  /** Every entry inside the viewed period, newest first — what the admin edits. */
+  periodEntries: RawHourEntry[];
+  /** Punches still open for this person (any date). */
+  openShifts: OpenShift[];
   ytdHours: number;
   periodHours: number;
   /** Dollars for the period: hours × rate per entry. */
@@ -346,25 +414,48 @@ export function summarizePeriod(data: HoursData, period: PayrollPeriod): HoursOv
     paidHours: number;
   }
   interface Bucket {
+    email: string | null;
+    name: string;
     ytdHours: number;
     periodHours: number;
     periodPay: number;
     periodPayIncomplete: boolean;
     jobs: Map<string, JobBucket>; // '' = no job
+    periodEntries: RawHourEntry[];
+    openShifts: OpenShift[];
   }
   const people = new Map<string, Bucket>();
+  const bucketFor = (key: string, email: string | null, name: string): Bucket => {
+    let b = people.get(key);
+    if (!b) {
+      b = {
+        email,
+        name,
+        ytdHours: 0,
+        periodHours: 0,
+        periodPay: 0,
+        periodPayIncomplete: false,
+        jobs: new Map(),
+        periodEntries: [],
+        openShifts: [],
+      };
+      people.set(key, b);
+    }
+    return b;
+  };
+
+  for (const shift of data.openShifts ?? []) {
+    bucketFor(shift.personKey, shift.email, shift.name).openShifts.push(shift);
+  }
 
   for (const entry of data.entries) {
-    let b = people.get(entry.name);
-    if (!b) {
-      b = { ytdHours: 0, periodHours: 0, periodPay: 0, periodPayIncomplete: false, jobs: new Map() };
-      people.set(entry.name, b);
-    }
+    const b = bucketFor(entry.personKey, entry.email, entry.name);
     if (entry.date.startsWith(year)) b.ytdHours += entry.hours;
 
     const inPeriod = entry.date >= period.start && entry.date <= period.end;
     const beforePeriod = period.start !== '' && entry.date < period.start;
     if (inPeriod) {
+      b.periodEntries.push(entry);
       b.periodHours += entry.hours;
       if (entry.rate != null && entry.rate > 0) b.periodPay += entry.hours * entry.rate;
       else b.periodPayIncomplete = true;
@@ -379,8 +470,14 @@ export function summarizePeriod(data: HoursData, period: PayrollPeriod): HoursOv
   }
 
   const employees: EmployeeHoursSummary[] = [...people.entries()]
-    .map(([name, b]) => ({
-      name,
+    .map(([key, b]) => ({
+      key,
+      email: b.email,
+      name: b.name,
+      periodEntries: [...b.periodEntries].sort(
+        (x, y) => y.date.localeCompare(x.date) || (y.clockIn ?? '').localeCompare(x.clockIn ?? ''),
+      ),
+      openShifts: b.openShifts,
       ytdHours: b.ytdHours,
       periodHours: b.periodHours,
       periodPay: b.periodPay,
@@ -395,7 +492,7 @@ export function summarizePeriod(data: HoursData, period: PayrollPeriod): HoursOv
         }))
         .sort((a, b2) => b2.periodHours - a.periodHours || b2.paidHours - a.paidHours),
     }))
-    .filter((e) => e.periodHours > 0 || e.ytdHours > 0)
+    .filter((e) => e.periodHours > 0 || e.ytdHours > 0 || e.openShifts.length > 0)
     .sort((a, b2) => b2.periodHours - a.periodHours || b2.ytdHours - a.ytdHours);
 
   let totalPeriodHours = 0;

@@ -3,6 +3,7 @@ import { Stack, router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, TextInput, View } from 'react-native';
 
+import { HourEntryEditor, type EditableHourEntry } from '@/components/HourEntryEditor';
 import { LogHoursSheet } from '@/components/LogHoursSheet';
 import {
   AnimatedPressable,
@@ -30,9 +31,13 @@ import {
   runsForPeriod,
   summarizePeriod,
   type HoursData,
+  type OpenShift,
   type PayrollRun,
+  type RawHourEntry,
   type PayrollState,
 } from '@/lib/payroll';
+import { zonedDate, zonedTime } from '@/lib/hoursAdmin';
+import { fetchJobOptions, type JobOption } from '@/lib/myhours';
 import { useRole } from '@/lib/role';
 
 function formatHours(hours: number): string {
@@ -149,6 +154,12 @@ export default function HoursScreen() {
   // row per ticked person.
   const [logOpen, setLogOpen] = useState(false);
   const [logMessage, setLogMessage] = useState<string | null>(null);
+  // Admin editing (2026-11-07): one entry open at a time, keyed `source:id`.
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  // "Add hours for <person>": the person's card key while its sheet is open.
+  const [addForKey, setAddForKey] = useState<string | null>(null);
+  const [cardMessage, setCardMessage] = useState<{ key: string; text: string } | null>(null);
+  const [jobOptions, setJobOptions] = useState<JobOption[]>([]);
 
   const periods = useMemo(() => listPayrollPeriods(), []);
   // Default to the current (last) period.
@@ -159,15 +170,28 @@ export default function HoursScreen() {
 
   const load = useCallback(async () => {
     if (role?.isAdmin) {
-      const [hoursData, runList] = await Promise.all([fetchHoursData(), fetchPayrollRuns()]);
+      const [hoursData, runList, jobList] = await Promise.all([
+        fetchHoursData(),
+        fetchPayrollRuns(),
+        fetchJobOptions(),
+      ]);
       setData(hoursData);
       setRuns(runList);
+      setJobOptions(jobList);
     } else if (role) {
       // Own rows only. Clock-in shifts carry the email and logged hours the
       // name, so fold them into one card.
       const own = await fetchHoursData();
       const me = role.displayName || 'My hours';
-      setData(own ? { ...own, entries: own.entries.map((e) => ({ ...e, name: me })) } : null);
+      setData(
+        own
+          ? {
+              ...own,
+              entries: own.entries.map((e) => ({ ...e, name: me, personKey: 'me' })),
+              openShifts: own.openShifts.map((o) => ({ ...o, name: me, personKey: 'me' })),
+            }
+          : null,
+      );
       setRuns([]);
     } else {
       setData(null);
@@ -290,6 +314,89 @@ export default function HoursScreen() {
   );
 
   const chipStyle = stateChipStyle(state);
+
+  const jobLabel = (jobId: string | null) =>
+    jobId ? (data?.jobLabels.get(jobId) ?? 'Job') : 'No job';
+
+  const entryEditable = (entry: RawHourEntry): EditableHourEntry =>
+    entry.source === 'clock'
+      ? {
+          kind: 'clock',
+          id: entry.id,
+          clockIn: entry.clockIn as string,
+          clockOut: entry.clockOut ?? null,
+          jobId: entry.jobId,
+          note: entry.note,
+        }
+      : { kind: 'logged', id: entry.id, hours: entry.hours, date: entry.date, jobId: entry.jobId, note: entry.note };
+
+  const openShiftEditable = (shift: OpenShift): EditableHourEntry => ({
+    kind: 'clock',
+    id: shift.id,
+    clockIn: shift.clockIn,
+    clockOut: null,
+    jobId: shift.jobId,
+    note: shift.note,
+  });
+
+  /** One tappable entry row; tapping opens the inline editor in its place. */
+  const renderEntry = (
+    personKey: string,
+    entry: EditableHourEntry,
+    view: { title: string; job: string; hours: string; note: string | null; warn: boolean },
+  ) => {
+    const key = `${entry.kind}:${entry.id}`;
+    if (editingKey === key) {
+      return (
+        <HourEntryEditor
+          key={key}
+          entry={entry}
+          jobs={jobOptions}
+          editorEmail={role?.email ?? null}
+          onCancel={() => setEditingKey(null)}
+          onDone={(what) => {
+            setEditingKey(null);
+            setCardMessage({ key: personKey, text: what === 'deleted' ? 'Entry deleted.' : 'Entry saved.' });
+            void load();
+          }}
+        />
+      );
+    }
+    return (
+      <AnimatedPressable
+        key={key}
+        onPress={() => {
+          setAddForKey(null);
+          setCardMessage(null);
+          setEditingKey(key);
+        }}
+        haptic="tapLight"
+        scaleTo={0.99}
+        accessibilityRole="button"
+        accessibilityLabel={`Edit ${view.title}, ${view.hours}`}
+        style={({ pressed }) => [styles.entryRow, pressed && { opacity: 0.6 }]}>
+        <Ionicons
+          name={entry.kind === 'clock' ? 'time-outline' : 'create-outline'}
+          size={14}
+          color={view.warn ? colors.danger : colors.textMuted}
+        />
+        <View style={styles.entryBody}>
+          <AppText variant="caption" color={colors.textPrimary} numberOfLines={1}>
+            {view.title} · {view.job}
+          </AppText>
+          {view.note ? (
+            <AppText variant="caption" color={colors.textMuted} numberOfLines={1}>
+              {view.note}
+            </AppText>
+          ) : null}
+        </View>
+        <AppText variant="bodyStrong" color={view.warn ? colors.danger : colors.textPrimary} style={styles.jobNumber}>
+          {view.hours}
+        </AppText>
+        <Ionicons name="chevron-forward" size={12} color={colors.textMuted} />
+      </AnimatedPressable>
+    );
+  };
 
   const openJob = (jobId: string) => {
     router.push({ pathname: '/job/[id]', params: { id: jobId, focus: 'hours' } });
@@ -661,12 +768,12 @@ export default function HoursScreen() {
             {overview.employees.length === 0
               ? placeholder(isAdmin ? 'No hours in this period.' : 'You have no hours in this period.')
               : overview.employees.map((emp, index) => {
-                  const open = openNames.has(emp.name);
+                  const open = openNames.has(emp.key);
                   return (
-                    <FadeInUp key={emp.name} index={index}>
+                    <FadeInUp key={emp.key} index={index}>
                       <Card style={styles.employeeCard}>
                         <AnimatedPressable
-                          onPress={() => toggle(emp.name)}
+                          onPress={() => toggle(emp.key)}
                           haptic="tapLight"
                           scaleTo={0.995}
                           accessibilityRole="button"
@@ -816,6 +923,87 @@ export default function HoursScreen() {
                               already-paid periods — carry-over jobs show both sides.
                               Tap a job to open it at its hours.
                             </AppText>
+                          </View>
+                        ) : null}
+
+                        {open && isAdmin ? (
+                          <View style={styles.jobList}>
+                            {emp.openShifts.length > 0 ? (
+                              <>
+                                <AppText variant="section" color={colors.danger}>
+                                  Still clocked in — not counted until closed
+                                </AppText>
+                                {emp.openShifts.map((shift) =>
+                                  renderEntry(emp.key, openShiftEditable(shift), {
+                                    title: `Since ${formatPayrollDate(zonedDate(shift.clockIn))} ${zonedTime(shift.clockIn)}`,
+                                    job: jobLabel(shift.jobId),
+                                    hours: 'open',
+                                    note: shift.note,
+                                    warn: true,
+                                  }),
+                                )}
+                              </>
+                            ) : null}
+                            <AppText variant="section" color={colors.textMuted}>
+                              {period.current ? 'Entries this payroll' : 'Entries this period'} — tap to edit
+                            </AppText>
+                            {emp.periodEntries.length === 0 ? (
+                              <AppText variant="caption" color={colors.textMuted}>
+                                No entries in this period.
+                              </AppText>
+                            ) : (
+                              emp.periodEntries.map((entry) =>
+                                renderEntry(emp.key, entryEditable(entry), {
+                                  title:
+                                    entry.source === 'clock' && entry.clockIn && entry.clockOut
+                                      ? `${formatPayrollDate(entry.date)} · ${zonedTime(entry.clockIn)}–${zonedTime(entry.clockOut)}`
+                                      : formatPayrollDate(entry.date),
+                                  job: jobLabel(entry.jobId),
+                                  hours: formatHours(entry.hours),
+                                  note: entry.note,
+                                  warn: false,
+                                }),
+                              )
+                            )}
+                            {cardMessage?.key === emp.key ? (
+                              <AppText variant="caption" color={colors.success}>
+                                {cardMessage.text}
+                              </AppText>
+                            ) : null}
+                            {addForKey === emp.key && emp.email ? (
+                              <LogHoursSheet
+                                title={`Add hours for ${emp.name}`}
+                                defaultEmails={[emp.email]}
+                                onCancel={() => setAddForKey(null)}
+                                onSaved={(outcome) => {
+                                  if (outcome.ok) setAddForKey(null);
+                                  setCardMessage({
+                                    key: emp.key,
+                                    text: `${formatHours(outcome.hours)} added on ${formatPayrollDate(outcome.occurredOn)}.`,
+                                  });
+                                  void load();
+                                }}
+                              />
+                            ) : emp.email ? (
+                              <View style={styles.logRow}>
+                                <Button
+                                  label={`Add hours for ${emp.name.split(' ')[0]}`}
+                                  icon="add-circle"
+                                  size="sm"
+                                  variant="secondary"
+                                  onPress={() => {
+                                    setEditingKey(null);
+                                    setCardMessage(null);
+                                    setAddForKey(emp.key);
+                                  }}
+                                />
+                              </View>
+                            ) : (
+                              <AppText variant="caption" color={colors.textMuted}>
+                                These rows have no login attached, so new hours can&apos;t be added to this name —
+                                add them under the person&apos;s roster name instead.
+                              </AppText>
+                            )}
                           </View>
                         ) : null}
                       </Card>
@@ -1018,5 +1206,17 @@ const styles = StyleSheet.create({
   },
   jobListHint: {
     marginTop: spacing.xs,
+  },
+  entryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs + 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  entryBody: {
+    flex: 1,
+    gap: 1,
   },
 });
