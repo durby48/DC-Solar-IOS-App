@@ -100,6 +100,25 @@ let pending: Pending | null = null;
 const handled = new Set<string>();
 const listeners = new Set<() => void>();
 
+/**
+ * Take the queued tap (and mark it handled) in ONE plain function.
+ *
+ * 2026-11-08: this used to be inline in the release effect —
+ *   const next = pending; pending = null; handled.add(next.id);
+ *   setTimeout(() => navigateToTarget(next.target), 150);
+ * React Compiler treated the module variable as stable and folded `next`
+ * back into `pending`, shipping `p=null, d.add(p.id)` and
+ * `navigateToTarget(p.target)`: every notification tap crashed with
+ * "Cannot read property 'id' of null" (Devon's and Ken's phones, every
+ * type). Keep the read-and-clear here, outside any component or hook.
+ */
+function takePending(): Pending | null {
+  const next = pending;
+  pending = null;
+  if (next) handled.add(next.id);
+  return next;
+}
+
 function notifyListeners(): void {
   for (const fn of listeners) fn();
 }
@@ -160,6 +179,9 @@ function hasLanded(navState: ReturnType<typeof useRootNavigationState>): boolean
  * response, and releases the queue when the app is ready for it.
  */
 export function useNotificationRouting(): void {
+  // Opt out of React Compiler: this hook reads and writes module state
+  // (`pending`), which the compiler assumes never changes (see takePending).
+  'use no memo';
   const navState = useRootNavigationState();
   const pathname = usePathname();
   const [sessionReady, setSessionReady] = useState(false);
@@ -213,11 +235,11 @@ export function useNotificationRouting(): void {
     // Home, then fired it the moment they opened another tab (2026-09-11).
     const landed = hasLanded(navState);
     if (!navReady || !sessionReady || !landed) return;
-    const next = pending;
-    pending = null;
-    handled.add(next.id);
+    const next = takePending();
+    if (!next) return;
+    const target = next.target;
     // One tick after landing, so a `replace()` still in flight cannot bury it.
-    const timer = setTimeout(() => navigateToTarget(next.target), 150);
+    const timer = setTimeout(() => navigateToTarget(target), 150);
     return () => clearTimeout(timer);
   }, [navState?.key, pathname, sessionReady, version]);
 }
