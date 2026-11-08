@@ -4,6 +4,8 @@ Start every session with `git pull --ff-only` (two developers push to `main`), t
 
 On Devon's Windows PC the repo lives at `C:\Durbin Enterprises\DC-Solar-IOS-App` — never move it or `node_modules` under OneDrive (Files-On-Demand breaks Metro).
 
+**EAS from a cloud session (or any machine not logged in to Expo):** an Expo access token ("claude", owner of `durby` / `dc-solar`) is in `C:\Durbin Enterprises\config\secrets\expo-token.txt`. Read it on Devon's PC and pass it as `EXPO_TOKEN=… npx eas-cli …` — never commit it. Before `expo export` / `eas update` from a fresh clone, run `eas env:pull --environment production` in `app/` (writes the gitignored `.env.local`; without it the export fails "supabaseUrl is required").
+
 ## Database changes
 
 Migrations go in `supabase/migrations/`, and **you apply them yourself** — Devon no longer pastes them by hand (changed 2026-08-07). Use the Supabase Management API with the personal access token — Mac: `~/Desktop/DC Solar LLC/secrets/supabase-access-token.txt`; Devon's Windows PC: `C:\Durbin Enterprises\config\secrets\supabase-access-token.txt` (pass it to `scripts\db\query.ps1 -TokenFile …`); Carson's PC: `C:\Users\carso\Desktop\DC Solar LLC\secrets\`. The file documents the exact call:
