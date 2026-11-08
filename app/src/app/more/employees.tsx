@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -128,6 +129,9 @@ export default function EmployeesScreen() {
   const [rowNotice, setRowNotice] = useState<{ email: string; text: string } | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const isOwner = gate.role?.role === 'owner';
+  /** Pay-rate field text per employee id while it is being edited (2026-11-08). */
+  const [rateDrafts, setRateDrafts] = useState<Map<string, string>>(new Map());
+  const [rateNotice, setRateNotice] = useState<{ id: string; text: string } | null>(null);
 
   /**
    * Load one employee's paystubs on demand. Admins read the whole company
@@ -301,6 +305,49 @@ export default function EmployeesScreen() {
     setEmployees((list) => list.map((e) => (e.id === employee.id ? { ...e, role: next } : e)));
   };
 
+  // Hourly rate (2026-11-08). employees has no write policies; set_pay_rate()
+  // is admin-only, and only the owner may change an owner's / operator's rate
+  // (or an admin's own). New logged hours pick the rate up on insert; clock
+  // shifts are costed at the current rate wherever they are read.
+  const canEditRate = (employee: EmployeeRow): boolean => {
+    if (isOwner) return true;
+    if (employee.email.toLowerCase() === (gate.role?.email ?? '').toLowerCase()) return false;
+    return employee.role !== 'owner' && employee.role !== 'operator';
+  };
+
+  const savePayRate = async (employee: EmployeeRow) => {
+    const draft = (rateDrafts.get(employee.id) ?? '').replace(/[$,\s]/g, '').replace(/\/h(ou)?r$/i, '');
+    let next: number | null = null;
+    if (draft !== '') {
+      next = Number(draft);
+      if (!Number.isFinite(next) || next <= 0 || next > 500) {
+        setRowError('Enter an hourly rate like 22 or 22.50.');
+        return;
+      }
+      next = Math.round(next * 100) / 100;
+    }
+    setRowBusy(`rate:${employee.email}`);
+    setRowError(null);
+    setRateNotice(null);
+    const { data, error } = await supabase.rpc('set_pay_rate', { p_email: employee.email, p_rate: next });
+    setRowBusy(null);
+    if (error) {
+      setRowError(error.message);
+      return;
+    }
+    const saved = data != null ? Number(data) : null;
+    setEmployees((list) => list.map((e) => (e.id === employee.id ? { ...e, pay_rate: saved } : e)));
+    setRateDrafts((prev) => {
+      const m = new Map(prev);
+      m.delete(employee.id);
+      return m;
+    });
+    setRateNotice({
+      id: employee.id,
+      text: saved == null ? 'Pay rate cleared.' : `Pay rate saved: ${formatPayRate(saved)}.`,
+    });
+  };
+
   const statusLine = (employee: EmployeeRow): { text: string; invited: boolean } | null => {
     const st = statuses.get(employee.email.toLowerCase());
     if (!st) return null;
@@ -423,6 +470,51 @@ export default function EmployeesScreen() {
                   </Pressable>
                 ))}
               </View>
+            ) : null}
+            {/* Hourly rate (2026-11-08). */}
+            <View style={styles.rateRow}>
+              <Text style={styles.roleLabel}>Pay rate</Text>
+              {canEditRate(employee) ? (
+                <>
+                  <View style={styles.rateInputWrap}>
+                    <Text style={styles.rateAffix}>$</Text>
+                    <TextInput
+                      value={rateDrafts.get(employee.id) ?? (employee.pay_rate != null ? String(employee.pay_rate) : '')}
+                      onChangeText={(t) => {
+                        setRateNotice(null);
+                        setRateDrafts((prev) => new Map(prev).set(employee.id, t));
+                      }}
+                      onSubmitEditing={() => void savePayRate(employee)}
+                      placeholder="0.00"
+                      placeholderTextColor={colors.inkSoft}
+                      keyboardType="decimal-pad"
+                      returnKeyType="done"
+                      editable={rowBusy === null}
+                      accessibilityLabel={`Hourly pay rate for ${employee.display_name ?? employee.email}`}
+                      style={styles.rateInput}
+                    />
+                    <Text style={styles.rateAffix}>/hr</Text>
+                  </View>
+                  {rateDrafts.has(employee.id) ? (
+                    <Pressable
+                      onPress={() => void savePayRate(employee)}
+                      disabled={rowBusy !== null}
+                      accessibilityRole="button"
+                      style={({ pressed }) => [styles.roleChoice, styles.roleChoiceOn, pressed && styles.rowPressed]}>
+                      <Text style={[styles.roleChoiceText, styles.roleChoiceTextOn]}>
+                        {rowBusy === `rate:${employee.email}` ? 'Saving…' : 'Save'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </>
+              ) : (
+                <Text style={styles.payText}>{pay ?? 'Not set'} · only the owner can change this</Text>
+              )}
+            </View>
+            {rateNotice && rateNotice.id === employee.id ? (
+              <Text style={styles.noticeText}>
+                {rateNotice.text} Applies to hours logged from now on and to every clock-in shift.
+              </Text>
             ) : null}
             {/* Field crew (2026-10-06): counts toward how many service
                 visits sales can book on a day. Not for sales reps. */}
@@ -777,4 +869,15 @@ const styles = StyleSheet.create({
   roleChoiceOn: { backgroundColor: colors.violet },
   roleChoiceText: { color: colors.ink, fontSize: 12, fontWeight: '700' },
   roleChoiceTextOn: { color: colors.white },
+  // Pay rate editor (2026-11-08).
+  rateRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingVertical: 4 },
+  rateInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceSunk,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.sm,
+  },
+  rateAffix: { color: colors.inkSoft, fontSize: 14, fontWeight: '700' },
+  rateInput: { color: colors.ink, fontSize: 15, fontWeight: '700', minWidth: 64, paddingVertical: 6, paddingHorizontal: 4 },
 });
