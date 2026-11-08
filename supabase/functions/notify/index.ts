@@ -461,7 +461,25 @@ Deno.serve(async (req) => {
     return json(400, { error: 'invalid JSON' });
   }
 
-  // Cron (notify-reminders): task-due and appointment reminders.
+  // Cron (2026-11-08): a `notify_ticks` row every 5 minutes, delivered by
+  // the ordinary notify_webhook() trigger — so the notify secret lives only
+  // where it already did. 'reminders' runs here; 'email_watch' calls
+  // crm-email-watch with this function's own NOTIFY_SECRET.
+  if (payload.table === 'notify_ticks' && payload.type === 'INSERT') {
+    const kind = (payload.record as Record<string, unknown> | undefined)?.kind;
+    if (kind === 'reminders') return json(200, await runReminders());
+    if (kind === 'email_watch') {
+      const url = Deno.env.get('SUPABASE_URL');
+      if (!url) return json(500, { error: 'no SUPABASE_URL' });
+      const res = await fetch(`${url}/functions/v1/crm-email-watch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-notify-secret': secret },
+        body: '{}',
+      }).catch(() => null);
+      return json(200, { emailWatch: res?.status ?? 'failed' });
+    }
+    return json(200, { skipped: 'unknown tick' });
+  }
   if (payload.action === 'reminders') return json(200, await runReminders());
 
   // --- Email payloads: log parseable transactions into finance_entries ---
@@ -537,7 +555,9 @@ Deno.serve(async (req) => {
     sanitizeTarget({ type: 'schedule', jobId, day }) ?? jobTarget(jobId);
   const src = table && op ? `${table}:${op}` : undefined;
   const rid = typeof record?.id === 'string' ? record.id : undefined;
-  const txid = typeof payload.txid === 'string' ? payload.txid : '';
+  // A per-change stamp for dedupe keys: the row's updated_at when it has one
+  // (tasks, leads, appointments), else the transaction id if a caller sent it.
+  const stamp = String(record?.updated_at ?? payload.txid ?? '');
   const lower = (v: unknown): string => String(v ?? '').toLowerCase();
 
   if (!message && table === 'job_assignments' && record?.email) {
@@ -562,7 +582,7 @@ Deno.serve(async (req) => {
         audience: 'admins',
         target: scheduleTarget(record.job_id, centralToday()),
         pref: 'schedule',
-        dedupe: rid ? `unassign:${rid}:${txid}` : undefined,
+        dedupe: rid ? `unassign:${rid}` : undefined,
         source: src,
       };
     }
@@ -633,7 +653,7 @@ Deno.serve(async (req) => {
       audience: 'admins',
       target: rid ? { type: 'lead', leadId: rid } : undefined,
       pref: 'new_prospects',
-      dedupe: rid ? `lead_assigned:${rid}:${lower(record.assigned_to)}:${txid}` : undefined,
+      dedupe: rid ? `lead_assigned:${rid}:${lower(record.assigned_to)}:${stamp}` : undefined,
       source: src,
     };
   }
@@ -659,7 +679,7 @@ Deno.serve(async (req) => {
         audience: 'admins',
         target,
         pref: 'tasks',
-        dedupe: rid ? `task_assigned:${rid}:${assignee}:${txid}` : undefined,
+        dedupe: rid ? `task_assigned:${rid}:${assignee}:${stamp}` : undefined,
         source: src,
       };
     }
@@ -721,7 +741,7 @@ Deno.serve(async (req) => {
           audience: 'admins',
           target,
           pref,
-          dedupe: `appt:${String(now?.id)}:${op}:${txid}`,
+          dedupe: `appt:${String(now?.id)}:${op}:${op === 'DELETE' ? '' : stamp}`,
           source: src,
         };
       }
@@ -748,7 +768,10 @@ Deno.serve(async (req) => {
             ? `${label} moved to ${when}.`
             : `${label}: the ${prettyDate(record.work_date)} work day was removed.`;
       let day = record.work_date;
-      let dedupe = `sched:${rid}:${op}:${txid}`;
+      let dedupe =
+        op === 'UPDATE'
+          ? `sched:${rid}:UPDATE:${String(record.work_date)}:${String(record.start_time ?? '')}`
+          : `sched:${rid}:${op}`;
       // "Several days" (2026-10-14) inserts many days in ONE statement: they
       // share created_at exactly (now() is the transaction's start). ONE push
       // for the batch, naming the range. 2026-11-08: the batch is found by

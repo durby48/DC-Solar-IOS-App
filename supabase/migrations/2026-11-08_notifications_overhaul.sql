@@ -12,21 +12,18 @@
 --    "your own email" and the existing row was the previous person's), so a
 --    shared phone kept getting the previous person's pushes.
 -- 3. Mute switches: staff_profiles.notify_tasks / notify_schedule.
--- 4. `notify_webhook()` reads its secret from Vault (`notify_secret`), sends
---    the transaction id (multi-day schedule batching), and stays QUIET while
---    `app.silent_notify = 'on'` (data-fix migrations: `set local
---    app.silent_notify = 'on';`). `notify_post(body)` is the same call for
---    cron jobs.
+-- 4. Payment pushes stay QUIET while `app.silent_notify = 'on'` (data-fix
+--    migrations: `set local app.silent_notify = 'on';`).
 -- 5. New push triggers:
 --      lead_appointments  moved (date/time), canceled (outcome), deleted
 --      messages           an outbound text failed / undelivered → its sender
 --      customers          card saved; a payment problem
 --      jobs               a service visit paid
--- 6. Cron: `notify-reminders` (task due, appointment 24 h / 1 h) and
---    `crm-email-watch` (customer / lead email replies), every 5 minutes.
---
--- Vault secret `notify_secret` must exist (created outside the repo with the
--- same value as the edge functions' NOTIFY_SECRET).
+-- 6. Cron, every 5 minutes: a row in `notify_ticks` ('reminders',
+--    'email_watch'). Its trigger is the existing notify_webhook() — so no new
+--    copy of the notify secret exists anywhere — and `notify` runs the task-
+--    due / appointment 24 h + 1 h reminders, or calls `crm-email-watch`
+--    (customer / lead email replies) with the secret it already holds.
 --
 -- Idempotent: safe to re-run.
 
@@ -155,47 +152,15 @@ alter table public.staff_profiles add column if not exists notify_tasks boolean 
 alter table public.staff_profiles add column if not exists notify_schedule boolean not null default true;
 
 -- ---------------------------------------------------------------------------
--- 4. notify_webhook / notify_post
+-- 4. Quiet data fixes
 -- ---------------------------------------------------------------------------
 
-create or replace function public.notify_post(p_body jsonb)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if coalesce(current_setting('app.silent_notify', true), '') = 'on' then
-    return;
-  end if;
-  perform net.http_post(
-    url := 'https://kjamxfezsathrsbztiln.supabase.co/functions/v1/notify',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'x-notify-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'notify_secret')
-    ),
-    body := p_body,
-    timeout_milliseconds := 30000
-  );
-end $$;
-revoke all on function public.notify_post(jsonb) from public, anon, authenticated;
-
-create or replace function public.notify_webhook()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  perform public.notify_post(jsonb_build_object(
-    'type', TG_OP,
-    'table', TG_TABLE_NAME,
-    'record', case when TG_OP = 'DELETE' then to_jsonb(old) else to_jsonb(new) end,
-    'old_record', case when TG_OP = 'UPDATE' then to_jsonb(old) else null end,
-    'txid', txid_current()::text
-  ));
-  return coalesce(new, old);
-end $$;
+drop trigger if exists finance_entries_notify_trg on public.finance_entries;
+create trigger finance_entries_notify_trg
+  after insert on public.finance_entries
+  for each row
+  when (coalesce(current_setting('app.silent_notify', true), '') <> 'on')
+  execute function public.notify_webhook();
 
 -- ---------------------------------------------------------------------------
 -- 5. New push triggers
@@ -266,31 +231,35 @@ create table if not exists public.crm_email_watch (
 alter table public.crm_email_watch enable row level security;
 revoke all on public.crm_email_watch from anon, authenticated;
 
-create or replace function public.crm_email_watch_call()
+-- The cron heartbeat. Rows are pruned daily.
+create table if not exists public.notify_ticks (
+  id bigint generated always as identity primary key,
+  kind text not null check (kind in ('reminders', 'email_watch')),
+  created_at timestamptz not null default now()
+);
+alter table public.notify_ticks enable row level security;
+revoke all on public.notify_ticks from anon, authenticated;
+
+drop trigger if exists notify_ticks_trg on public.notify_ticks;
+create trigger notify_ticks_trg
+  after insert on public.notify_ticks
+  for each row
+  execute function public.notify_webhook();
+
+create or replace function public.prune_notify_ticks()
 returns void
-language plpgsql
+language sql
 security definer
 set search_path = public
-as $$
-begin
-  perform net.http_post(
-    url := 'https://kjamxfezsathrsbztiln.supabase.co/functions/v1/crm-email-watch',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'x-notify-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'notify_secret')
-    ),
-    body := '{}'::jsonb,
-    timeout_milliseconds := 60000
-  );
-end $$;
-revoke all on function public.crm_email_watch_call() from public, anon, authenticated;
+as $$ delete from public.notify_ticks where created_at < now() - interval '1 day' $$;
+revoke all on function public.prune_notify_ticks() from public, anon, authenticated;
 
 do $$
 begin
   perform cron.unschedule(jobid) from cron.job where jobname in ('notify-reminders', 'crm-email-watch', 'prune-notifications');
-  perform cron.schedule('notify-reminders', '*/5 * * * *', $c$select public.notify_post('{"action":"reminders"}'::jsonb)$c$);
-  perform cron.schedule('crm-email-watch', '*/5 * * * *', $c$select public.crm_email_watch_call()$c$);
-  perform cron.schedule('prune-notifications', '17 9 * * *', $c$select public.prune_notifications()$c$);
+  perform cron.schedule('notify-reminders', '*/5 * * * *', $c$insert into public.notify_ticks (kind) values ('reminders')$c$);
+  perform cron.schedule('crm-email-watch', '1-59/5 * * * *', $c$insert into public.notify_ticks (kind) values ('email_watch')$c$);
+  perform cron.schedule('prune-notifications', '17 9 * * *', $c$select public.prune_notifications(); select public.prune_notify_ticks()$c$);
 end $$;
 
 commit;

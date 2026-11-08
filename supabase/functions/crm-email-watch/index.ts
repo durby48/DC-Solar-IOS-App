@@ -3,8 +3,8 @@
  * of the two DC Solar mailboxes.
  *
  * gmail-inbox stores nothing (it reads Gmail live), so nothing could notice
- * a reply arriving. This runs from cron (`crm-email-watch`, every 5 min, via
- * public.crm_email_watch_call()) with the NOTIFY_SECRET header, lists inbox
+ * a reply arriving. This runs from cron (`crm-email-watch`, every 5 min: a
+ * notify_ticks row → notify → here, with the NOTIFY_SECRET header), lists inbox
  * mail newer than the last run per mailbox, keeps only messages FROM an
  * email address on a lead or customer, and hands each one to `notify`
  * (recipient = the app identity that owns the mailbox; target = the Gmail
