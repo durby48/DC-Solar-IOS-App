@@ -461,6 +461,26 @@ Deno.serve(async (req) => {
     return json(400, { error: 'invalid JSON' });
   }
 
+  // Database webhooks and cron ticks come through pg_net, which gives up
+  // after 5 s (notify_webhook sets no timeout). A cold start plus a reminder
+  // sweep can take longer, so answer at once and finish in the background
+  // (2026-11-08). Direct callers (Twilio functions, scripts) still wait for
+  // the real result.
+  if (typeof payload.table === 'string' && typeof EdgeRuntime !== 'undefined') {
+    EdgeRuntime.waitUntil(
+      handle(payload, secret).catch((e) => {
+        console.error('notify: background handling failed', e instanceof Error ? e.message : String(e));
+      }),
+    );
+    return json(202, { accepted: true });
+  }
+  return handle(payload, secret);
+});
+
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
+
+async function handle(payload: Record<string, unknown>, secret: string): Promise<Response> {
+
   // Cron (2026-11-08): a `notify_ticks` row every 5 minutes, delivered by
   // the ordinary notify_webhook() trigger — so the notify secret lives only
   // where it already did. 'reminders' runs here; 'email_watch' calls
@@ -885,7 +905,7 @@ Deno.serve(async (req) => {
 
   const result = await deliver(message);
   return json(200, { ...result, logged: logged ?? undefined });
-});
+}
 
 // ---------------------------------------------------------------------------
 // Recipients, the Alerts row, the push
