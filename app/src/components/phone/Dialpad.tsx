@@ -136,6 +136,7 @@ export function Dialpad({
           style={[styles.number, numberStyle, value.length === 0 && styles.numberEmpty]}
           numberOfLines={1}
           adjustsFontSizeToFit
+          minimumFontScale={0.5}
           selectable>
           {value ? formatDialed(value) : 'Enter a number'}
         </Text>

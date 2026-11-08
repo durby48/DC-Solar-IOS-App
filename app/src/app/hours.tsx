@@ -127,6 +127,18 @@ function PagerChip({
   );
 }
 
+/**
+ * The employee tiles' number size, from the text's length (2026-11-08).
+ * These used iOS `adjustsFontSizeToFit` with no floor: a card measured mid
+ * fade-in (the third one down, reliably) shrank its numbers to a few points
+ * and never re-measured. A fixed size per length is the same on every card.
+ */
+function tileFit(text: string): { fontSize: number; lineHeight: number } {
+  const n = text.length;
+  const fontSize = n <= 8 ? 20 : n <= 9 ? 18 : n <= 10 ? 17 : n <= 11 ? 15 : 14;
+  return { fontSize, lineHeight: Math.round(fontSize * 1.25) };
+}
+
 export default function HoursScreen() {
   const role = useRole();
   // Employees (2026-10-13): everyone signed in sees the screen. Admins get the
@@ -794,9 +806,8 @@ export default function HoursScreen() {
                               </AppText>
                               <AppText
                                 variant="numeric"
-                                style={styles.tileValue}
-                                numberOfLines={1}
-                                adjustsFontSizeToFit>
+                                style={[styles.tileValue, tileFit(formatHours(emp.periodHours))]}
+                                numberOfLines={1}>
                                 {formatHours(emp.periodHours)}
                               </AppText>
                             </View>
@@ -807,9 +818,8 @@ export default function HoursScreen() {
                               </AppText>
                               <AppText
                                 variant="numeric"
-                                style={styles.tileValue}
-                                numberOfLines={1}
-                                adjustsFontSizeToFit>
+                                style={[styles.tileValue, tileFit(`${formatMoney(emp.periodPay)}${emp.periodPayIncomplete ? '*' : ''}`)]}
+                                numberOfLines={1}>
                                 {formatMoney(emp.periodPay)}
                                 {emp.periodPayIncomplete ? '*' : ''}
                               </AppText>
@@ -821,9 +831,8 @@ export default function HoursScreen() {
                               </AppText>
                               <AppText
                                 variant="numeric"
-                                style={styles.tileValue}
-                                numberOfLines={1}
-                                adjustsFontSizeToFit>
+                                style={[styles.tileValue, tileFit(formatHours(emp.ytdHours))]}
+                                numberOfLines={1}>
                                 {formatHours(emp.ytdHours)}
                               </AppText>
                             </View>

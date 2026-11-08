@@ -397,7 +397,7 @@ export function MarketingPanel({ refreshKey = 0 }: { refreshKey?: number }) {
                 {PLATFORM_METRICS[platform].map((metric) => (
                   <View key={metric.key} style={styles.metricTile}>
                     <Text style={styles.metricLabel}>{metric.label}</Text>
-                    <Text style={styles.metricValue} numberOfLines={1} adjustsFontSizeToFit>
+                    <Text style={styles.metricValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                       {formatMetric(bag[metric.key], metric.key)}
                     </Text>
                   </View>
