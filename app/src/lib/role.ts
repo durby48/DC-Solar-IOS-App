@@ -45,6 +45,12 @@ export interface RoleInfo {
 
 let cache: { email: string; info: RoleInfo | null } | null = null;
 
+/** True when the last getRole() reached an answer (cached), false after a failed read. */
+let lastReadFailed = false;
+function roleAnswered(): boolean {
+  return !lastReadFailed;
+}
+
 /** Drop the cached role (e.g. after sign-out). */
 export function clearRoleCache() {
   cache = null;
@@ -61,17 +67,36 @@ export async function getRole(): Promise<RoleInfo | null> {
     const email = data.session?.user?.email ?? null;
     if (!email) {
       cache = null;
+      lastReadFailed = false;
       return null;
     }
     if (cache && cache.email === email) return cache.info;
 
-    const { data: row, error } = await supabase
-      .from('employees')
-      .select('email, display_name, role, pay_rate, is_developer')
-      .eq('email', email)
-      .maybeSingle();
+    // A failed READ is not an answer (2026-11-08). supabase-js reports a
+    // network failure as `error`, and caching that as "not staff" locked an
+    // admin out of every admin screen until relaunch — a notification tap on
+    // a cold start, before the radio was up, showed "Admin access needed".
+    // Retry briefly; cache only a definite "no row".
+    let row: Record<string, unknown> | null = null;
+    let failed = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await supabase
+        .from('employees')
+        .select('email, display_name, role, pay_rate, is_developer')
+        .eq('email', email)
+        .maybeSingle();
+      if (!result.error) {
+        row = (result.data as Record<string, unknown> | null) ?? null;
+        failed = false;
+        break;
+      }
+      failed = true;
+      await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+    }
 
-    if (error || !row) {
+    lastReadFailed = failed;
+    if (failed) return null; // unknown: not cached, the next call asks again
+    if (!row) {
       cache = { email, info: null };
       return null;
     }
@@ -98,6 +123,7 @@ export async function getRole(): Promise<RoleInfo | null> {
     void loadStaffNames();
     return info;
   } catch {
+    lastReadFailed = true;
     return null;
   }
 }
@@ -135,9 +161,16 @@ export function useRoleGate(): { phase: 'loading' | 'ready'; role: RoleInfo | nu
       }
       const info = await getRole();
       if (cancelled) return;
+      if (!info && !roleAnswered()) {
+        // The read FAILED (offline): stay 'loading' and ask again shortly,
+        // rather than declaring "not staff" and blocking every gate.
+        retry = setTimeout(() => void resolve(), 4000);
+        return;
+      }
       setRole(info);
       setPhase('ready');
     };
+    let retry: ReturnType<typeof setTimeout> | null = null;
     void resolve();
     const { data: sub } = supabase.auth.onAuthStateChange(() => {
       if (cancelled) return;
@@ -146,6 +179,7 @@ export function useRoleGate(): { phase: 'loading' | 'ready'; role: RoleInfo | nu
     });
     return () => {
       cancelled = true;
+      if (retry) clearTimeout(retry);
       sub.subscription.unsubscribe();
     };
   }, []);
@@ -165,17 +199,24 @@ export function useRole(): RoleInfo | null {
 
   useEffect(() => {
     let cancelled = false;
-    getRole().then((info) => {
-      if (!cancelled) setRole(info);
-    });
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    const load = () => {
+      getRole().then((info) => {
+        if (cancelled) return;
+        setRole(info);
+        // A failed read (offline): try again rather than staying role-less.
+        if (!info && !roleAnswered()) retry = setTimeout(load, 4000);
+      });
+    };
+    load();
     const { data: sub } = supabase.auth.onAuthStateChange(() => {
       clearRoleCache();
-      getRole().then((info) => {
-        if (!cancelled) setRole(info);
-      });
+      if (retry) clearTimeout(retry);
+      load();
     });
     return () => {
       cancelled = true;
+      if (retry) clearTimeout(retry);
       sub.subscription.unsubscribe();
     };
   }, []);

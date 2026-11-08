@@ -1,7 +1,18 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
 
 import { composeRouteParams } from '@/components/email';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
@@ -95,6 +106,16 @@ export function EmailPane({
   /** After a send or a mailbox change: the list and the Activity need a fresh read. */
   onChanged: () => void;
 }) {
+  // The reply box sat under the iPhone keyboard (2026-11-08): the thread view
+  // now avoids it, offset by where this pane starts on screen (measured).
+  const [measuredTop, setMeasuredTop] = useState(0);
+  const measureTop = useCallback((e: LayoutChangeEvent) => {
+    // The event's target is the host view: its position on screen.
+    const host = e.target as unknown as { measureInWindow?: View['measureInWindow'] };
+    host.measureInWindow?.((_x, y) => {
+      if (Number.isFinite(y)) setMeasuredTop((prev) => (Math.abs(prev - y) < 1 ? prev : y));
+    });
+  }, []);
   const router = useRouter();
   const [view, setView] = useState<PaneView>(openThreadId ? { kind: 'thread', id: openThreadId } : { kind: 'list' });
   const [thread, setThread] = useState<MailThread | null>(null);
@@ -283,7 +304,11 @@ export function EmailPane({
 
   if (view.kind === 'thread') {
     return (
-      <View style={styles.column}>
+      <KeyboardAvoidingView
+          onLayout={measureTop}
+        style={styles.column}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? measuredTop : 0}>
         <View style={styles.bar}>
           <Pressable onPress={back} hitSlop={8} style={styles.barButton}>
             <Ionicons name="chevron-back" size={16} color={hubColors.crm.fg} />
@@ -402,7 +427,7 @@ export function EmailPane({
             </Pressable>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     );
   }
 

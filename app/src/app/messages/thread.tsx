@@ -267,3 +267,6 @@ const styles = StyleSheet.create({
   strangerText: { flex: 1, color: colors.inkSoft, fontSize: 12, fontWeight: '600' },
   pressed: { opacity: 0.6 },
 });
+
+// A render error replaces only this screen; the header / tab bar stay (2026-11-08).
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorBoundary';

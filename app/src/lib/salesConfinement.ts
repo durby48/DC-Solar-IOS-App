@@ -30,6 +30,7 @@ const ALLOWED = [
   '/saved-texts',
   '/do-not-disturb',
   '/notifications',
+  '/alerts',
   '/calling-check',
   '/lead-map',
   '/resources',

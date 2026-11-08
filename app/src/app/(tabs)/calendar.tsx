@@ -1,6 +1,6 @@
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { AppState, StyleSheet, View } from 'react-native';
 
 import { EmployeeOfMonth } from '@/components/EmployeeOfMonth';
 import { JobCard } from '@/components/JobCard';
@@ -93,6 +93,15 @@ function mondayOf(offset: number): Date {
   return d;
 }
 
+/** The week offset (0 = this week, by `mondayOf`'s Sunday rule) holding `day` (YYYY-MM-DD). */
+function weekOffsetFor(day: string): number {
+  const d = new Date(`${day}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return 0;
+  const dow = d.getDay();
+  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+  return Math.round((d.getTime() - mondayOf(0).getTime()) / (7 * 24 * 3600 * 1000));
+}
+
 /** One row of the week list: a day plus that day's schedule entries. */
 interface WeekRow {
   dateISO: string;
@@ -109,15 +118,14 @@ interface WeekRow {
  * Monday→Saturday rows for the week at `offset`. Sundays are omitted
  * entirely (nobody works Sunday), so this is always exactly 6 rows.
  */
-function buildWeekRows(entries: ScheduleEntry[], offset: number): WeekRow[] {
+function buildWeekRows(entries: ScheduleEntry[], offset: number, today: string): WeekRow[] {
   const byDate = new Map<string, ScheduleEntry[]>();
   for (const entry of entries) {
     const list = byDate.get(entry.work_date) ?? [];
     list.push(entry);
     byDate.set(entry.work_date, list);
   }
-  const today = todayISO();
-  const tomorrowDate = new Date();
+  const tomorrowDate = new Date(`${today}T12:00:00`);
   tomorrowDate.setDate(tomorrowDate.getDate() + 1);
   const tomorrow = isoOf(tomorrowDate);
 
@@ -157,6 +165,10 @@ function weekTitle(offset: number): string {
 }
 
 export default function CalendarScreen() {
+  // Opt out of React Compiler: the week labels and month grid read the clock
+  // (`new Date()` in mondayOf / buildMonthGrid), and memoised once they froze
+  // on the week the tab first mounted in.
+  'use no memo';
   const router = useRouter();
   const role = useRole();
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -175,11 +187,37 @@ export default function CalendarScreen() {
   const [weekAppts, setWeekAppts] = useState<LeadAppointmentEntry[]>([]);
   const [monthAppts, setMonthAppts] = useState<LeadAppointmentEntry[]>([]);
 
+  // "Today" is STATE (2026-11-08): the tab stays mounted, and a value
+  // computed in render was cached by React Compiler at first mount — the next
+  // morning "Today's jobs" still listed yesterday's. Re-read on every focus
+  // and whenever the app comes back to the foreground.
+  const [today, setToday] = useState(todayISO);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setToday(todayISO());
+    });
+    return () => sub.remove();
+  }, []);
+
+  // `?day=YYYY-MM-DD` (notification taps: a schedule change, a job reminder,
+  // an appointment): open the week holding that day, with the day ringed.
+  const params = useLocalSearchParams<{ day?: string }>();
+  const [focusDay, setFocusDay] = useState<string | null>(null);
+  useEffect(() => {
+    const day = typeof params.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(params.day) ? params.day : null;
+    if (!day) return;
+    setViewMode('week');
+    setWeekOffset(weekOffsetFor(day));
+    setFocusDay(day);
+    router.setParams({ day: undefined } as never);
+  }, [params.day, router]);
+
   // Refetch on every focus so stage/schedule edits made on other screens show
   // up immediately.
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
+      setToday(todayISO());
       fetchJobs().then(({ jobs: fetched }) => {
         if (!cancelled) setJobs(fetched);
       });
@@ -259,7 +297,6 @@ export default function CalendarScreen() {
     [assignments],
   );
 
-  const today = todayISO();
   const todayEntries = scheduleEntries.filter((e) => e.work_date === today);
   const todaysJobs =
     todayEntries.length > 0
@@ -270,7 +307,7 @@ export default function CalendarScreen() {
   // The week pager has its own range query; until it lands, fall back to the
   // default ±window fetch so the week doesn't flash empty.
   const weekSource = weekEntries ?? scheduleEntries;
-  const weekRows = buildWeekRows(weekSource, weekOffset);
+  const weekRows = buildWeekRows(weekSource, weekOffset, today);
 
   const openJob = (id: string) => router.push({ pathname: '/job/[id]', params: { id } });
   const openLead = (id: string) => router.push({ pathname: '/leads/[id]', params: { id } } as never);
@@ -558,6 +595,7 @@ export default function CalendarScreen() {
                   styles.dayRow,
                   index > 0 && styles.rowBorder,
                   row.isToday && styles.dayRowToday,
+                  row.dateISO === focusDay && styles.dayRowFocus,
                 ]}>
                 <View style={styles.dayCol}>
                   <AppText
@@ -686,6 +724,11 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
   },
+  dayRowFocus: {
+    borderWidth: 2,
+    borderColor: colors.ocean,
+    borderRadius: radii.md,
+  },
   dayRowToday: {
     backgroundColor: colors.oliveTint,
   },
@@ -753,3 +796,6 @@ const styles = StyleSheet.create({
     lineHeight: 12,
   },
 });
+
+// A render error replaces only this screen; the header / tab bar stay (2026-11-08).
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorBoundary';

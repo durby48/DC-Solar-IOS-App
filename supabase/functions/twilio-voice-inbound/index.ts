@@ -275,6 +275,8 @@ Deno.serve(async (req) => {
             headers: { 'content-type': 'application/json', 'x-notify-secret': notifySecret },
             body: JSON.stringify({
               title: '📞 Missed call',
+              source: 'twilio-voice-inbound',
+              ...(callSid ? { dedupe: `missed:${callSid}` } : {}),
               body: `${caller.who}${from && caller.who !== pretty(from) ? ` · ${pretty(from)}` : ''}`,
               audience: 'admins',
               // Their own switch (Settings → Notifications) decides, in notify.

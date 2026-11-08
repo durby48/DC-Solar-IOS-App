@@ -80,7 +80,10 @@ export default function JobDetailScreen() {
     const result = await markServiceVisitDone(job.id);
     if (result.ok) {
       setDoneNotice(result.message);
-      setJob(await fetchJob(job.id));
+      // Keep the job on screen if the re-read fails (2026-11-08): a null here
+      // flipped the page to "Job not found" right after a successful charge.
+      const fresh = await fetchJob(job.id);
+      if (fresh) setJob(fresh);
     } else {
       setDoneError(result.message);
     }
@@ -148,7 +151,12 @@ export default function JobDetailScreen() {
   return (
     <>
       <Stack.Screen options={{ title: job?.job_number ?? 'Job' }} />
-      <ScrollView ref={scrollRef} style={styles.safe} contentContainerStyle={styles.container}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.safe}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets>
         {loading ? (
           <SkeletonList count={4} height={96} />
         ) : !job ? (
@@ -384,3 +392,6 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
 });
+
+// A render error replaces only this screen; the header / tab bar stay (2026-11-08).
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorBoundary';

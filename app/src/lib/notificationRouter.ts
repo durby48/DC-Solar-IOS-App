@@ -1,45 +1,66 @@
 /**
- * The ONE place a notification tap turns into navigation (2026-09-08).
+ * The ONE place a notification tap turns into navigation (2026-09-08;
+ * rebuilt 2026-11-08).
  *
- * Before this existed a tap only brought the app to the front: pushes had no
- * `data`, and nothing listened for the response. Now:
- *
- *   tap → parseNotificationTarget(data) → routeForTarget() → router.push()
+ *   tap → parseNotificationTarget(data) → routeForTarget(target, role) → router
  *
  * and the same path serves every case:
  *   - the app is open (response listener)
  *   - the app is in the background (same listener, on resume)
- *   - the app was terminated (`getLastNotificationResponseAsync` on launch)
- *   - the on-device job reminders (their data folds into `job`)
+ *   - the app was terminated (`getLastNotificationResponse` on launch)
+ *   - the on-device job reminders (their data folds into `schedule` / `job`)
+ *   - a row tapped in the in-app Alerts list (`openNotificationTarget`)
  *
  * COLD START IS THE HARD CASE. On launch nothing is ready: expo-router has no
  * navigation state yet, the session has not been read, and `app/index.tsx`
  * is about to `replace()` the login route with the tabs. Navigating during
  * that dance loses the push or gets overwritten by the replace. So the
- * target is QUEUED and released only when three things are true: the root
- * navigator has a key, a session exists, and the pathname has left `/` (the
- * login/index route) — which is exactly when index.tsx has finished landing
- * the person in the app. A tap while signed out waits through the login and
- * then continues to the record.
+ * target is QUEUED and released only when the session exists and the person
+ * has LANDED — decided from `useSegments()` (reactive), not from
+ * `useRootNavigationState()`.
+ *
+ * 2026-11-08 — why every tap was lost:
+ *  1. `useRootNavigationState()` called from the root layout returns the
+ *     internal Slot navigator's state, whose one route is `__root`. "Landed"
+ *     was therefore ALWAYS true; the tap was pushed over the login screen
+ *     and index.tsx's `replace('/(tabs)')` then replaced the pushed record
+ *     with Home.
+ *  2. The pending tap was dequeued BEFORE a 150 ms timer whose effect
+ *     cleanup cleared it, so any re-render in that window dropped it.
+ *  3. The launch response was never cleared, so a JS reload (View as…,
+ *     applying an update) replayed the last tap.
+ * Now: landed = segments say we are past login; the tap stays queued until
+ * the timer actually fires; the launch response is cleared once taken.
+ *
+ * ROLE-AWARE DESTINATIONS. Records open in the CRM workspace (texts on the
+ * conversation pane) for admins and sales alike — the sales app is confined
+ * to `/workspace`, `/schedule`, `/recents` and friends (lib/salesConfinement),
+ * so a rep's tap must land inside that list or it would be bounced.
  *
  * FAILS SOFT. A target the router cannot place goes to the nearest sensible
  * screen; a record that no longer exists is the destination screen's
- * problem, and every one of those screens already has its own "not found"
- * state. Nothing here can throw into React.
+ * problem. Nothing here can throw into React.
  */
 
 import * as Notifications from 'expo-notifications';
-import { router, usePathname, useRootNavigationState } from 'expo-router';
+import { router, useSegments } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
 import { reportDiagnostic } from '@/lib/diagnostics';
 import { parseNotificationTarget, type NotificationTarget } from '@/lib/notificationTargets';
+import { getRole, type RoleInfo } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
 export interface Route {
   pathname: string;
   params?: Record<string, string>;
+}
+
+/** What the routing needs to know about the person who tapped. */
+export interface TapperRole {
+  isAdmin: boolean;
+  isSales: boolean;
 }
 
 function compact(params: Record<string, string | undefined>): Record<string, string> {
@@ -48,43 +69,118 @@ function compact(params: Record<string, string | undefined>): Record<string, str
   return out;
 }
 
-/** Where a target goes. The routes are the phone's screens; none is web-only. */
-export function routeForTarget(target: NotificationTarget): Route {
+/** The CRM workspace record key (lib/crmWorkspace.ts: `customer:<id>` / `lead:<id>`). */
+function recordKey(customerId?: string, leadId?: string): string | null {
+  if (customerId) return `customer:${customerId}`;
+  if (leadId) return `lead:${leadId}`;
+  return null;
+}
+
+function workspace(key: string, channel?: 'sms' | 'email'): Route {
+  return { pathname: '/workspace', params: compact({ open: key, channel }) };
+}
+
+/** The calendar for this person, on `day`. */
+function calendarOn(day: string | undefined, who: TapperRole): Route {
+  if (who.isSales) return { pathname: '/schedule', params: compact({ day }) };
+  return { pathname: '/calendar', params: compact({ day }) };
+}
+
+/**
+ * Where a target goes, for this person. `null` = no navigation (the test
+ * push just confirms receipt).
+ */
+export function routeForTarget(target: NotificationTarget, who: TapperRole): Route | null {
   switch (target.type) {
-    case 'sms_thread':
-      return {
-        pathname: '/messages/thread',
-        params: compact({
-          customerId: target.customerId,
-          leadId: target.leadId,
-          contactId: target.contactId,
-          phone: target.phone,
-          name: target.name,
-        }),
-      };
+    case 'sms_thread': {
+      const key = recordKey(target.customerId, target.leadId);
+      if (key) return workspace(key, 'sms');
+      // A stranger / contact: the stand-alone thread (admins only).
+      if (who.isAdmin) {
+        return {
+          pathname: '/messages/thread',
+          params: compact({ contactId: target.contactId, phone: target.phone, name: target.name }),
+        };
+      }
+      return { pathname: '/workspace' };
+    }
     case 'call':
-      // A missed call is a CALL LOG entry, not a conversation: Phone →
-      // Recents, opened on the Missed segment. (Routing this into the SMS
-      // thread was the 2026-09-08 misroute.)
-      return { pathname: '/phone/recents', params: { segment: 'missed' } };
+      // A missed call is a CALL LOG entry: Recents, on the Missed segment.
+      // The sales app has its own top-level Recents (the Phone section is admin).
+      return who.isAdmin
+        ? { pathname: '/phone/recents', params: { segment: 'missed' } }
+        : { pathname: '/recents', params: { segment: 'missed' } };
     case 'lead':
-      return { pathname: '/leads/[id]', params: { id: target.leadId } };
+      return workspace(`lead:${target.leadId}`);
     case 'customer':
-      return { pathname: '/crm/[id]', params: { id: target.customerId } };
+      return workspace(`customer:${target.customerId}`);
     case 'job':
       return { pathname: '/job/[id]', params: { id: target.jobId } };
-    case 'task':
-      // Tasks live on the record they belong to (the CRM workspace is web
-      // only); a task with no record lands on Home.
-      if (target.leadId) return { pathname: '/leads/[id]', params: { id: target.leadId } };
-      if (target.customerId) return { pathname: '/crm/[id]', params: { id: target.customerId } };
-      return { pathname: '/(tabs)' };
+    case 'schedule':
+      return calendarOn(target.day, who);
+    case 'task': {
+      const key = recordKey(target.customerId, target.leadId);
+      if (key) return workspace(key);
+      return { pathname: '/' };
+    }
     case 'appointment':
-      if (target.leadId) return { pathname: '/leads/[id]', params: { id: target.leadId } };
-      return { pathname: '/(tabs)/calendar' };
+      if (target.day) return calendarOn(target.day, who);
+      if (target.leadId) return workspace(`lead:${target.leadId}`);
+      return calendarOn(undefined, who);
     case 'storm':
       return { pathname: '/storm-reports/[day]', params: { day: target.day } };
+    case 'email_thread':
+      return { pathname: '/inbox/[threadId]', params: { threadId: target.threadId } };
+    case 'prospects':
+      return { pathname: '/workspace', params: { lens: 'prospect' } };
+    case 'financials':
+      return who.isAdmin ? { pathname: '/financials' } : { pathname: '/' };
+    case 'inbox':
+      return who.isAdmin ? { pathname: '/inbox' } : { pathname: '/' };
+    case 'test':
+      return null;
   }
+}
+
+function tapperOf(role: RoleInfo | null): TapperRole {
+  return { isAdmin: role?.isAdmin === true, isSales: role?.isSales === true };
+}
+
+/**
+ * Navigate to a target now. Exported for the in-app Alerts list, the
+ * incoming-call path and tests.
+ */
+export async function openNotificationTarget(target: NotificationTarget): Promise<void> {
+  if (target.type === 'test') {
+    reportDiagnostic('notification_tap', true, { targetType: 'test' });
+    Alert.alert('Test notification received', 'Tapping notifications works on this phone.');
+    return;
+  }
+  let route: Route | null = null;
+  try {
+    route = routeForTarget(target, tapperOf(await getRole()));
+    if (!route) return;
+    // `navigate` (not `push`) so a tab target JUMPs to the tab with its
+    // params instead of stacking a second copy of it.
+    router.navigate({ pathname: route.pathname, params: route.params ?? {} } as never);
+    reportDiagnostic('notification_tap', true, { targetType: target.type, route: route.pathname });
+  } catch (e) {
+    reportDiagnostic('notification_tap', false, {
+      targetType: target.type,
+      route: route?.pathname ?? null,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    try {
+      router.replace('/(tabs)' as never);
+    } catch {
+      // Nothing sensible left to do; the app is still on a real screen.
+    }
+  }
+}
+
+/** @deprecated kept for older call sites — same as openNotificationTarget. */
+export function navigateToTarget(target: NotificationTarget): void {
+  void openNotificationTarget(target);
 }
 
 // ---------------------------------------------------------------------------
@@ -103,20 +199,20 @@ const listeners = new Set<() => void>();
 /**
  * Take the queued tap (and mark it handled) in ONE plain function.
  *
- * 2026-11-08: this used to be inline in the release effect —
- *   const next = pending; pending = null; handled.add(next.id);
- *   setTimeout(() => navigateToTarget(next.target), 150);
- * React Compiler treated the module variable as stable and folded `next`
- * back into `pending`, shipping `p=null, d.add(p.id)` and
- * `navigateToTarget(p.target)`: every notification tap crashed with
- * "Cannot read property 'id' of null" (Devon's and Ken's phones, every
- * type). Keep the read-and-clear here, outside any component or hook.
+ * 2026-11-08: this used to be inline in the release effect and React
+ * Compiler folded the alias back into the module variable, shipping
+ * `p=null, d.add(p.id)` — every tap crashed with "Cannot read property 'id'
+ * of null". Keep the read-and-clear here, outside any component or hook.
  */
 function takePending(): Pending | null {
   const next = pending;
   pending = null;
   if (next) handled.add(next.id);
   return next;
+}
+
+function hasPending(): boolean {
+  return pending !== null;
 }
 
 function notifyListeners(): void {
@@ -128,6 +224,12 @@ function enqueue(response: Notifications.NotificationResponse | null | undefined
   if (!response) return;
   const id = response.notification.request.identifier;
   if (handled.has(id)) return;
+  // Taken: a JS reload must not replay it (2026-11-08).
+  try {
+    Notifications.clearLastNotificationResponse();
+  } catch {
+    // Older native builds: harmless — `handled` still covers this run.
+  }
   const data = response.notification.request.content.data;
   const target = parseNotificationTarget(data);
   if (!target) {
@@ -143,35 +245,14 @@ function enqueue(response: Notifications.NotificationResponse | null | undefined
   notifyListeners();
 }
 
-/** Navigate to a target now. Exported for the incoming-call path and tests. */
-export function navigateToTarget(target: NotificationTarget): void {
-  const route = routeForTarget(target);
-  try {
-    router.push({ pathname: route.pathname, params: route.params ?? {} } as never);
-    reportDiagnostic('notification_tap', true, { targetType: target.type, route: route.pathname });
-  } catch (e) {
-    reportDiagnostic('notification_tap', false, {
-      targetType: target.type,
-      route: route.pathname,
-      error: e instanceof Error ? e.message : String(e),
-    });
-    try {
-      router.replace('/(tabs)' as never);
-    } catch {
-      // Nothing sensible left to do; the app is still on a real screen.
-    }
-  }
-}
+/** First route segments that mean "not in the app yet": login and its gates. */
+const PRE_LANDING = new Set(['set-password', 'sign-up', 'customer', 'join']);
 
-/** Root-stack routes that mean "not in the app yet": login and its gates. */
-const PRE_LANDING_ROUTES = new Set(['index', 'set-password', 'sign-up']);
-
-/** True once the root stack's focused route is a real app screen. */
-function hasLanded(navState: ReturnType<typeof useRootNavigationState>): boolean {
-  const routes = navState?.routes;
-  if (!routes || typeof navState.index !== 'number') return false;
-  const name = routes[navState.index]?.name;
-  return typeof name === 'string' && !PRE_LANDING_ROUTES.has(name);
+/** True once the person is on a real app screen (Home is `(tabs)`). */
+function landedOn(segments: readonly string[]): boolean {
+  // The login route is `app/index.tsx`: no segments at all.
+  if (segments.length === 0) return false;
+  return !PRE_LANDING.has(segments[0]);
 }
 
 /**
@@ -182,8 +263,7 @@ export function useNotificationRouting(): void {
   // Opt out of React Compiler: this hook reads and writes module state
   // (`pending`), which the compiler assumes never changes (see takePending).
   'use no memo';
-  const navState = useRootNavigationState();
-  const pathname = usePathname();
+  const segments = useSegments();
   const [sessionReady, setSessionReady] = useState(false);
   const [version, setVersion] = useState(0);
 
@@ -193,11 +273,11 @@ export function useNotificationRouting(): void {
     const bump = () => setVersion((v) => v + 1);
     listeners.add(bump);
     const sub = Notifications.addNotificationResponseReceivedListener(enqueue);
-    void Notifications.getLastNotificationResponseAsync()
-      .then(enqueue)
-      .catch(() => {
-        // No launch response, or the module is unavailable: nothing queued.
-      });
+    try {
+      enqueue(Notifications.getLastNotificationResponse());
+    } catch {
+      // No launch response, or the module is unavailable: nothing queued.
+    }
     return () => {
       listeners.delete(bump);
       sub.remove();
@@ -223,23 +303,20 @@ export function useNotificationRouting(): void {
     };
   }, []);
 
-  // Release the queue when the router, the session and the landing are all done.
+  const segmentKey = segments.join('/');
+  const landed = landedOn(segments);
+
+  // Release the queue when the session and the landing are both done.
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    if (!pending) return;
-    const navReady = Boolean(navState?.key);
-    // "Landed" is decided by the ROOT stack's current ROUTE NAME, not the
-    // pathname: Home is `(tabs)/index.tsx`, whose pathname is `/` — the same
-    // string as the login route (the collision lib/signOut.ts documents).
-    // Gating on the pathname left every tap stuck while the person sat on
-    // Home, then fired it the moment they opened another tab (2026-09-11).
-    const landed = hasLanded(navState);
-    if (!navReady || !sessionReady || !landed) return;
-    const next = takePending();
-    if (!next) return;
-    const target = next.target;
-    // One tick after landing, so a `replace()` still in flight cannot bury it.
-    const timer = setTimeout(() => navigateToTarget(target), 150);
+    if (!hasPending() || !sessionReady || !landed) return;
+    // One beat after landing so a `replace()` still in flight cannot bury
+    // it. The tap stays QUEUED until the timer fires: if this effect is torn
+    // down first, the next run simply starts a new timer.
+    const timer = setTimeout(() => {
+      const next = takePending();
+      if (next) void openNotificationTarget(next.target);
+    }, 250);
     return () => clearTimeout(timer);
-  }, [navState?.key, pathname, sessionReady, version]);
+  }, [segmentKey, landed, sessionReady, version]);
 }

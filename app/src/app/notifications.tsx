@@ -8,15 +8,23 @@ import { fetchMyPrefs, saveMyPrefs, type MyPrefs } from '@/lib/repSettings';
 
 /**
  * `/notifications` (2026-10-06, rep Settings): which pushes reach this person.
+ * Every push also lands in the Alerts list (`/alerts`) — a switch turned off
+ * stops both.
  * Saved on their staff_profiles row; the `notify` edge function drops a push
  * addressed to them when its switch is off. Turning one off does not hide
  * anything in the app — texts and missed calls still show on Home and in the
  * CRM.
  */
-const ROWS: { key: 'notifyTexts' | 'notifyMissedCalls' | 'notifyNewProspects' | 'notifyStorms'; title: string; detail: string }[] = [
-  { key: 'notifyTexts', title: 'New texts', detail: 'When someone texts your DC Solar number' },
+const ROWS: {
+  key: 'notifyTexts' | 'notifyMissedCalls' | 'notifyNewProspects' | 'notifyStorms' | 'notifyTasks' | 'notifySchedule';
+  title: string;
+  detail: string;
+}[] = [
+  { key: 'notifyTexts', title: 'New texts', detail: 'When someone texts your DC Solar number, or a text you sent fails' },
   { key: 'notifyMissedCalls', title: 'Missed calls', detail: 'When a call to your number is not answered' },
   { key: 'notifyNewProspects', title: 'New prospects', detail: 'When an admin assigns a prospect to you' },
+  { key: 'notifyTasks', title: 'Tasks', detail: 'A task handed to you, and when one of your tasks comes due' },
+  { key: 'notifySchedule', title: 'Schedule', detail: 'Job days added or moved, and appointment reminders and changes' },
   { key: 'notifyStorms', title: 'Hail near my leads', detail: 'When hail of 1 inch or more hits near your leads or customers' },
 ];
 
@@ -62,7 +70,7 @@ export default function NotificationsScreen() {
         </Card>
       )}
       <AppText variant="caption" color={colors.textSecondary}>
-        Turning one off only stops the buzz. Everything still shows on Home and in the CRM.
+        Turning one off stops that push and its entry in Alerts. Texts, tasks and the schedule still show in the CRM and on the calendar.
       </AppText>
       {error ? (
         <AppText variant="caption" color={colors.danger}>

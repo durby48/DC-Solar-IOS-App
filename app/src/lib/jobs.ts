@@ -26,6 +26,7 @@ import { CUSTOMER_COLUMNS, createCustomerRow } from '@/lib/crm';
 import { statusForStage, type Stage } from '@/lib/stages';
 import { supabase } from '@/lib/supabase';
 import { type Customer, type Job } from '@/lib/types';
+import { todayISO } from '@/lib/dates';
 
 const COMPANY = 'dc-solar';
 
@@ -298,7 +299,9 @@ export async function updateJobStage(jobId: string, stage: Stage): Promise<SaveJ
   const payload: Record<string, unknown> = {
     stage,
     status: statusForStage(stage),
-    completed_on: stage === 'Complete' ? new Date().toISOString().slice(0, 10) : null,
+    // Local date (2026-11-08): toISOString() is UTC — a job finished after
+    // ~6–7 PM in Kansas City was stamped with tomorrow's date.
+    completed_on: stage === 'Complete' ? todayISO() : null,
   };
   try {
     const { error } = await supabase

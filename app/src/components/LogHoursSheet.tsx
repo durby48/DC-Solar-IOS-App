@@ -78,6 +78,9 @@ export function LogHoursSheet({
   onSaved?: (outcome: LogHoursOutcome) => void;
   onCancel?: () => void;
 }) {
+  // Opt out of React Compiler (2026-11-08): this reads the clock during
+  // render (today / quick-pick dates), and memoised that froze at mount.
+  'use no memo';
   const pickPeople = !lockedEmail;
   const pickJob = !jobId;
 

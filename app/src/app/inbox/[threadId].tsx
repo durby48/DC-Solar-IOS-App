@@ -104,3 +104,6 @@ const styles = StyleSheet.create({
   cardTitle: { color: colors.ink, fontSize: 17, fontWeight: '800', textAlign: 'center' },
   cardBody: { color: colors.inkSoft, fontSize: 14, fontWeight: '600', textAlign: 'center' },
 });
+
+// A render error replaces only this screen; the header / tab bar stay (2026-11-08).
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorBoundary';

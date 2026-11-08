@@ -74,6 +74,9 @@ function DateFields({
   onTime: (v: string) => void;
   excludeJobId?: string;
 }) {
+  // Opt out of React Compiler (2026-11-08): this reads the clock during
+  // render (today / quick-pick dates), and memoised that froze at mount.
+  'use no memo';
   const [avail, setAvail] = useState<Map<string, DayAvailability> | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -231,6 +234,9 @@ export function BookVisitForm({
   onBooked: (message: string) => void;
   onCancel: () => void;
 }) {
+  // Opt out of React Compiler (2026-11-08): this reads the clock during
+  // render (today / quick-pick dates), and memoised that froze at mount.
+  'use no memo';
   // The first visit is the inspection that comes with the plan; cleaning is an add-on (2026-10-12).
   const [kind, setKind] = useState<ServiceKind>('Inspection');
   const [date, setDate] = useState(isoPlusDays(1));

@@ -352,11 +352,10 @@ Deno.serve(async (req) => {
         .eq('number_e164', to)
         .maybeSingle();
       const assigned = (route as { assigned_to?: string | null } | null)?.assigned_to ?? null;
-      if (assigned) {
-        const { data: emp } = await admin.from('employees').select('role').ilike('email', assigned).maybeSingle();
-        const r = (emp as { role?: string } | null)?.role;
-        if (r === 'sales' || r === 'sales_manager') repEmail = assigned.toLowerCase();
-      }
+      // 2026-11-08 (Devon): a text goes to WHOEVER the number is assigned to
+      // — the owner's main office number, the sales manager's, a rep's — not
+      // only to sales roles. Only an unassigned number tells the admins.
+      if (assigned) repEmail = assigned.toLowerCase();
     }
     const notifySecret = Deno.env.get('NOTIFY_SECRET');
     if (notifySecret) {
@@ -373,6 +372,8 @@ Deno.serve(async (req) => {
             // The notification target (see notify/index.ts): the EXACT thread
             // this message was filed under, by id — a tap opens it, not the
             // inbox. Strangers carry only the number.
+            source: 'twilio-inbound',
+            ...(messageSid ? { dedupe: `sms_in:${messageSid}` } : {}),
             target: {
               type: 'sms_thread',
               ...(customerId ? { customerId } : {}),

@@ -21,3 +21,6 @@ export default function RecentsScreen() {
   );
   return <RecentCallsList reloadKey={reloadKey} onDialUnknown={(phone) => openDialer({ phone })} />;
 }
+
+// A render error replaces only this screen; the header / tab bar stay (2026-11-08).
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorBoundary';

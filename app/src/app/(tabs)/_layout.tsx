@@ -1,6 +1,6 @@
 import { Tabs, useNavigation, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TabIcon } from '@/components/ui';
@@ -12,7 +12,7 @@ import {
   hasBouncedToLogin,
   markBouncedToLogin,
 } from '@/lib/authGate';
-import { fetchUnreadCount } from '@/lib/comms';
+import { fetchUnreadCount, useCommsRealtime } from '@/lib/comms';
 import { useRoleGate } from '@/lib/role';
 import { supabase } from '@/lib/supabase';
 
@@ -171,16 +171,33 @@ export default function TabsLayout() {
    * the database's, not this file's. It runs only once the gate clears, so a
    * signed-out visitor never fires the query at all.
    */
+  // The CRM tab's unread texts: live (2026-11-08 — it was read once at launch
+  // and never changed). Refresh on any message change, coalesced, and when
+  // the app returns to the foreground.
+  const unreadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshUnread = useCallback(() => {
+    if (unreadTimer.current) clearTimeout(unreadTimer.current);
+    unreadTimer.current = setTimeout(() => {
+      unreadTimer.current = null;
+      void fetchUnreadCount().then(setUnread);
+    }, 800);
+  }, []);
   useEffect(() => {
     if (gate !== 'staff') return;
     let cancelled = false;
     void fetchUnreadCount().then((count) => {
       if (!cancelled) setUnread(count);
     });
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshUnread();
+    });
     return () => {
       cancelled = true;
+      sub.remove();
+      if (unreadTimer.current) clearTimeout(unreadTimer.current);
     };
-  }, [gate]);
+  }, [gate, refreshUnread]);
+  useCommsRealtime(refreshUnread);
 
   if (gate !== 'staff') {
     return (

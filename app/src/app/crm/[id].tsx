@@ -1824,6 +1824,7 @@ export default function CustomerDetailScreen() {
         style={styles.screen}
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.ocean} />
         }>
@@ -2319,3 +2320,6 @@ const styles = StyleSheet.create({
     borderTopColor: colors.tan,
   },
 });
+
+// A render error replaces only this screen; the header / tab bar stay (2026-11-08).
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorBoundary';

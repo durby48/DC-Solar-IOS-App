@@ -643,7 +643,13 @@ export function composeActivity(input: {
     });
   }
 
-  events.sort((a, b) => b.at.localeCompare(a.at));
+  // By the INSTANT, not the string (2026-11-08): local `…T12:00:00` stamps
+  // and UTC `…Z` stamps sort up to six hours apart as text.
+  const time = (iso: string) => {
+    const t = new Date(iso).getTime();
+    return Number.isFinite(t) ? t : 0;
+  };
+  events.sort((a, b) => time(b.at) - time(a.at));
   return events;
 }
 

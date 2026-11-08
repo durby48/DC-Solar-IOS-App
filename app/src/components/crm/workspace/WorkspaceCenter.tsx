@@ -76,6 +76,7 @@ export function WorkspaceCenter({
   onRecordChanged,
   onOpenDetail,
   ownerNote = null,
+  focus = null,
 }: {
   record: WorkspaceRecord;
   settings: CommsSettings | null;
@@ -95,6 +96,8 @@ export function WorkspaceCenter({
   onOpenDetail?: () => void;
   /** Someone else's lead (admins / sales managers, 2026-10-07): whose it is. */
   ownerNote?: string | null;
+  /** A deep link asked for this record's texts / email (notification taps). */
+  focus?: { channel: 'sms' | 'email'; nonce: number } | null;
 }) {
   const router = useRouter();
   // SALES (2026-10-05). Texts and calls, from the rep's own number (B3): the
@@ -108,6 +111,11 @@ export function WorkspaceCenter({
   const [pane, setPane] = useState<Pane>('conversation');
   const [rawChannel, setChannel] = useState<Channel>('sms');
   const channel: Channel = isSales ? 'sms' : rawChannel;
+  useEffect(() => {
+    if (!focus) return;
+    setPane('conversation');
+    setChannel(focus.channel as Channel);
+  }, [focus?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A BOOKED lead's texts file under the customer record the booking made
   // (inbound and outbound both prefer a customer with that number), so its
@@ -326,7 +334,6 @@ export function WorkspaceCenter({
           jobId={record.currentJob?.id ?? null}
           templates={templates}
           templateVars={templateVars}
-          keyboardOffset={0}
           banner={
             ownerNote ? (
               <View style={styles.ownerNote}>

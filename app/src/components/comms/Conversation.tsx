@@ -16,6 +16,7 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type LayoutChangeEvent,
 } from 'react-native';
 
 import { colors, radii, shadows, spacing } from '@/constants/theme';
@@ -102,7 +103,7 @@ export function Conversation({
   templates = [],
   templateVars,
   banner,
-  keyboardOffset = 92,
+  keyboardOffset,
   autoFocus = false,
 }: {
   target: ConversationTarget;
@@ -124,7 +125,12 @@ export function Conversation({
   templateVars?: TemplateVars;
   /** Rendered between the header and the messages — the stranger notice, say. */
   banner?: ReactNode;
-  /** iOS: height of whatever native header sits above this. */
+  /**
+   * iOS: distance from the top of the screen to this view. Omit (the normal
+   * case) and it is MEASURED (2026-11-08) — a fixed 92 sat ~10 pt short under
+   * a Dynamic Island header, and the CRM workspace's 0 left the composer
+   * ~185 pt under the keyboard.
+   */
   keyboardOffset?: number;
   autoFocus?: boolean;
 }) {
@@ -145,6 +151,15 @@ export function Conversation({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const listRef = useRef<FlatList<CommsMessage>>(null);
+  // Where this view starts on screen, for the keyboard offset (see the prop).
+  const [measuredTop, setMeasuredTop] = useState(0);
+  const measureTop = useCallback((e: LayoutChangeEvent) => {
+    // The event's target is the host view: its position on screen.
+    const host = e.target as unknown as { measureInWindow?: View['measureInWindow'] };
+    host.measureInWindow?.((_x, y) => {
+      if (Number.isFinite(y)) setMeasuredTop((prev) => (Math.abs(prev - y) < 1 ? prev : y));
+    });
+  }, []);
 
   const customerId = target.customerId ?? null;
   const contactId = target.contactId ?? null;
@@ -156,14 +171,18 @@ export function Conversation({
       ? await fetchThread(customerId)
       : contactId
         ? await fetchThread(contactId, { byContact: true })
-        : phone
+        : leadId
+          ? // A lead's own thread, by lead id (2026-11-08): by phone it only
+            // found rows with no customer AND no contact.
+            await fetchThread(leadId, { byLead: true })
+          : phone
           ? await fetchThread(phone, { byPhone: true })
           : [];
     setMessages(rows);
     setLoading(false);
     if (customerId) void markThreadRead(customerId);
     else if (phone) void markThreadRead(null, phone);
-  }, [customerId, contactId, phone]);
+  }, [customerId, contactId, leadId, phone]);
 
   useFocusEffect(
     useCallback(() => {
@@ -449,9 +468,10 @@ export function Conversation({
 
   return (
     <KeyboardAvoidingView
+      onLayout={measureTop}
       style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? keyboardOffset : 0}>
+      keyboardVerticalOffset={Platform.OS === 'ios' ? (keyboardOffset ?? measuredTop) : 0}>
       {banner}
       {loading ? (
         <View style={styles.center}>

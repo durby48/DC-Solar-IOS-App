@@ -134,6 +134,9 @@ export function AppointmentComposer({
   onAdded: () => void;
   onCancel?: () => void;
 }) {
+  // Opt out of React Compiler (2026-11-08): this reads the clock during
+  // render (today / quick-pick dates), and memoised that froze at mount.
+  'use no memo';
   const [kind, setKind] = useState<AppointmentKind>('site_visit');
   // Who can be going: the sales team or Devon (appointment_staff, 2026-10-08).
   const [people, setPeople] = useState(reps);

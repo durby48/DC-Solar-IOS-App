@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  type LayoutChangeEvent,
 } from 'react-native';
 
 import { takeCompose } from '@/components/email';
@@ -88,6 +89,16 @@ function titleFor(mode: ComposeMode | 'draft'): string {
 
 export default function ComposeEmailScreen() {
   const router = useRouter();
+  // Keyboard offset = where this screen starts (measured; 2026-11-08 — a fixed
+  // 88 sat short of the header on Dynamic Island iPhones).
+  const [measuredTop, setMeasuredTop] = useState(0);
+  const measureTop = useCallback((e: LayoutChangeEvent) => {
+    // The event's target is the host view: its position on screen.
+    const host = e.target as unknown as { measureInWindow?: View['measureInWindow'] };
+    host.measureInWindow?.((_x, y) => {
+      if (Number.isFinite(y)) setMeasuredTop((prev) => (Math.abs(prev - y) < 1 ? prev : y));
+    });
+  }, []);
   const params = useLocalSearchParams<Params>();
   const { phase, role } = useRoleGate();
 
@@ -336,9 +347,10 @@ export default function ComposeEmailScreen() {
 
   return screen(
     <KeyboardAvoidingView
+      onLayout={measureTop}
       style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}>
+      keyboardVerticalOffset={Platform.OS === 'ios' ? measuredTop || 88 : 0}>
       <View style={styles.bar}>
         {confirmDiscard ? (
           <>

@@ -67,6 +67,9 @@ export function Screen({
       style={styles.flex}
       contentContainerStyle={[padded && styles.content, contentContainerStyle]}
       keyboardShouldPersistTaps="handled"
+      // iOS: scroll the focused field above the keyboard (2026-11-08 — inputs
+      // in the lower half of most forms sat under it). No-op elsewhere.
+      automaticallyAdjustKeyboardInsets
       refreshControl={
         onRefresh ? (
           <RefreshControl

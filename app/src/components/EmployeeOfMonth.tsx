@@ -50,6 +50,9 @@ import { useRole } from '@/lib/role';
  * quietly backdating the headline. See lib/eom.ts for why.
  */
 export function EmployeeOfMonth() {
+  // Opt out of React Compiler (2026-11-08): this reads the clock during
+  // render (today / quick-pick dates), and memoised that froze at mount.
+  'use no memo';
   // Every month on record, newest first — the arrows page through them.
   // `employee_of_month` is member-SELECT, so the crew sees the history too.
   const [entries, setEntries] = useState<EmployeeOfMonthEntry[]>([]);

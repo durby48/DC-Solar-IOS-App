@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { AlertsBell } from '@/components/AlertsBell';
 import { CustomerAvatar } from '@/components/CustomerAvatar';
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { formatPhone } from '@/lib/comms';
@@ -318,6 +319,8 @@ export function RecordList({
         ) : Platform.OS === 'web' ? (
           <Text style={styles.kbd}>/</Text>
         ) : null}
+        {/* CRM alerts on the phone (2026-11-08): texts, leads, tasks, emails. */}
+        <AlertsBell color={hubColors.crm.fg} size={21} />
         {onNewLead ? (
           <Pressable
             onPress={onNewLead}

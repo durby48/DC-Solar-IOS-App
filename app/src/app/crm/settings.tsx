@@ -385,7 +385,8 @@ export default function MessagingSettingsScreen() {
       <ScrollView
         style={styles.screen}
         contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled">
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets>
         {settings == null ? (
           <View style={styles.noticeCard}>
             <Ionicons name="warning" size={16} color={colors.coralDeep} />

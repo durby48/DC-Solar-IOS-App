@@ -2,8 +2,10 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs, router, useNavigation, useSegments } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TabIcon } from '@/components/ui';
+import { tabBarHeight } from '@/constants/layout';
 import { colors, fonts, hubColors, spacing } from '@/constants/theme';
 import { explainAdminOnly } from '@/lib/adminGate';
 import { useRoleGate } from '@/lib/role';
@@ -83,6 +85,7 @@ function leavePhone(navigation: { canGoBack: () => boolean; goBack: () => void }
 }
 
 export default function PhoneLayout() {
+  const insets = useSafeAreaInsets();
   // CONTACTS IS FOR EVERYONE (2026-09-12): the company directory — customers
   // and the imported contacts — is something Devon wants the crew to have.
   // The other three tabs (texts, calls, keypad) stay admin-only. So the gate
@@ -165,7 +168,11 @@ export default function PhoneLayout() {
           tabBarStyle: {
             backgroundColor: colors.surfaceAlt,
             borderTopColor: colors.border,
-            height: 62,
+            // Content height PLUS the home-bar inset, like the main tabs
+            // (2026-11-08: a flat 62 squeezed this bar on Face ID iPhones).
+            height: tabBarHeight(insets.bottom),
+            paddingTop: 6,
+            paddingBottom: insets.bottom > 0 ? insets.bottom : 6,
           },
           tabBarLabelStyle: { fontFamily: fonts.bold, fontSize: 11 },
           sceneStyle: { backgroundColor: colors.surfaceAlt },

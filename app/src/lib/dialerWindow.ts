@@ -69,6 +69,9 @@ export function setDialerTab(tab: DialerTab): void {
  */
 let hiders = 0;
 export function useHideKeypadButton(active: boolean): void {
+  // Opt out of React Compiler: the effect read-modify-writes module state
+  // (`hiders`), the same shape as the 2026-11-08 notification-tap crash.
+  'use no memo';
   useEffect(() => {
     if (!active) return;
     hiders += 1;

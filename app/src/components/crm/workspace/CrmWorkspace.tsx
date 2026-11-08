@@ -280,9 +280,15 @@ export function CrmWorkspace() {
 
   // Deep links from the Sales Home. Declared after the restore above so a
   // link wins over the remembered record when both land on the first load.
-  const params = useLocalSearchParams<{ open?: string; lens?: string; new?: string }>();
+  // `channel` (2026-11-08, notification taps): open the record on its texts
+  // or its email. Nothing happens until the role is known — on a cold start
+  // `role` is null for the first renders, and acting then dropped
+  // `new=prospect` for reps (it looked like "not sales").
+  const params = useLocalSearchParams<{ open?: string; lens?: string; new?: string; channel?: string }>();
+  const [focus, setFocus] = useState<{ channel: 'sms' | 'email'; nonce: number } | null>(null);
   useEffect(() => {
     if (!params.open && !params.lens && !params.new) return;
+    if (!role) return; // wait for the role
     if (params.open && records.length === 0) return; // wait for the list
     if (params.new === 'prospect' && isSales) {
       setAddingProspect(true);
@@ -292,19 +298,28 @@ export function CrmWorkspace() {
       setSelectedKey(params.open);
       setDetailOpen(false);
       setAddingProspect(false);
+      if (params.channel === 'sms' || params.channel === 'email') {
+        setFocus({ channel: params.channel, nonce: Date.now() });
+      }
     } else if (params.lens && LENSES.includes(params.lens as ListMode)) {
       setKind(params.lens as ListMode);
       setSelectedKey(null);
       setAddingProspect(false);
     }
-    router.setParams({ open: undefined, lens: undefined, new: undefined });
-  }, [params.open, params.lens, params.new, records.length, isSales, router]);
+    router.setParams({ open: undefined, lens: undefined, new: undefined, channel: undefined });
+  }, [params.open, params.lens, params.new, params.channel, records.length, role, isSales, router]);
 
+  const loadedKey = useRef<string | null>(null);
   const loadSelected = useCallback(async (record: WorkspaceRecord) => {
     // Same guard as loadEmail: clicking A then B quickly must not land A's
     // messages, notes and money under B when A's slower fetch resolves last.
     detailFor.current = record.key;
-    setDetailLoading(true);
+    // The spinner only for a DIFFERENT record (2026-11-08). A refresh of the
+    // open one (realtime, a note saved, a text marked read) updates in place:
+    // swapping the pane for a spinner unmounted the composer and threw away
+    // whatever was being typed a second after every message event.
+    const quiet = loadedKey.current === record.key;
+    if (!quiet) setDetailLoading(true);
     if (record.kind === 'customer') {
       const [thread, noteResult, jobRows] = await Promise.all([
         fetchThread(record.id),
@@ -340,6 +355,7 @@ export function CrmWorkspace() {
       setHistory(statusHistory);
       setAppointments(appts.status === 'ok' ? appts.appointments : []);
     }
+    loadedKey.current = record.key;
     setDetailLoading(false);
   }, []);
 
@@ -704,6 +720,7 @@ export function CrmWorkspace() {
       notesAvailable={notesAvailable}
       events={events}
       loading={detailLoading}
+      focus={focus}
       email={email}
       onNotesChanged={() => void loadSelected(selected)}
       onEmailChanged={() => void loadEmail(selected)}

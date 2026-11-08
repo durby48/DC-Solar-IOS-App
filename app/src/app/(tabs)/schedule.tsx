@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Redirect, useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { AppText, Card, ListRow, Screen } from '@/components/ui';
@@ -54,6 +54,10 @@ interface Item {
 }
 
 function SalesWeek() {
+  // Opt out of React Compiler: "today" and the current week come from the
+  // clock, and a memoised read froze them at the tab's first mount (a rep
+  // opening the app on Monday saw last week, Saturday ringed as today).
+  'use no memo';
   const router = useRouter();
   const gate = useRoleGate();
   const myEmail = gate.role?.email.toLowerCase() ?? '';
@@ -64,6 +68,29 @@ function SalesWeek() {
   const [visits, setVisits] = useState<ScheduleEntry[]>([]);
   const [appts, setAppts] = useState<LeadAppointmentEntry[]>([]);
   const [leadByJob, setLeadByJob] = useState<Map<string, string>>(new Map());
+  // The rep paged away from the current week (or a link chose one): keep it.
+  const paged = useRef(false);
+  const [focusDay, setFocusDay] = useState<string | null>(null);
+
+  // `?day=YYYY-MM-DD` (notification taps): that day's week, the day ringed.
+  const params = useLocalSearchParams<{ day?: string }>();
+  useEffect(() => {
+    const day = typeof params.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(params.day) ? params.day : null;
+    if (!day) return;
+    paged.current = true;
+    setWeekStart(mondayOf(new Date(`${day}T12:00:00`)));
+    setFocusDay(day);
+    router.setParams({ day: undefined } as never);
+  }, [params.day, router]);
+
+  // Back on the tab (or the app) on a new week: follow the clock.
+  useFocusEffect(
+    useCallback(() => {
+      if (paged.current) return;
+      const current = mondayOf(new Date());
+      setWeekStart((prev) => (isoDay(prev) === isoDay(current) ? prev : current));
+    }, []),
+  );
 
   const days = useMemo(
     () =>
@@ -157,6 +184,7 @@ function SalesWeek() {
   };
 
   const shiftWeek = (weeks: number) => {
+    paged.current = true;
     const d = new Date(weekStart);
     d.setDate(d.getDate() + weeks * 7);
     setWeekStart(d);
@@ -189,7 +217,7 @@ function SalesWeek() {
           const d = new Date(`${day}T12:00:00`);
           const past = day < today;
           return (
-            <Card key={day} padded={false} style={[styles.day, day === today && styles.today, past && styles.past]}>
+            <Card key={day} padded={false} style={[styles.day, day === today && styles.today, past && styles.past, day === focusDay && styles.focus]}>
               <View style={styles.dayHead}>
                 <AppText variant="bodyStrong" color={colors.textPrimary} style={styles.dayName}>
                   {d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })}
@@ -245,6 +273,7 @@ const styles = StyleSheet.create({
   loading: { marginVertical: spacing.xl },
   day: { overflow: 'hidden' },
   today: { borderWidth: 1.5, borderColor: hubColors.crm.fg },
+  focus: { borderWidth: 2, borderColor: colors.ocean },
   past: { opacity: 0.6 },
   dayHead: {
     flexDirection: 'row',
@@ -259,3 +288,6 @@ const styles = StyleSheet.create({
   pillFull: { backgroundColor: colors.dangerSoft },
   warn: { paddingHorizontal: spacing.md, paddingBottom: spacing.xs },
 });
+
+// A render error replaces only this screen; the header / tab bar stay (2026-11-08).
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorBoundary';

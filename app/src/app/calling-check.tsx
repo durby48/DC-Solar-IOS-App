@@ -24,6 +24,9 @@ import { getIncomingRegistration, inAppCallingSupported, registerForIncomingCall
 type Check = { ok: boolean; title: string; detail: string };
 
 export default function CallingCheckScreen() {
+  // Opt out of React Compiler (2026-11-08): this reads the clock during
+  // render (today / quick-pick dates), and memoised that froze at mount.
+  'use no memo';
   const [line, setLine] = useState<string | null | undefined>(undefined);
   const [prefs, setPrefs] = useState<MyPrefs | null>(null);
   const [registration, setRegistration] = useState(getIncomingRegistration());

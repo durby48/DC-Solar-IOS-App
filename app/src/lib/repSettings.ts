@@ -9,7 +9,8 @@ import { supabase } from '@/lib/supabase';
  *   Do not disturb   dnd_enabled + work_start / work_end (America/Chicago):
  *                    outside those hours calls to their DC Solar number do not
  *                    ring and the caller is texted back (twilio-voice-inbound)
- *   Notifications    notify_texts / notify_missed_calls / notify_new_prospects,
+ *   Notifications    notify_texts / notify_missed_calls / notify_new_prospects /
+ *                    notify_storms / notify_tasks / notify_schedule,
  *                    honoured by the `notify` edge function
  */
 
@@ -25,6 +26,10 @@ export interface MyPrefs {
   notifyNewProspects: boolean;
   /** Hail near my leads / customers (2026-10-09). */
   notifyStorms: boolean;
+  /** Tasks handed to me and task-due reminders (2026-11-08). */
+  notifyTasks: boolean;
+  /** Job schedule changes, appointment changes and appointment reminders (2026-11-08). */
+  notifySchedule: boolean;
 }
 
 export const DEFAULT_PREFS: MyPrefs = {
@@ -35,6 +40,8 @@ export const DEFAULT_PREFS: MyPrefs = {
   notifyMissedCalls: true,
   notifyNewProspects: true,
   notifyStorms: true,
+  notifyTasks: true,
+  notifySchedule: true,
 };
 
 async function myEmail(): Promise<string | null> {
@@ -48,7 +55,7 @@ export async function fetchMyPrefs(): Promise<MyPrefs> {
     if (!email) return DEFAULT_PREFS;
     const { data } = await supabase
       .from('staff_profiles')
-      .select('dnd_enabled, work_start, work_end, notify_texts, notify_missed_calls, notify_new_prospects, notify_storms')
+      .select('dnd_enabled, work_start, work_end, notify_texts, notify_missed_calls, notify_new_prospects, notify_storms, notify_tasks, notify_schedule')
       .eq('company', COMPANY)
       .eq('email', email)
       .maybeSingle();
@@ -62,6 +69,8 @@ export async function fetchMyPrefs(): Promise<MyPrefs> {
       notifyMissedCalls: r.notify_missed_calls !== false,
       notifyNewProspects: r.notify_new_prospects !== false,
       notifyStorms: r.notify_storms !== false,
+      notifyTasks: r.notify_tasks !== false,
+      notifySchedule: r.notify_schedule !== false,
     };
   } catch {
     return DEFAULT_PREFS;
@@ -80,6 +89,8 @@ export async function saveMyPrefs(patch: Partial<MyPrefs>): Promise<{ ok: true }
     if (patch.notifyMissedCalls !== undefined) row.notify_missed_calls = patch.notifyMissedCalls;
     if (patch.notifyNewProspects !== undefined) row.notify_new_prospects = patch.notifyNewProspects;
     if (patch.notifyStorms !== undefined) row.notify_storms = patch.notifyStorms;
+    if (patch.notifyTasks !== undefined) row.notify_tasks = patch.notifyTasks;
+    if (patch.notifySchedule !== undefined) row.notify_schedule = patch.notifySchedule;
     const { error } = await supabase.from('staff_profiles').upsert(row, { onConflict: 'company,email' });
     return error ? { ok: false, message: error.message } : { ok: true };
   } catch (e) {

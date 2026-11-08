@@ -6,9 +6,10 @@
  *    scratch every time the Today screen loads, so edits to the schedule are
  *    picked up next open. No server involved.
  *
- * 2. REMOTE push groundwork: each signed-in device registers its Expo push
- *    token into push_tokens (migration 9). Server-side triggers (payment
- *    received, contract signed, …) will use these tokens in a later phase.
+ * 2. REMOTE pushes: each signed-in device registers its Expo push token
+ *    (push_tokens, via the register_push_token RPC); the `notify` edge
+ *    function fans pushes out to them and keeps every one in the person's
+ *    Alerts list (`notifications`, lib/alerts.ts).
  *
  * Everything is best-effort and iOS/Android-only: web and permission-denied
  * cases silently no-op — notifications must never break the app.
@@ -35,8 +36,10 @@ export function configureNotificationHandler(): void {
     handleNotification: async () => ({
       shouldShowBanner: true,
       shouldShowList: true,
-      shouldPlaySound: false,
-      shouldSetBadge: false,
+      // Sound + badge on (2026-11-08): a text arriving while the app is open
+      // used to show a silent banner, and the icon never carried a count.
+      shouldPlaySound: true,
+      shouldSetBadge: true,
     }),
   });
 }
@@ -142,7 +145,8 @@ export async function scheduleJobReminders(jobs: ReminderJob[]): Promise<void> {
           content: {
             title: reminder.title,
             body: reminder.body,
-            data: { type: REMINDER_TYPE, jobId: job.id },
+            // `day` (2026-11-08): a tap opens the calendar on that work day.
+            data: { type: REMINDER_TYPE, jobId: job.id, day: row.work_date },
           },
           trigger: {
             type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -183,6 +187,14 @@ export async function registerPushToken(email: string): Promise<void> {
   try {
     const token = await currentPushToken();
     if (!token) return;
+    // 2026-11-08: through the `register_push_token` RPC. The old upsert by
+    // token could not move a device to a new person — ON CONFLICT DO UPDATE
+    // needs the UPDATE policy ("your own email") to pass on the EXISTING row,
+    // which belongs to the previous person — so it errored silently and their
+    // pushes kept arriving on this phone. The RPC reassigns by token to the
+    // caller's own email (never a caller-chosen one).
+    const { error } = await supabase.rpc('register_push_token', { p_token: token, p_platform: Platform.OS });
+    if (!error) return;
     await supabase.from('push_tokens').upsert(
       {
         company: COMPANY,

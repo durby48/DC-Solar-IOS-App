@@ -23,7 +23,7 @@ import {
 import { colors, hubColors, radii, spacing } from '@/constants/theme';
 import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { getDocumentUrl } from '@/lib/data';
-import { formatShortDate } from '@/lib/dates';
+import { formatShortDate, todayISO } from '@/lib/dates';
 import {
   deleteFinanceEntry,
   generateContractPdf,
@@ -106,7 +106,8 @@ const JOB_STATUS: { key: JobStatusFilter; label: string }[] = [
 function inPeriod(dateISO: string | null, period: Period): boolean {
   if (period === 'all') return true;
   if (!dateISO) return false;
-  const now = new Date().toISOString().slice(0, 10);
+  // Local date (2026-11-08): UTC flipped "This month" early on a month's last evening.
+  const now = todayISO();
   if (period === 'month') return dateISO.slice(0, 7) === now.slice(0, 7);
   if (period === 'ytd') return dateISO.slice(0, 4) === now.slice(0, 4);
   // quarter

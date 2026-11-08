@@ -795,3 +795,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.danger,
   },
 });
+
+// A render error replaces only this screen; the header / tab bar stay (2026-11-08).
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorBoundary';

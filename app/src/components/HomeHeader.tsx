@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AlertsBell } from '@/components/AlertsBell';
 import { AppText } from '@/components/ui';
 import { accentCycle, colors, hubColors, radii, spacing, type HubKey } from '@/constants/theme';
 import { formatFullDate } from '@/lib/dates';
@@ -42,6 +43,10 @@ import { useRole } from '@/lib/role';
  * person's own row (see `lib/profile.ts`).
  */
 export function HomeHeader({ line }: { line?: string | null } = {}) {
+  // Opt out of React Compiler: the greeting and the date read the clock, and
+  // memoised they froze at the tab's first mount ("Good morning" all evening,
+  // yesterday's date the next day).
+  'use no memo';
   const insets = useSafeAreaInsets();
   const role = useRole();
 
@@ -159,6 +164,9 @@ export function HomeHeader({ line }: { line?: string | null } = {}) {
             </AppText>
           ) : null}
         </View>
+
+        {/* Alerts (2026-11-08): every push this person was sent. */}
+        {email ? <AlertsBell /> : null}
 
         <Avatar
           name={displayName}

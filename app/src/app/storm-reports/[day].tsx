@@ -438,3 +438,6 @@ const styles = StyleSheet.create({
   send: { backgroundColor: colors.sun, borderRadius: radii.pill, paddingVertical: spacing.sm + 4, alignItems: 'center' },
   sendText: { color: colors.textOnAction, fontSize: 14, fontWeight: '800' },
 });
+
+// A render error replaces only this screen; the header / tab bar stay (2026-11-08).
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorBoundary';

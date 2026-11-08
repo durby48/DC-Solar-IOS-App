@@ -14,7 +14,7 @@ import { DefaultTheme, Stack, ThemeProvider, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { Platform, Pressable, StyleSheet, Text } from 'react-native';
+import { Platform, Pressable, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -22,48 +22,20 @@ import { ConnectionBanner } from '@/components/ConnectionBanner';
 import { DevViewFrame } from '@/components/DevViewBanner';
 import { KeypadFab } from '@/components/KeypadFab';
 import { colors } from '@/constants/theme';
-import { installProblemCapture, reportAppOpen, reportDiagnostic } from '@/lib/diagnostics';
+import { installProblemCapture, reportAppOpen } from '@/lib/diagnostics';
 import { useNotificationRouting } from '@/lib/notificationRouter';
 import { configureNotificationHandler } from '@/lib/notifications';
 import { useSalesConfinement } from '@/lib/salesConfinement';
 import { prepareVoiceAtLaunch } from '@/lib/voice';
 
 /**
- * The last line before a white screen. A JS error anywhere under the root
- * lands here instead of killing the app: it is recorded to
- * `client_diagnostics` (message + the top of the stack, nothing else) so it
- * can be read from a desk, and the person gets a way back. Native crashes
- * do not reach this; JS ones — a bad param, a null in a screen — do.
+ * The last line before a white screen: a JS error that no screen's own
+ * boundary caught (components/ScreenErrorBoundary.tsx — record screens and
+ * tabs export one, so their header / tab bar survive). Recorded to
+ * `client_diagnostics`; "Go to Home" restarts the JS, because at this level
+ * the navigator is gone and there is nothing left to navigate with.
  */
-export function ErrorBoundary({ error, retry }: { error: Error; retry: () => Promise<void> }) {
-  useEffect(() => {
-    reportDiagnostic('js_error', false, {
-      message: error.message,
-      stack: (error.stack ?? '').split('\n').slice(0, 6).join(' | '),
-    });
-  }, [error]);
-  return (
-    <SafeAreaView style={styles.errorScreen}>
-      <Ionicons name="warning-outline" size={28} color={colors.ocean} />
-      <Text style={styles.errorTitle}>Something went wrong</Text>
-      <Text style={styles.errorBody}>{error.message}</Text>
-      <Pressable onPress={() => void retry()} style={({ pressed }) => [styles.errorButton, pressed && { opacity: 0.6 }]}>
-        <Text style={styles.errorButtonText}>Try again</Text>
-      </Pressable>
-      <Pressable
-        onPress={() => {
-          try {
-            router.replace('/(tabs)' as never);
-          } catch {
-            void retry();
-          }
-        }}
-        style={({ pressed }) => [styles.errorLink, pressed && { opacity: 0.6 }]}>
-        <Text style={styles.errorLinkText}>Go to Home</Text>
-      </Pressable>
-    </SafeAreaView>
-  );
-}
+export { RootErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorBoundary';
 
 /**
  * Web-only header back button: the native-stack header on web doesn't
@@ -213,6 +185,8 @@ export default function RootLayout() {
             <Stack.Screen name="saved-texts" options={{ title: 'Saved texts' }} />
             <Stack.Screen name="do-not-disturb" options={{ title: 'Do not disturb' }} />
             <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
+            {/* Every push this person was sent (2026-11-08). */}
+            <Stack.Screen name="alerts" options={{ title: 'Alerts' }} />
             <Stack.Screen name="calling-check" options={{ title: 'Calling check' }} />
             <Stack.Screen name="lead-map" options={{ title: 'Lead map' }} />
             <Stack.Screen name="recents" options={{ title: 'Recent calls' }} />
@@ -286,11 +260,4 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 100,
   },
-  errorScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24, backgroundColor: colors.surfaceAlt },
-  errorTitle: { color: colors.ink, fontSize: 18, fontWeight: '800' },
-  errorBody: { color: colors.inkSoft, fontSize: 13, fontWeight: '600', textAlign: 'center' },
-  errorButton: { marginTop: 8, backgroundColor: colors.sun, borderRadius: 999, paddingHorizontal: 22, paddingVertical: 10 },
-  errorButtonText: { color: colors.textOnAction, fontSize: 14, fontWeight: '800' },
-  errorLink: { padding: 8 },
-  errorLinkText: { color: colors.ocean, fontSize: 13, fontWeight: '700' },
 });
