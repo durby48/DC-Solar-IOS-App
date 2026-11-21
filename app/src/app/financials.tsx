@@ -10,6 +10,7 @@ import { AnimatedPressable, AppText, Button, Card, Chip, EmptyState, SectionHead
 import { colors, hubColors, spacing } from '@/constants/theme';
 import { useAdminOnlyScreen } from '@/lib/adminGate';
 import { todayISO } from '@/lib/dates';
+import { syncFinanceWidget } from '@/lib/financeWidget';
 import {
   fetchBooksOverview,
   fetchJobPnl,
@@ -134,8 +135,11 @@ function QboMirror({ refreshKey }: { refreshKey: number }) {
       setMatchNote(parts.length ? parts.join(' · ') : null);
       setToConfirm(n);
     }
-    if (o.ok) setOverview(o.value);
-    else setError(o.message);
+    if (o.ok) {
+      setOverview(o.value);
+      // Keep the home-screen widget in step with what Devon just looked at.
+      void syncFinanceWidget(true);
+    } else setError(o.message);
     if (j.ok) setJobs(j.value);
     if (u.ok) setNeedsJob(u.value.lines.length);
     setLoadedAt(new Date());

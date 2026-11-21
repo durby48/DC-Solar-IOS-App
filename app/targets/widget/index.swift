@@ -185,9 +185,153 @@ struct TodayWidget: Widget {
   }
 }
 
+
+// MARK: - Company numbers (2026-11-21): YTD revenue + company value
+
+private let financeKey = "financeState"
+
+/// Written by the app (src/lib/financeWidget.ts) from QuickBooks — admins' phones only.
+struct FinanceState {
+  var ytdRevenue: Double
+  var companyValue: Double
+  var year: Int
+  /// ms since epoch the numbers were read; 0 = nothing on this phone.
+  var asOf: Double
+
+  var hasData: Bool { asOf > 0 }
+  var asOfDate: Date { Date(timeIntervalSince1970: asOf / 1000) }
+
+  static func load() -> FinanceState {
+    let dict = UserDefaults(suiteName: appGroup)?.dictionary(forKey: financeKey) ?? [:]
+    func num(_ key: String) -> Double { (dict[key] as? NSNumber)?.doubleValue ?? 0 }
+    return FinanceState(
+      ytdRevenue: num("ytdRevenue"),
+      companyValue: num("companyValue"),
+      year: Int(num("year")),
+      asOf: num("asOf")
+    )
+  }
+}
+
+struct FinanceEntry: TimelineEntry {
+  let date: Date
+  let state: FinanceState
+}
+
+struct FinanceProvider: TimelineProvider {
+  func placeholder(in context: Context) -> FinanceEntry {
+    FinanceEntry(date: Date(), state: FinanceState(ytdRevenue: 255_980, companyValue: 49_202, year: 2026, asOf: Date().timeIntervalSince1970 * 1000))
+  }
+
+  func getSnapshot(in context: Context, completion: @escaping (FinanceEntry) -> Void) {
+    let state = FinanceState.load()
+    completion(FinanceEntry(date: Date(), state: state.hasData ? state : placeholder(in: context).state))
+  }
+
+  func getTimeline(in context: Context, completion: @escaping (Timeline<FinanceEntry>) -> Void) {
+    // The numbers only change when the app writes new ones (and asks WidgetKit
+    // to reload); the hourly tick just keeps the "updated … ago" line honest.
+    let entry = FinanceEntry(date: Date(), state: FinanceState.load())
+    completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(3600))))
+  }
+}
+
+private func dollars(_ value: Double) -> String {
+  let f = NumberFormatter()
+  f.numberStyle = .currency
+  f.currencyCode = "USD"
+  f.maximumFractionDigits = 0
+  return f.string(from: NSNumber(value: value)) ?? "$\(Int(value))"
+}
+
+struct FinanceFigure: View {
+  let label: String
+  let value: Double
+  let color: Color
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 1) {
+      Text(label)
+        .font(.system(size: 10, weight: .heavy, design: .rounded))
+        .foregroundStyle(Theme.inkSoft)
+        .kerning(0.5)
+        .lineLimit(1)
+      Text(dollars(value))
+        .font(.system(.title3, design: .rounded).weight(.bold).monospacedDigit())
+        .foregroundStyle(color)
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
+    }
+  }
+}
+
+struct FinanceWidgetView: View {
+  var entry: FinanceEntry
+  @Environment(\.widgetFamily) private var family
+
+  private var state: FinanceState { entry.state }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 4) {
+        Circle().fill(Theme.olive).frame(width: 8, height: 8)
+        Text("DC SOLAR")
+          .font(.system(size: 10, weight: .heavy, design: .rounded))
+          .foregroundStyle(Theme.inkSoft)
+          .kerning(0.6)
+        Spacer(minLength: 0)
+      }
+
+      if state.hasData {
+        if family == .systemMedium {
+          HStack(alignment: .top, spacing: 12) {
+            FinanceFigure(label: "\(state.year) REVENUE", value: state.ytdRevenue, color: Theme.sun)
+            Spacer(minLength: 0)
+            FinanceFigure(label: "COMPANY VALUE", value: state.companyValue, color: Theme.oliveDeep)
+          }
+        } else {
+          FinanceFigure(label: "\(state.year) REVENUE", value: state.ytdRevenue, color: Theme.sun)
+          FinanceFigure(label: "COMPANY VALUE", value: state.companyValue, color: Theme.oliveDeep)
+        }
+        Spacer(minLength: 0)
+        HStack(spacing: 3) {
+          Text("QuickBooks ·")
+          Text(state.asOfDate, style: .relative)
+          Text("ago")
+        }
+        .font(.system(size: 9, weight: .semibold, design: .rounded))
+        .foregroundStyle(Theme.inkSoft.opacity(0.8))
+        .lineLimit(1)
+      } else {
+        Spacer(minLength: 0)
+        Text("Open DC Solar to load the company numbers")
+          .font(.system(.caption, design: .rounded).weight(.semibold))
+          .foregroundStyle(Theme.inkSoft)
+        Spacer(minLength: 0)
+      }
+    }
+    .containerBackground(Theme.cream, for: .widget)
+    .widgetURL(URL(string: "dcsolarkc://financials"))
+  }
+}
+
+struct FinanceWidget: Widget {
+  let kind = "DCSolarFinanceWidget"
+
+  var body: some WidgetConfiguration {
+    StaticConfiguration(kind: kind, provider: FinanceProvider()) { entry in
+      FinanceWidgetView(entry: entry)
+    }
+    .configurationDisplayName("Company Numbers")
+    .description("Year-to-date revenue and company value from QuickBooks. Admins only.")
+    .supportedFamilies([.systemSmall, .systemMedium])
+  }
+}
+
 @main
 struct DCSolarWidgets: WidgetBundle {
   var body: some Widget {
     TodayWidget()
+    FinanceWidget()
   }
 }

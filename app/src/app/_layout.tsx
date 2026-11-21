@@ -23,6 +23,7 @@ import { DevViewFrame } from '@/components/DevViewBanner';
 import { KeypadFab } from '@/components/KeypadFab';
 import { colors } from '@/constants/theme';
 import { installProblemCapture, reportAppOpen } from '@/lib/diagnostics';
+import { useFinanceWidgetSync } from '@/lib/financeWidget';
 import { useNotificationRouting } from '@/lib/notificationRouter';
 import { configureNotificationHandler } from '@/lib/notifications';
 import { useSalesConfinement } from '@/lib/salesConfinement';
@@ -112,6 +113,10 @@ export default function RootLayout() {
 
   // A sales login lives in the CRM tab; any other path sends it back there.
   useSalesConfinement();
+
+  // "Company numbers" home-screen widget: YTD revenue + company value from
+  // QuickBooks, admins only (lib/financeWidget.ts).
+  useFinanceWidgetSync();
 
   // Incoming calls: create the PushKit registry and listen for invites from
   // the very first render, not from Home — a VoIP push that wakes a
