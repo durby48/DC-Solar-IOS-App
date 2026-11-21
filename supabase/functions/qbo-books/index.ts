@@ -68,7 +68,7 @@ const fail = (status: number, code: string, error: string) => json({ ok: false, 
 
 type Env = { supabaseUrl: string; serviceKey: string; clientId: string; clientSecret: string; apiBase: string };
 
-function readEnv(): Env | string {
+export function readEnv(): Env | string {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const clientId = Deno.env.get('QBO_CLIENT_ID');
@@ -95,7 +95,7 @@ class QboError extends Error {
   }
 }
 
-async function liveConnection(env: Env, admin: SupabaseClient, company: string): Promise<Conn> {
+export async function liveConnection(env: Env, admin: SupabaseClient, company: string): Promise<Conn> {
   const { data } = await admin.from('qbo_connections').select('*').eq('company', company).maybeSingle();
   const conn = data as Conn | null;
   if (!conn) throw new QboError(409, 'QuickBooks is not connected. Systems Management → QuickBooks → Connect.');
@@ -133,7 +133,7 @@ type Qbo = {
   query: (q: string) => Promise<Record<string, any>[]>;
 };
 
-function client(env: Env, conn: Conn): Qbo {
+export function client(env: Env, conn: Conn): Qbo {
   const call = async (method: 'GET' | 'POST', path: string, body?: unknown) => {
     const sep = path.includes('?') ? '&' : '?';
     const res = await fetch(`${env.apiBase}/v3/company/${conn.realm_id}/${path}${sep}minorversion=${MINOR_VERSION}`, {
@@ -244,7 +244,7 @@ const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T12:00:00
 const dayDiff = (a: string, b: string) => Math.round(Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86400000);
 const money = (n: number) => Math.round(n * 100) / 100;
 
-async function overview(qbo: Qbo, start: string, end: string) {
+export async function overview(qbo: Qbo, start: string, end: string) {
   const [pnl, bs, ar] = await Promise.all([
     report(qbo, 'ProfitAndLoss', { start_date: start, end_date: end, summarize_column_by: 'Month', accounting_method: 'Cash' }),
     report(qbo, 'BalanceSheet', { end_date: end, accounting_method: 'Cash' }),
@@ -266,7 +266,9 @@ async function overview(qbo: Qbo, start: string, end: string) {
       expenses: groupTotal(pnl.rows, 'Expenses') ?? 0,
       netIncome: groupTotal(pnl.rows, 'NetIncome') ?? 0,
       bank: groupTotal(bs.rows, 'BankAccounts') ?? 0,
-      receivables: groupTotal(bs.rows, 'AR') ?? 0,
+      // The books are cash basis, where the balance sheet always shows A/R as $0 —
+      // what customers owe comes from the A/R aging report's grand total instead.
+      receivables: groupTotal(ar.rows, 'GrandTotal') ?? ar.rows.at(-1)?.values.at(-1) ?? 0,
       liabilities: groupTotal(bs.rows, 'Liabilities') ?? 0,
       equity: groupTotal(bs.rows, 'Equity') ?? 0,
     },
@@ -292,7 +294,7 @@ async function projectLinks(admin: SupabaseClient, company: string) {
   return { byQbo, byJob };
 }
 
-async function jobsReport(qbo: Qbo, admin: SupabaseClient, company: string, start: string, end: string) {
+export async function jobsReport(qbo: Qbo, admin: SupabaseClient, company: string, start: string, end: string) {
   const [pnl, links, jobsRes] = await Promise.all([
     report(qbo, 'ProfitAndLoss', { start_date: start, end_date: end, summarize_column_by: 'Customers', accounting_method: 'Cash' }),
     projectLinks(admin, company),
@@ -302,7 +304,9 @@ async function jobsReport(qbo: Qbo, admin: SupabaseClient, company: string, star
   const pick = (group: string, i: number) => groupValues(pnl.rows, group)?.[i] ?? 0;
   const rows = pnl.columns
     .map((c, i) => {
-      if (/^total$/i.test(c.title)) return null;
+      // "Total <customer>" columns are QuickBooks' roll-up of a parent customer's
+      // projects — counting them would double every job.
+      if (/^total\b/i.test(c.title)) return null;
       const jobId = c.key ? links.byQbo.get(c.key) : undefined;
       const job = jobId ? jobs.get(jobId) : undefined;
       const income = pick('Income', i);
@@ -360,7 +364,10 @@ type Line = {
   suggestion: { jobId: string; jobNumber: string | null; why: string } | null;
 };
 
-async function untagged(qbo: Qbo, admin: SupabaseClient, company: string, start: string, end: string) {
+export async function untagged(qbo: Qbo, admin: SupabaseClient, company: string, from: string, end: string) {
+  // Before FEED_START every expense was categorised in the app's Review for QuickBooks and
+  // imported; what is untagged there is deliberate overhead. Only feed-era lines need a look.
+  const start = from < FEED_START ? FEED_START : from;
   const [accounts, purchases, bills, reviewedRes, jobsRes] = await Promise.all([
     qbo.query('select * from Account'),
     qbo.query(`select * from Purchase where TxnDate >= '${start}' and TxnDate <= '${end}'`),
@@ -392,7 +399,7 @@ async function untagged(qbo: Qbo, admin: SupabaseClient, company: string, start:
           amount: money(num(l.Amount)),
           total: money(num(t.TotalAmt)),
           payee: t.EntityRef?.name ?? null,
-          memo: [l.Description, t.PrivateNote].filter(Boolean).join(' · ') || null,
+          memo: [...new Set([l.Description, t.PrivateNote].filter(Boolean))].join(' · ') || null,
           account: a.FullyQualifiedName,
           accountType: a.AccountType,
           jobCost: a.AccountType === 'Cost of Goods Sold',
@@ -553,7 +560,7 @@ type AppExpense = {
   extracted: Record<string, unknown> | null;
 };
 
-async function matchApp(qbo: Qbo, admin: SupabaseClient, company: string, dryRun: boolean, keys: Set<string> | null) {
+export async function matchApp(qbo: Qbo, admin: SupabaseClient, company: string, dryRun: boolean, keys: Set<string> | null) {
   const { data } = await admin
     .from('finance_entries')
     .select('id, job_id, amount, occurred_on, description, paid_from_bank, extracted')
@@ -642,7 +649,8 @@ async function matchApp(qbo: Qbo, admin: SupabaseClient, company: string, dryRun
 
 // ---------------------------------------------------------------- handler
 
-Deno.serve(async (req) => {
+// Served only when run as the function; scripts/qbo/books-check.ts imports the helpers above.
+if (import.meta.main) Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS });
   if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'POST only');
   const env = readEnv();

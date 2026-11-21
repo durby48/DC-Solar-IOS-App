@@ -55,7 +55,7 @@ export default function BooksJobsScreen() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const [u, m, j] = await Promise.all([fetchUntaggedLines('2026-06-26'), previewAppMatches(), fetchPipelineJobs()]);
+    const [u, m, j] = await Promise.all([fetchUntaggedLines('2026-10-15'), previewAppMatches(), fetchPipelineJobs()]);
     if (u.ok) {
       setLines(u.value.lines);
       setAccounts(u.value.accounts);
