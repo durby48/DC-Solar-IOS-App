@@ -192,15 +192,22 @@ export function PipelineHero() {
   const { width } = useWindowDimensions();
   const wide = Platform.OS === 'web' && width >= WIDE_BREAKPOINT;
 
+  // Hours, panels and completed projects move every day: re-read whenever the Pipeline comes
+  // into view and every five minutes while it stays open (it used to read once per launch).
   useEffect(() => {
+    if (!focused) return;
     let cancelled = false;
-    fetchCompanyMetrics().then((result) => {
-      if (!cancelled) setMetrics(result);
-    });
+    const load = () =>
+      fetchCompanyMetrics().then((result) => {
+        if (!cancelled && result) setMetrics(result);
+      });
+    void load();
+    const timer = setInterval(load, 5 * 60_000);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
-  }, []);
+  }, [focused]);
 
   /**
    * The whole frame animation. Off screen or reduced motion, it parks on the

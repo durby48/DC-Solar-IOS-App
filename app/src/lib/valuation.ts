@@ -29,6 +29,7 @@ import { loadedLaborCost } from '@/lib/laborCost';
 import type { LaborRun, LedgerEntry } from '@/lib/financials';
 import { CONTRACTED_STAGES } from '@/lib/pipeline';
 import { isCompanyJob, stageOrDefault } from '@/lib/stages';
+import { allRows } from '@/lib/allRows';
 import { supabase } from '@/lib/supabase';
 import type { Job } from '@/lib/types';
 
@@ -256,8 +257,8 @@ export function deleteLiability(id: string): Promise<SaveResult> {
 export async function fetchDailyGrossWages(): Promise<Map<string, number> | null> {
   try {
     const [hoursResult, timeResult, employeesResult] = await Promise.all([
-      supabase.from('employee_hours').select('hours, rate, occurred_on').eq('company', COMPANY),
-      supabase.from('time_entries').select('employee, clock_in, clock_out').eq('company', COMPANY),
+      allRows(() => supabase.from('employee_hours').select('hours, rate, occurred_on').eq('company', COMPANY)),
+      allRows(() => supabase.from('time_entries').select('employee, clock_in, clock_out').eq('company', COMPANY)),
       supabase.from('employees').select('email, pay_rate').eq('is_test', false),
     ]);
     if (hoursResult.error || timeResult.error || employeesResult.error) return null;

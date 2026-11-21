@@ -198,6 +198,14 @@ function QboMirror({ refreshKey }: { refreshKey: number }) {
             <StatTile label="Gross profit" value={h.grossProfit} prefix="$" tone={2} compact style={styles.tileThird} />
             <StatTile label="In the bank" value={h.bank} prefix="$" tone={5} note={`as of ${overview!.period.end}`} style={styles.tile} />
             <StatTile label="Customers owe" value={h.receivables} prefix="$" tone={6} style={styles.tile} />
+            <StatTile
+              label="Company value"
+              value={h.equity}
+              prefix="$"
+              tone="olive"
+              note="Equity on the balance sheet (what the company owns minus what it owes)"
+              style={styles.tileWide}
+            />
           </View>
 
           {matchNote ? (
@@ -337,6 +345,7 @@ const styles = StyleSheet.create({
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   tile: { flexBasis: '48%', flexGrow: 1 },
   tileThird: { flexBasis: '30%', flexGrow: 1 },
+  tileWide: { flexBasis: '100%' },
   matchNote: { marginTop: -spacing.xs },
   alertCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderColor: colors.amber, borderWidth: 1 },
   tableRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },

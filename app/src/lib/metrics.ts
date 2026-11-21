@@ -14,6 +14,7 @@
  * still show the animation.
  */
 
+import { allRows } from '@/lib/allRows';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
@@ -43,12 +44,10 @@ export async function fetchCompanyMetrics(): Promise<CompanyMetrics | null> {
           'stage, status, job_type, module_count, critter_guard_panels, has_critter_guard, is_internal',
         )
         .eq('company', COMPANY),
-      supabase.from('employee_hours').select('hours').eq('company', COMPANY),
-      supabase
-        .from('time_entries')
-        .select('clock_in, clock_out')
-        .eq('company', COMPANY)
-        .not('clock_out', 'is', null),
+      allRows(() => supabase.from('employee_hours').select('hours').eq('company', COMPANY)),
+      allRows(() =>
+        supabase.from('time_entries').select('clock_in, clock_out').eq('company', COMPANY).not('clock_out', 'is', null),
+      ),
     ]);
     if (jobsRes.error || hoursRes.error || timeRes.error) return null;
 

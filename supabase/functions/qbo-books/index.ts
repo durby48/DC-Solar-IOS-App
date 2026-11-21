@@ -686,10 +686,10 @@ const BOOK_ACCOUNT_QBO: Record<string, string> = {
 
 export async function splitPayroll(qbo: Qbo, admin: SupabaseClient, company: string, dryRun: boolean, runIds: Set<string> | null, force = false) {
   const [runsRes, reimbRes, hoursRes, clocksRes, empRes, jobsRes, linksRes] = await Promise.all([
-    admin.from('payroll_runs').select('*').eq('company', company).gte('payday', FEED_START).order('payday'),
+    admin.from('payroll_runs').select('*').eq('company', company).gte('payday', force ? BOOKS_START : FEED_START).order('payday'),
     admin.from('finance_entries').select('id, amount, job_id, description, extracted').eq('company', company).eq('type', 'expense').neq('status', 'void').not('extracted->>paid_via_payroll', 'is', null),
-    admin.from('employee_hours').select('employee, email, job_id, occurred_on, hours, rate').eq('company', company).gte('occurred_on', addDays(FEED_START, -40)),
-    admin.from('time_entries').select('employee, job_id, clock_in, clock_out').eq('company', company).not('clock_out', 'is', null).gte('clock_in', `${addDays(FEED_START, -40)}T00:00:00Z`),
+    admin.from('employee_hours').select('employee, email, job_id, occurred_on, hours, rate').eq('company', company).gte('occurred_on', addDays(BOOKS_START, -30)),
+    admin.from('time_entries').select('employee, job_id, clock_in, clock_out').eq('company', company).not('clock_out', 'is', null).gte('clock_in', `${addDays(BOOKS_START, -30)}T00:00:00Z`),
     admin.from('employees').select('email, display_name, pay_rate').eq('company', company),
     admin.from('jobs').select('id, job_number, name, is_internal, customer_id, stage').eq('company', company),
     // A run the 10/14 import already booked as a split journal entry counts as done too.
@@ -702,6 +702,16 @@ export async function splitPayroll(qbo: Qbo, admin: SupabaseClient, company: str
     const k = `${r.period_start}|${r.period_end}`;
     periodGross.set(k, money((periodGross.get(k) ?? 0) + num(r.gross_wages)));
   }
+  const periodsByPreference = [...new Set(runs.map((r) => `${r.kind === 'regular' ? 0 : 1}|${r.period_start}|${r.period_end}`))].sort();
+  const homeOf = (day: string) => {
+    for (const k of periodsByPreference) {
+      const [, ps, pe] = k.split('|');
+      if (day >= ps && day <= pe) return `${ps}|${pe}`;
+    }
+    return null;
+  };
+  const groupJobCost = (key: string) =>
+    labor.filter((l) => homeOf(l.day) === key && onJob(l.jobId)).reduce((sum, l) => sum + l.cost, 0);
   const reimbByReceipt = new Map<string, AppExpense[]>();
   for (const e of (reimbRes.data ?? []) as AppExpense[]) {
     const key = String(e.extracted?.paid_via_payroll ?? '');
@@ -772,7 +782,16 @@ export async function splitPayroll(qbo: Qbo, admin: SupabaseClient, company: str
     // logged job cost is booked ONCE across them, each run taking its share of the gross.
     const periodKey = `${run.period_start}|${run.period_end}`;
     const share = only ? 1 : gross / (periodGross.get(periodKey) || gross);
-    const inPeriod = labor.filter((l) => l.day >= run.period_start && l.day <= run.period_end && (!only || l.email === only));
+    // Each logged day belongs to ONE pay period (its "home"): the period of a regular run that
+    // covers it, else any run that covers it. A one-person correction run whose dates overlap a
+    // regular run's (Ben's 9/14) therefore books no job labor — those hours are already on jobs.
+    // A one-person correction run picks up that person's job hours only when the regular run
+    // covering those days paid less than the period's logged job cost (the 9/18 run paid
+    // $1,292 under the logged cost; Ben's 9/14 correction covered it).
+    const spill = only
+      ? labor.filter((l) => l.email === only && onJob(l.jobId) && l.day >= run.period_start && l.day <= run.period_end && homeOf(l.day) !== periodKey)
+      : [];
+    const inPeriod = only ? spill : labor.filter((l) => homeOf(l.day) === periodKey);
     const byJob = new Map<string, { cost: number; hours: number }>();
     for (const l of inPeriod) {
       if (!onJob(l.jobId)) continue;
@@ -784,7 +803,12 @@ export async function splitPayroll(qbo: Qbo, admin: SupabaseClient, company: str
     let allocated = 0;
     const jobCost = [...byJob.values()].reduce((s, v) => s + v.cost, 0);
     const periodTotal = only ? gross : periodGross.get(periodKey) || gross;
-    const scale = (jobCost > periodTotal ? periodTotal / jobCost : 1) * share;
+    let scale = (jobCost > periodTotal ? periodTotal / jobCost : 1) * share;
+    if (only) {
+      const overflow = [...new Set(spill.map((l) => homeOf(l.day)).filter(Boolean))]
+        .reduce((sum, k) => sum + Math.max(0, groupJobCost(k!) - (periodGross.get(k!) ?? 0)), 0);
+      scale = jobCost > 0 ? Math.min(1, Math.min(overflow, gross) / jobCost) : 0;
+    }
     if (jobCost > 0) {
       for (const [jobId, v] of [...byJob.entries()].sort()) {
         const amount = money(v.cost * scale);

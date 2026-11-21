@@ -13,6 +13,7 @@ import { fetchForecastModel, type ForecastModel } from '@/lib/forecast';
 import { loadedLaborCost } from '@/lib/laborCost';
 import { type Job } from '@/lib/types';
 import { isCompanyJob, stageOrDefault, type Stage } from '@/lib/stages';
+import { allRows } from '@/lib/allRows';
 import { supabase } from '@/lib/supabase';
 
 const COMPANY = 'dc-solar';
@@ -178,11 +179,13 @@ function isNewerEstimate(
  */
 export async function fetchFinanceEntries(): Promise<FinanceRow[] | null> {
   try {
-    const { data, error } = await supabase
-      .from('finance_entries')
-      .select('job_id, type, amount, occurred_on, created_at, status')
-      .eq('company', COMPANY)
-      .neq('status', 'void');
+    const { data, error } = await allRows(() =>
+      supabase
+        .from('finance_entries')
+        .select('job_id, type, amount, occurred_on, created_at, status')
+        .eq('company', COMPANY)
+        .neq('status', 'void'),
+    );
     if (error || !data) return null;
     return data as FinanceRow[];
   } catch {

@@ -10,6 +10,7 @@ import { isProfitExpense } from '@/lib/books';
 import { todayISO } from '@/lib/dates';
 import { loadedLaborCost } from '@/lib/laborCost';
 import { isCompanyJob, stageOrDefault } from '@/lib/stages';
+import { allRows } from '@/lib/allRows';
 import { supabase } from '@/lib/supabase';
 import type { Job } from '@/lib/types';
 
@@ -166,27 +167,26 @@ function byDateDesc(a: LedgerEntry, b: LedgerEntry): number {
 export async function fetchFinancials(): Promise<FinancialsData | null> {
   try {
     const [{ data, error }, hoursResult, timeResult, employeesResult, runsResult, settingsResult] = await Promise.all([
-      supabase
-        .from('finance_entries')
-        .select(
-          'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path, paid_from_bank, revision, document_meta, extracted, status',
-        )
-        .eq('company', COMPANY)
-        // A voided entry is cancelled money: it stays in the table for the
-        // audit trail but must not reach any total, ledger, or drill-down.
-        .neq('status', 'void'),
+      allRows(() =>
+        supabase
+          .from('finance_entries')
+          .select(
+            'id, type, direction, amount, counterparty, description, occurred_on, created_at, job_id, document_number, document_path, paid_from_bank, revision, document_meta, extracted, status',
+          )
+          .eq('company', COMPANY)
+          // A voided entry is cancelled money: it stays in the table for the
+          // audit trail but must not reach any total, ledger, or drill-down.
+          .neq('status', 'void'),
+      ),
       // Wages live here, not in finance_entries. Fetched alongside so `net`
       // can subtract them — the headline overstated profit by every wage
       // dollar ever paid without this.
-      supabase.from('employee_hours').select('hours, rate, occurred_on').eq('company', COMPANY),
+      allRows(() => supabase.from('employee_hours').select('hours, rate, occurred_on').eq('company', COMPANY)),
       // Clock in/out hours are the OTHER half of labor — the Hours tab and the
       // per-job view both count them, and until 2026-08-23 this headline did
       // not, so Net overstated profit by every clocked (never hand-logged)
       // hour. Priced at the roster pay_rate, same as fetchJobFinance.
-      supabase
-        .from('time_entries')
-        .select('employee, clock_in, clock_out')
-        .eq('company', COMPANY),
+      allRows(() => supabase.from('time_entries').select('employee, clock_in, clock_out').eq('company', COMPANY)),
       supabase.from('employees').select('email, pay_rate').eq('is_test', false),
       // Completed Gusto runs (admin-only). When present, labor for the covered
       // periods is the money that ACTUALLY left the bank, to the penny.

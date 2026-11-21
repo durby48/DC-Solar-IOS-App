@@ -654,6 +654,10 @@ if (process.argv.includes('--apply')) {
 
   // Journal entries — payroll runs and money owed to Isaiah
   for (const j of journals) {
+    // Payroll entries are owned by the qbo-books split_payroll action since 2026-11-21 (logged
+    // job hours → Job labor, extra paid hours → overhead). Never rebuild or delete them here;
+    // they stay in `journals` only for the bank check above.
+    if (j.kind === 'payroll') { feedSkipped.add(`journal|${j.appId}`); continue; }
     await ensure('journal', j.appId, 'JournalEntry', {
       TxnDate: j.date,
       PrivateNote: note([j.kind === 'payroll' ? `Gusto ${j.receipt ?? ''}` : 'Isaiah out of pocket', j.appId]),
