@@ -30,6 +30,14 @@ import { fileURLToPath } from 'node:url';
 import { query, sql } from './qbo.mjs';
 
 const START = '2026-06-26';
+// From FEED_START on, Chase's bank feed (and Gusto's own QuickBooks connection) bring bank
+// money into QuickBooks. This script must never create those again (Devon, 2026-11-21: no
+// duplicates): bank-line purchases, deposits and payroll JEs dated on/after it are skipped,
+// customer payments go to Undeposited Funds only (QuickBooks offers them as the match when
+// the feed's deposit is accepted), and app expenses are stamped onto the feed's own
+// transaction by the `qbo-books` edge function (action match_app, qbo_links 'feed_match').
+const FEED_START = '2026-10-15';
+const feedSkipped = new Set(); // `${kind}|${ref}` left to the bank feed — never deleted as orphans
 const STATEMENT_CHECK = { date: '2026-09-30', balance: 11633.35, opening: 2029.0 };
 const OUT = join(dirname(fileURLToPath(import.meta.url)), 'out');
 
@@ -163,6 +171,7 @@ for (const [ref, rows] of groups) {
   const date = bankDateOf(ref, rows);
   const net = money(rows.reduce((s, r) => s + signed(r), 0));
   const hasIn = rows.some((r) => r.direction === 'in');
+  const fromFeed = date >= FEED_START;
   const lineFor = (r) => {
     const x = ext(r);
     const key = r.type === 'investment' ? (r.direction === 'in' ? 'owner_investment' : 'owner_draw') : (x.book_account ?? 'uncategorized');
@@ -175,6 +184,10 @@ for (const [ref, rows] of groups) {
       direction: r.direction,
     };
   };
+  if (!hasIn && fromFeed) {
+    feedSkipped.add(`purchase|${ref}`);
+    continue;
+  }
   if (!hasIn) {
     const check = ref.match(/CHECK (\d+)/i)?.[1];
     purchases.push({ ref, date, paymentType: check ? 'Check' : 'Cash', docNumber: check ?? null, total: -net, lines: rows.map(lineFor) });
@@ -203,6 +216,12 @@ for (const [ref, rows] of groups) {
   }
   const total = money(linked.reduce((s, l) => s + l.amount, 0) + other.reduce((s, l) => s + (l.direction === 'in' ? l.amount : -l.amount), 0));
   if (Math.abs(total - net) > 0.005) warn(`deposit ${ref}: lines ${fmt(total)} ≠ group ${fmt(net)}`);
+  if (fromFeed) {
+    // The feed's deposit is the bank line; only the payments (→ Undeposited Funds) are ours.
+    feedSkipped.add(`deposit|${ref}`);
+    if (other.length) warn(`deposit ${ref}: ${other.length} non-payment line(s) left to the bank feed`);
+    continue;
+  }
   deposits.push({ ref, date, total, linked, other });
 }
 
@@ -258,6 +277,8 @@ for (const c of clocks) {
 }
 const jobLaborTotals = new Map();
 for (const run of runs) {
+  // Gusto posts its own runs to QuickBooks from FEED_START on.
+  if (run.payday >= FEED_START) { feedSkipped.add(`journal|${run.id}`); continue; }
   if (run.payday < START) continue;
   const gross = money(run.gross_wages);
   const withdrawn = money(run.total_withdrawn);
@@ -662,7 +683,7 @@ if (process.argv.includes('--apply')) {
   if (!SEED) {
     const ORDER = ['deposit', 'purchase', 'cash_move', 'journal', 'payment', 'sales_receipt', 'invoice'];
     const orphans = [...links.values()]
-      .filter((l) => UPDATABLE.has(l.app_kind) && !touched.has(`${l.app_kind}|${l.app_key}`))
+      .filter((l) => UPDATABLE.has(l.app_kind) && !touched.has(`${l.app_kind}|${l.app_key}`) && !feedSkipped.has(`${l.app_kind}|${l.app_key}`))
       .sort((a, b) => ORDER.indexOf(a.app_kind) - ORDER.indexOf(b.app_kind));
     for (const l of orphans) {
       const entity = l.qbo_type;

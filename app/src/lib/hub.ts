@@ -144,7 +144,8 @@ export const HUB_ITEMS: readonly HubItem[] = [
   { key: 'eom', title: 'Employee of the Month', icon: 'trophy', href: '/more/employee-of-month', hub: 'hr', tone: 5, gate: 'all' },
 
   // ---- Systems Management ----
-  { key: 'financials', title: 'Financials', icon: 'wallet', href: '/financials', hub: 'systems', tone: 'hr', gate: 'admin', subtitle: 'P&L, ledger, cash position' },
+  { key: 'financials', title: 'Financials', icon: 'wallet', href: '/financials', hub: 'systems', tone: 'hr', gate: 'admin', subtitle: 'Live from QuickBooks' },
+  { key: 'books-jobs', title: 'Expenses needing a job', icon: 'pricetags', href: '/books-jobs' as never, hub: 'systems', tone: 3, gate: 'admin', subtitle: 'Tag QuickBooks expenses to projects' },
   { key: 'books-review', title: 'Review for QuickBooks', icon: 'checkmark-done', href: '/books-review' as never, hub: 'systems', tone: 4, gate: 'admin', subtitle: 'Overhead, jobs and accounts' },
   { key: 'quickbooks', title: 'QuickBooks', icon: 'link', href: '/quickbooks' as never, hub: 'systems', tone: 5, gate: 'admin', subtitle: 'Connect the books' },
   { key: 'receipts', title: 'Receipts', icon: 'receipt', href: '/more/receipts', hub: 'systems', tone: 4, gate: 'all', subtitle: 'Upload and approve' },
