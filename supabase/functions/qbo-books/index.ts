@@ -472,7 +472,7 @@ export async function untagged(qbo: Qbo, admin: SupabaseClient, company: string,
 // ---------------------------------------------------------------- projects + assign
 
 /** The QuickBooks customer id of the job's project, creating customer + project when missing. */
-async function ensureProject(qbo: Qbo, admin: SupabaseClient, company: string, jobId: string): Promise<string> {
+export async function ensureProject(qbo: Qbo, admin: SupabaseClient, company: string, jobId: string): Promise<string> {
   const links = await projectLinks(admin, company);
   const have = links.byJob.get(jobId);
   if (have) return have;
@@ -659,33 +659,64 @@ export async function matchApp(qbo: Qbo, admin: SupabaseClient, company: string,
  * purchase per run. This rewrites that purchase's lines — same total, same
  * bank match, no new transaction — the way the 2026-10-14 import split payroll:
  *
- *   Job labor (COGS), one line per job      gross × that job's share of the period's labor cost
- *   Office & overhead wages                 the rest of gross (hours not on a job)
+ *   Job labor (COGS), one line per job      that job's logged labor cost in the period
+ *                                           (hours × pay rate; scaled down only if the
+ *                                           logged cost is more than the run's gross)
+ *   Office & overhead wages                 the rest of gross — hours not on a job AND any
+ *                                           extra hours Gusto paid beyond what was logged
+ *                                           (Devon 2026-11-21: app hours are accurate; extra
+ *                                           paid hours are office overhead)
  *   Payroll taxes (employer)                withdrawn − gross
+ *   reimbursement lines                     expenses paid back inside the run
+ *                                           (finance_entries.extracted.paid_via_payroll)
  *
  * Labor cost = logged hours (employee_hours) + clocked shifts (time_entries) ×
  * pay rate, within the run's pay period. A run needs a payroll_runs row (gross
  * + withdrawn, from the Gusto receipt); feed payroll lines without one are
  * reported, not touched. Links: qbo_links app_kind 'payroll_split', key = run id.
  */
-type Run = { id: string; period_start: string; period_end: string; payday: string; gross_wages: number; total_withdrawn: number; kind: string; notes: string | null; reimbursements: number | null };
+type Run = { id: string; period_start: string; period_end: string; payday: string; gross_wages: number; total_withdrawn: number; kind: string; notes: string | null; reimbursements: number | null; receipt_id: string | null };
 
-export async function splitPayroll(qbo: Qbo, admin: SupabaseClient, company: string, dryRun: boolean, runIds: Set<string> | null) {
-  const [runsRes, hoursRes, clocksRes, empRes, jobsRes, linksRes] = await Promise.all([
+/** lib/books.ts BOOK_ACCOUNTS key → QuickBooks account (the overhead ones a reimbursed receipt uses). */
+const BOOK_ACCOUNT_QBO: Record<string, string> = {
+  job_materials: 'Job materials', job_fuel: 'Job fuel & travel', fuel: 'Vehicle expenses:Fuel',
+  vehicle_repairs: 'Vehicle expenses:Vehicle repairs & maintenance', tools: 'Tools & small equipment', supplies: 'Supplies',
+  job_equipment_rental: 'Job equipment rental', meals: 'Meals',
+};
+
+export async function splitPayroll(qbo: Qbo, admin: SupabaseClient, company: string, dryRun: boolean, runIds: Set<string> | null, force = false) {
+  const [runsRes, reimbRes, hoursRes, clocksRes, empRes, jobsRes, linksRes] = await Promise.all([
     admin.from('payroll_runs').select('*').eq('company', company).gte('payday', FEED_START).order('payday'),
+    admin.from('finance_entries').select('id, amount, job_id, description, extracted').eq('company', company).eq('type', 'expense').neq('status', 'void').not('extracted->>paid_via_payroll', 'is', null),
     admin.from('employee_hours').select('employee, email, job_id, occurred_on, hours, rate').eq('company', company).gte('occurred_on', addDays(FEED_START, -40)),
     admin.from('time_entries').select('employee, job_id, clock_in, clock_out').eq('company', company).not('clock_out', 'is', null).gte('clock_in', `${addDays(FEED_START, -40)}T00:00:00Z`),
     admin.from('employees').select('email, display_name, pay_rate').eq('company', company),
     admin.from('jobs').select('id, job_number, name, is_internal, customer_id, stage').eq('company', company),
     // A run the 10/14 import already booked as a split journal entry counts as done too.
-    admin.from('qbo_links').select('app_key, qbo_id').eq('company', company).in('app_kind', ['payroll_split', 'journal']),
+    admin.from('qbo_links').select('app_kind, app_key, qbo_id').eq('company', company).in('app_kind', ['payroll_split', 'journal']),
   ]);
   const runs = (runsRes.data ?? []) as Run[];
+  const periodGross = new Map<string, number>();
+  for (const r of runs) {
+    if (r.kind === 'off_cycle' && /for [A-Z][a-z]+ [A-Z][a-z]+/.test(r.notes ?? '')) continue; // one person's off-cycle stands alone
+    const k = `${r.period_start}|${r.period_end}`;
+    periodGross.set(k, money((periodGross.get(k) ?? 0) + num(r.gross_wages)));
+  }
+  const reimbByReceipt = new Map<string, AppExpense[]>();
+  for (const e of (reimbRes.data ?? []) as AppExpense[]) {
+    const key = String(e.extracted?.paid_via_payroll ?? '');
+    reimbByReceipt.set(key, [...(reimbByReceipt.get(key) ?? []), e]);
+  }
   const rateOf = new Map(((empRes.data ?? []) as { email: string; pay_rate: number }[]).map((e) => [e.email?.toLowerCase(), Number(e.pay_rate) || 0]));
   const nameToEmail = new Map(((empRes.data ?? []) as { email: string; display_name: string }[]).map((e) => [e.display_name?.toLowerCase(), e.email?.toLowerCase()]));
   const jobs = new Map(((jobsRes.data ?? []) as JobRef[]).map((j) => [j.id, j]));
   const onJob = (id: string | null) => !!id && !!jobs.get(id) && !jobs.get(id)!.is_internal;
-  const done = new Map(((linksRes.data ?? []) as { app_key: string; qbo_id: string }[]).map((l) => [l.app_key, l.qbo_id]));
+  const linkRows = (linksRes.data ?? []) as { app_kind: string; app_key: string; qbo_id: string }[];
+  const done = new Map(linkRows.map((l) => [l.app_key, l.qbo_id]));
+  // Runs this function split before (not import journals) can be re-split with `force`.
+  const splitLinks = new Map(linkRows.filter((l) => l.app_kind === 'payroll_split').map((l) => [l.app_key, l.qbo_id]));
+  // Runs the 10/14 import booked as journal entries; `force` re-splits their wage lines in place.
+  const journalLinks = new Map(linkRows.filter((l) => l.app_kind === 'journal').map((l) => [l.app_key, l.qbo_id]));
   const localDay = (ts: string) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
 
   const labor: { email: string; jobId: string | null; day: string; hours: number; cost: number }[] = [];
@@ -719,23 +750,29 @@ export async function splitPayroll(qbo: Qbo, admin: SupabaseClient, company: str
 
   for (const run of runs) {
     if (runIds && !runIds.has(run.id)) continue;
-    if (done.has(run.id)) {
+    const journalId = force ? journalLinks.get(run.id) : undefined;
+    if (done.has(run.id) && !(force && (splitLinks.has(run.id) || journalId))) {
       results.push({ runId: run.id, payday: run.payday, status: 'already split', qboId: done.get(run.id) });
       continue;
     }
     const gross = money(num(run.gross_wages));
     const withdrawn = money(num(run.total_withdrawn));
-    const target = feed
-      .filter((p) => !claimed.has(p.Id) && Math.abs(money(num(p.TotalAmt)) - withdrawn) < 0.005 && dayDiff(p.TxnDate, run.payday) <= 7)
+    const forced = force && splitLinks.has(run.id) ? (await qbo.get(`purchase/${splitLinks.get(run.id)}`)).Purchase : null;
+    const je = journalId ? (await qbo.get(`journalentry/${journalId}`)).JournalEntry : null;
+    const target = je ? { Id: je.Id, TxnDate: je.TxnDate, TotalAmt: 0 } : forced ?? feed
+      .filter((p) => !claimed.has(p.Id) && Math.abs(money(num(p.TotalAmt)) - money(withdrawn + money(num(run.reimbursements)))) < 0.005 && dayDiff(p.TxnDate, run.payday) <= 7)
       .sort((a, b) => dayDiff(a.TxnDate, run.payday) - dayDiff(b.TxnDate, run.payday))[0];
     if (!target) {
-      results.push({ runId: run.id, payday: run.payday, withdrawn, status: 'no matching Chase payroll line in QuickBooks yet' });
+      results.push({ runId: run.id, payday: run.payday, withdrawn: money(withdrawn + money(num(run.reimbursements))), status: 'no matching Chase payroll line in QuickBooks yet' });
       continue;
     }
     claimed.add(target.Id);
     const only = run.kind === 'off_cycle' ? nameToEmail.get((run.notes ?? '').match(/for ([A-Z][a-z]+ [A-Z][a-z]+)/)?.[1]?.toLowerCase() ?? '') : null;
+    // Several runs can pay the same period (a regular run + a correction run). The period's
+    // logged job cost is booked ONCE across them, each run taking its share of the gross.
+    const periodKey = `${run.period_start}|${run.period_end}`;
+    const share = only ? 1 : gross / (periodGross.get(periodKey) || gross);
     const inPeriod = labor.filter((l) => l.day >= run.period_start && l.day <= run.period_end && (!only || l.email === only));
-    const totalCost = inPeriod.reduce((s, l) => s + l.cost, 0);
     const byJob = new Map<string, { cost: number; hours: number }>();
     for (const l of inPeriod) {
       if (!onJob(l.jobId)) continue;
@@ -745,30 +782,72 @@ export async function splitPayroll(qbo: Qbo, admin: SupabaseClient, company: str
     type Out = { account: string; amount: number; jobId?: string; description: string };
     const out: Out[] = [];
     let allocated = 0;
-    if (totalCost > 0) {
+    const jobCost = [...byJob.values()].reduce((s, v) => s + v.cost, 0);
+    const periodTotal = only ? gross : periodGross.get(periodKey) || gross;
+    const scale = (jobCost > periodTotal ? periodTotal / jobCost : 1) * share;
+    if (jobCost > 0) {
       for (const [jobId, v] of [...byJob.entries()].sort()) {
-        const amount = money((gross * v.cost) / totalCost);
+        const amount = money(v.cost * scale);
         if (amount <= 0) continue;
         allocated = money(allocated + amount);
         out.push({ account: 'Job labor', amount, jobId, description: `${jobs.get(jobId)?.job_number ?? ''} labor, ${Math.round(v.hours * 10) / 10} h, ${run.period_start}–${run.period_end}` });
       }
     }
-    if (gross - allocated > 0.004) out.push({ account: 'Payroll expenses:Office & overhead wages', amount: money(gross - allocated), description: 'Hours not on a job (shop, office, travel)' });
+    if (gross - allocated > 0.004) out.push({ account: 'Payroll expenses:Office & overhead wages', amount: money(gross - allocated), description: 'Office & overhead: hours not on a job, and paid hours beyond those logged' });
     if (withdrawn - gross > 0.004) out.push({ account: 'Payroll expenses:Payroll taxes (employer)', amount: money(withdrawn - gross), description: 'Employer payroll taxes' });
+    // Rounding only (cents): true the lines up to the withdrawal on the largest one.
     const drift = money(withdrawn - out.reduce((s, l) => s + l.amount, 0));
     if (drift !== 0 && out.length) {
       const big = out.reduce((a, b) => (b.amount > a.amount ? b : a));
       big.amount = money(big.amount + drift);
     }
+    // Expenses paid back inside this run ride on the same bank line.
+    const reimbursed = run.receipt_id ? reimbByReceipt.get(run.receipt_id) ?? [] : [];
+    for (const e of reimbursed) {
+      out.push({ account: BOOK_ACCOUNT_QBO[(e.extracted?.book_account as string) ?? ''] ?? 'Supplies', amount: money(num(e.amount)), jobId: onJob(e.job_id) ? e.job_id! : undefined, description: `Reimbursed: ${e.description ?? ''}`.slice(0, 200) });
+    }
+    const reimbTotal = money(num(run.reimbursements));
+    const reimbBooked = money(reimbursed.reduce((s, e) => s + num(e.amount), 0));
+    if (!journalId && reimbTotal - reimbBooked > 0.004) out.push({ account: 'Payroll expenses:Office & overhead wages', amount: money(reimbTotal - reimbBooked), description: 'Reimbursement paid beyond the receipts on file' });
+    const bankOut = money(withdrawn + reimbTotal);
     const summary = {
-      runId: run.id, payday: run.payday, period: `${run.period_start}–${run.period_end}`, gross, withdrawn, qboId: target.Id, qboDate: target.TxnDate,
+      runId: run.id, payday: run.payday, period: `${run.period_start}–${run.period_end}`, gross, withdrawn: bankOut, qboId: target.Id, qboDate: target.TxnDate,
       lines: out.map((l) => ({ account: l.account, amount: l.amount, job: l.jobId ? jobs.get(l.jobId)?.job_number : null })),
     };
     if (dryRun) {
       results.push({ ...summary, status: 'would split' });
       continue;
     }
+    if (je) {
+      // Keep every line that is not wages / employer tax (the reimbursement debit, the bank
+      // credit) exactly as it is; replace the wage and tax debits with the new split.
+      const payrollNames = new Set(['Job labor', 'Payroll expenses:Office & overhead wages', 'Payroll expenses:Payroll taxes (employer)']);
+      const payrollIds = new Set([...payrollNames].map((n) => accounts.get(n)?.Id).filter(Boolean));
+      const kept = (je.Line ?? []).filter((l: any) => !(l.JournalEntryLineDetail?.PostingType === 'Debit' && payrollIds.has(l.JournalEntryLineDetail?.AccountRef?.value)));
+      const wageLines = [];
+      for (const l of out.filter((o) => payrollNames.has(o.account))) {
+        const customer = l.jobId ? (await projectLinks(admin, company)).byJob.get(l.jobId) ?? (await ensureProject(qbo, admin, company, l.jobId)) : null;
+        wageLines.push({
+          Amount: l.amount, DetailType: 'JournalEntryLineDetail', Description: l.description.slice(0, 4000),
+          JournalEntryLineDetail: { PostingType: 'Debit', AccountRef: acct(l.account), ...(customer ? { Entity: { Type: 'Customer', EntityRef: { value: customer } } } : {}) },
+        });
+      }
+      const lines = [...wageLines, ...kept];
+      const dr = money(lines.filter((l: any) => l.JournalEntryLineDetail.PostingType === 'Debit').reduce((s2: number, l: any) => s2 + num(l.Amount), 0));
+      const cr = money(lines.filter((l: any) => l.JournalEntryLineDetail.PostingType === 'Credit').reduce((s2: number, l: any) => s2 + num(l.Amount), 0));
+      if (Math.abs(dr - cr) > 0.004) throw new QboError(409, `Journal ${je.Id}: debits ${dr} ≠ credits ${cr}`);
+      if (dryRun) {
+        results.push({ ...summary, qboId: `JE ${je.Id}`, status: 'would re-split journal' });
+        continue;
+      }
+      je.Line = lines;
+      je.PrivateNote = [je.PrivateNote, 'Re-split 2026-11-21: logged job hours → Job labor, extra paid hours → overhead'].filter(Boolean).join(' | ').slice(0, 4000);
+      const savedJe = (await qbo.post('journalentry', je)).JournalEntry;
+      results.push({ ...summary, qboId: `JE ${savedJe.Id}`, status: 're-split journal' });
+      continue;
+    }
     const keepId = (target.Line ?? []).find((l: any) => l.AccountBasedExpenseLineDetail)?.Id;
+    if (Math.abs(money(num(target.TotalAmt)) - bankOut) > 0.004) throw new QboError(409, `Run ${run.payday}: lines ${bankOut} ≠ bank line ${target.TotalAmt}`);
     const newLines = [];
     for (const [i, l] of out.entries()) {
       const customer = l.jobId ? (await projectLinks(admin, company)).byJob.get(l.jobId) ?? (await ensureProject(qbo, admin, company, l.jobId)) : null;

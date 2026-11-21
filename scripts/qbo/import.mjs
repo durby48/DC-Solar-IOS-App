@@ -240,6 +240,9 @@ const journals = [];
 const cashMoves = [];
 for (const e of entries.filter((r) => inBooks(r) && !r.paid_from_bank)) {
   const x = ext(e);
+  // Paid back inside a Gusto run: from FEED_START the run's Chase line in QuickBooks carries it
+  // (qbo-books split_payroll); before that the run's payroll JE did. Never a Due-to-Isaiah JE.
+  if (x.paid_via_payroll) continue;
   // Paid back by Devon personally (Financials → Profit → cash → Pay back, "Me, personally"):
   // the cost stays, and the money counts as owner investment instead of a debt.
   const ownerPaid = x.reimbursement?.from === 'owner';
