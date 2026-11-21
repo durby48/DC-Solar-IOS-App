@@ -31,6 +31,8 @@ export type FinanceWidgetState = {
   ytdRevenue: number;
   /** QuickBooks equity: what the company owns minus what it owes. */
   companyValue: number;
+  /** Soft sale valuation: annualized owner earnings × multiple (0 when unknown). */
+  saleEstimate: number;
   year: number;
   /** ms since epoch the numbers were read. */
   asOf: number;
@@ -45,7 +47,7 @@ export function writeFinanceWidget(state: FinanceWidgetState | null): void {
   if (Platform.OS !== 'ios') return;
   try {
     const { store, reload } = storage();
-    if (state) store.set(KEY, { ...state, ytdRevenue: Math.round(state.ytdRevenue), companyValue: Math.round(state.companyValue) });
+    if (state) store.set(KEY, { ...state, ytdRevenue: Math.round(state.ytdRevenue), companyValue: Math.round(state.companyValue), saleEstimate: Math.round(state.saleEstimate) });
     else store.remove(KEY);
     reload();
   } catch {
@@ -69,6 +71,7 @@ export async function syncFinanceWidget(force = false): Promise<void> {
   writeFinanceWidget({
     ytdRevenue: res.value.headline.income,
     companyValue: res.value.headline.equity,
+    saleEstimate: res.value.sale?.estimate ?? 0,
     year: Number(end.slice(0, 4)),
     asOf: Date.now(),
   });

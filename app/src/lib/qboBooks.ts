@@ -34,10 +34,31 @@ export type BooksOverview = {
     equity: number;
   };
   months: { title: string; income: number; cogs: number; expenses: number; net: number }[];
+  /** Soft valuation: annualized SDE × multiple (see saleEstimate in qbo-books). */
+  sale: SaleEstimate | null;
   pnl: Report;
   balanceSheet: Report;
   receivables: Report;
 };
+
+export type SaleEstimate = {
+  start: string;
+  end: string;
+  days: number;
+  netIncome: number;
+  ownerPay: number;
+  sde: number;
+  annualizedSde: number;
+  multiple: number;
+  estimate: number;
+  runsMissingOwnerPay: number;
+};
+
+/** Save the multiple the sale estimate uses (company_settings.sale_multiple, admins only by RLS). */
+export async function saveSaleMultiple(multiple: number): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { error } = await supabase.from('company_settings').update({ sale_multiple: multiple }).eq('company', 'dc-solar');
+  return error ? { ok: false, message: error.message } : { ok: true };
+}
 
 export type JobPnl = {
   qboId: string | null;

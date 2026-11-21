@@ -18,7 +18,9 @@ import {
   previewAppMatches,
   type BooksOverview,
   type JobPnl,
+  saveSaleMultiple,
   type ReportNode,
+  type SaleEstimate,
 } from '@/lib/qboBooks';
 
 /**
@@ -202,15 +204,27 @@ function QboMirror({ refreshKey }: { refreshKey: number }) {
             <StatTile label="Gross profit" value={h.grossProfit} prefix="$" tone={2} compact style={styles.tileThird} />
             <StatTile label="In the bank" value={h.bank} prefix="$" tone={5} note={`as of ${overview!.period.end}`} style={styles.tile} />
             <StatTile label="Customers owe" value={h.receivables} prefix="$" tone={6} style={styles.tile} />
+            {overview!.sale ? (
+              <StatTile
+                label="Sale estimate"
+                value={overview!.sale.estimate}
+                prefix="$"
+                tone="olive"
+                note={`${formatRounded(overview!.sale.annualizedSde)}/yr owner earnings × ${overview!.sale.multiple} · soft estimate, not an appraisal`}
+                style={styles.tileWide}
+              />
+            ) : null}
             <StatTile
-              label="Company value"
+              label="Book value"
               value={h.equity}
               prefix="$"
-              tone="olive"
-              note="Equity on the balance sheet (what the company owns minus what it owes)"
+              tone={2}
+              note="What the company owns minus what it owes (cash basis)"
               style={styles.tileWide}
             />
           </View>
+
+          {overview!.sale ? <SaleCard sale={overview!.sale} onChanged={() => void load(period)} /> : null}
 
           {matchNote ? (
             <AppText variant="caption" color={colors.textSecondary} style={styles.matchNote}>{matchNote}</AppText>
@@ -300,6 +314,52 @@ function QboMirror({ refreshKey }: { refreshKey: number }) {
   );
 }
 
+
+const MULTIPLES = [2, 2.5, 3, 3.5, 4, 5];
+
+/** How the sale estimate is built, and the multiple Devon wants to use. */
+function SaleCard({ sale, onChanged }: { sale: SaleEstimate; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pick = async (m: number) => {
+    setSaving(m);
+    setError(null);
+    const res = await saveSaleMultiple(m);
+    setSaving(null);
+    if (!res.ok) setError(res.message);
+    else onChanged();
+  };
+  const months = Math.round((sale.days / 30.44) * 10) / 10;
+  return (
+    <Card style={styles.saleCard}>
+      <Pressable onPress={() => setOpen((v) => !v)} style={styles.saleHead}>
+        <Ionicons name="calculator" size={18} color={colors.olive} />
+        <AppText variant="bodyStrong" style={styles.flex}>How the sale estimate works</AppText>
+        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textMuted} />
+      </Pressable>
+      {open ? (
+        <View style={styles.saleBody}>
+          <AppText variant="caption" color={colors.textSecondary}>
+            Net profit {formatRounded(sale.netIncome)} + your Gusto pay {formatRounded(sale.ownerPay)} = {formatRounded(sale.sde)} owner earnings over {months} months
+            {sale.days < 365 ? ` → ${formatRounded(sale.annualizedSde)} a year` : ''}, × {sale.multiple}.
+          </AppText>
+          <AppText variant="caption" color={colors.textMuted}>
+            Small solar installers usually sell for about 2–4× owner earnings. With under a year of books, a buyer will discount this, and slow winter months will pull the yearly figure down.
+            {sale.runsMissingOwnerPay ? ` ${sale.runsMissingOwnerPay} payroll run has no receipt yet, so your pay from it is not included.` : ''}
+          </AppText>
+          <View style={styles.chips}>
+            {MULTIPLES.map((m) => (
+              <Chip key={m} label={saving === m ? '…' : `${m}×`} selected={sale.multiple === m} tone="olive" onPress={() => void pick(m)} />
+            ))}
+          </View>
+          {error ? <AppText variant="caption" color={colors.danger}>{error}</AppText> : null}
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
 /** A QuickBooks report as collapsible sections; the figure shown is the Total column. */
 function ReportTree({ rows, depth = 0, lastColumnOnly = true }: { rows: ReportNode[]; depth?: number; lastColumnOnly?: boolean }) {
   return (
@@ -350,6 +410,9 @@ const styles = StyleSheet.create({
   tile: { flexBasis: '48%', flexGrow: 1 },
   tileThird: { flexBasis: '30%', flexGrow: 1 },
   tileWide: { flexBasis: '100%' },
+  saleCard: { gap: spacing.sm },
+  saleHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  saleBody: { gap: spacing.sm },
   matchNote: { marginTop: -spacing.xs },
   alertCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderColor: colors.amber, borderWidth: 1 },
   tableRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },

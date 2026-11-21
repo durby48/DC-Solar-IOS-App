@@ -248,8 +248,40 @@ const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T12:00:00
 const dayDiff = (a: string, b: string) => Math.round(Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86400000);
 const money = (n: number) => Math.round(n * 100) / 100;
 
-export async function overview(qbo: Qbo, start: string, end: string) {
-  const [pnl, bs, ar] = await Promise.all([
+/**
+ * Sale estimate (Devon, 2026-11-21) — a soft valuation, not an appraisal:
+ *   SDE        = QuickBooks net income (trailing 12 months, cash basis, clamped to BOOKS_START)
+ *                + what the company paid Devon through Gusto (payroll_runs.owner_gross, plus
+ *                  the employer taxes on it at the run's withdrawn ÷ gross ratio)
+ *   annualized = SDE × 365 ÷ days covered (while the books are under a year old)
+ *   estimate   = annualized × company_settings.sale_multiple (default 3)
+ * Owner draws are not added back — they never reduced profit.
+ */
+export async function saleEstimate(qbo: Qbo, admin: SupabaseClient, company: string, end: string) {
+  const yearAgo = addDays(end, -364);
+  const start = yearAgo < BOOKS_START ? BOOKS_START : yearAgo;
+  const [pnl, runsRes, settingsRes] = await Promise.all([
+    report(qbo, 'ProfitAndLoss', { start_date: start, end_date: end, accounting_method: 'Cash' }),
+    admin.from('payroll_runs').select('payday, gross_wages, total_withdrawn, owner_gross').eq('company', company).gte('payday', start).lte('payday', end),
+    admin.from('company_settings').select('sale_multiple').eq('company', company).maybeSingle(),
+  ]);
+  const netIncome = groupTotal(pnl.rows, 'NetIncome') ?? 0;
+  const runs = (runsRes.data ?? []) as { gross_wages: number; total_withdrawn: number; owner_gross: number | null }[];
+  const ownerPay = money(runs.reduce((sum, r) => sum + (r.owner_gross == null ? 0 : num(r.owner_gross) * (num(r.total_withdrawn) / (num(r.gross_wages) || 1))), 0));
+  const days = dayDiff(start, end) + 1;
+  const sde = money(netIncome + ownerPay);
+  const annualizedSde = money(days < 365 ? (sde * 365) / days : sde);
+  const multiple = num((settingsRes.data as { sale_multiple?: number } | null)?.sale_multiple) || 3;
+  return {
+    start, end, days, netIncome, ownerPay, sde, annualizedSde, multiple,
+    estimate: money(annualizedSde * multiple),
+    runsMissingOwnerPay: runs.filter((r) => r.owner_gross == null).length,
+  };
+}
+
+export async function overview(qbo: Qbo, start: string, end: string, admin?: SupabaseClient, company = 'dc-solar') {
+  const [sale, pnl, bs, ar] = await Promise.all([
+    admin ? saleEstimate(qbo, admin, company, end) : Promise.resolve(null),
     report(qbo, 'ProfitAndLoss', { start_date: start, end_date: end, summarize_column_by: 'Month', accounting_method: 'Cash' }),
     report(qbo, 'BalanceSheet', { end_date: end, accounting_method: 'Cash' }),
     report(qbo, 'AgedReceivables', { report_date: end }),
@@ -277,6 +309,7 @@ export async function overview(qbo: Qbo, start: string, end: string) {
       equity: groupTotal(bs.rows, 'Equity') ?? 0,
     },
     months,
+    sale,
     pnl,
     balanceSheet: bs,
     receivables: ar,
@@ -926,7 +959,7 @@ if (import.meta.main) Deno.serve(async (req) => {
 
     switch (body.action) {
       case 'overview':
-        return ok(await overview(qbo, start, end));
+        return ok(await overview(qbo, start, end, admin, company));
       case 'jobs':
         return ok(await jobsReport(qbo, admin, company, start, end));
       case 'untagged':

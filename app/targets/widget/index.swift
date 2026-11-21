@@ -6,6 +6,19 @@ import WidgetKit
 private let appGroup = "group.com.dcsolarkc.fieldapp"
 private let stateKey = "widgetState"
 
+/// The app writes through @bacons/apple-targets' ExtensionStorage, whose `set(key, object)`
+/// stores the object as JSON *Data* — not a property-list dictionary — so
+/// `dictionary(forKey:)` alone always came back empty (2026-11-21: both widgets showed
+/// their empty state). Read either form.
+private func sharedDict(_ key: String) -> [String: Any] {
+  let defaults = UserDefaults(suiteName: appGroup)
+  if let data = defaults?.data(forKey: key),
+     let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+    return object
+  }
+  return defaults?.dictionary(forKey: key) ?? [:]
+}
+
 /// Brand colors mirroring src/constants/theme.ts — the 2026-09-12 "Sonoran
 /// dusk" dark palette. `cream` is the widget ground and is the app's CARD
 /// charcoal (not the page), so the widget matches a card on the Home screen.
@@ -39,7 +52,7 @@ struct WidgetState {
   }
 
   static func load() -> WidgetState {
-    let dict = UserDefaults(suiteName: appGroup)?.dictionary(forKey: stateKey) ?? [:]
+    let dict = sharedDict(stateKey)
     func str(_ key: String) -> String { dict[key] as? String ?? "" }
     func num(_ key: String) -> Double { (dict[key] as? NSNumber)?.doubleValue ?? 0 }
     return WidgetState(
@@ -194,6 +207,8 @@ private let financeKey = "financeState"
 struct FinanceState {
   var ytdRevenue: Double
   var companyValue: Double
+  /// Soft sale valuation (annualized owner earnings × multiple); 0 when unknown.
+  var saleEstimate: Double
   var year: Int
   /// ms since epoch the numbers were read; 0 = nothing on this phone.
   var asOf: Double
@@ -202,11 +217,12 @@ struct FinanceState {
   var asOfDate: Date { Date(timeIntervalSince1970: asOf / 1000) }
 
   static func load() -> FinanceState {
-    let dict = UserDefaults(suiteName: appGroup)?.dictionary(forKey: financeKey) ?? [:]
+    let dict = sharedDict(financeKey)
     func num(_ key: String) -> Double { (dict[key] as? NSNumber)?.doubleValue ?? 0 }
     return FinanceState(
       ytdRevenue: num("ytdRevenue"),
       companyValue: num("companyValue"),
+      saleEstimate: num("saleEstimate"),
       year: Int(num("year")),
       asOf: num("asOf")
     )
@@ -220,7 +236,7 @@ struct FinanceEntry: TimelineEntry {
 
 struct FinanceProvider: TimelineProvider {
   func placeholder(in context: Context) -> FinanceEntry {
-    FinanceEntry(date: Date(), state: FinanceState(ytdRevenue: 255_980, companyValue: 49_202, year: 2026, asOf: Date().timeIntervalSince1970 * 1000))
+    FinanceEntry(date: Date(), state: FinanceState(ytdRevenue: 265_080, companyValue: 54_832, saleEstimate: 561_703, year: 2026, asOf: Date().timeIntervalSince1970 * 1000))
   }
 
   func getSnapshot(in context: Context, completion: @escaping (FinanceEntry) -> Void) {
@@ -284,14 +300,16 @@ struct FinanceWidgetView: View {
 
       if state.hasData {
         if family == .systemMedium {
-          HStack(alignment: .top, spacing: 12) {
+          HStack(alignment: .top, spacing: 10) {
             FinanceFigure(label: "\(state.year) REVENUE", value: state.ytdRevenue, color: Theme.sun)
             Spacer(minLength: 0)
-            FinanceFigure(label: "COMPANY VALUE", value: state.companyValue, color: Theme.oliveDeep)
+            FinanceFigure(label: "SALE ESTIMATE", value: state.saleEstimate > 0 ? state.saleEstimate : state.companyValue, color: Theme.oliveDeep)
+            Spacer(minLength: 0)
+            FinanceFigure(label: "BOOK VALUE", value: state.companyValue, color: Theme.ocean)
           }
         } else {
           FinanceFigure(label: "\(state.year) REVENUE", value: state.ytdRevenue, color: Theme.sun)
-          FinanceFigure(label: "COMPANY VALUE", value: state.companyValue, color: Theme.oliveDeep)
+          FinanceFigure(label: state.saleEstimate > 0 ? "SALE ESTIMATE" : "BOOK VALUE", value: state.saleEstimate > 0 ? state.saleEstimate : state.companyValue, color: Theme.oliveDeep)
         }
         Spacer(minLength: 0)
         HStack(spacing: 3) {
@@ -323,7 +341,7 @@ struct FinanceWidget: Widget {
       FinanceWidgetView(entry: entry)
     }
     .configurationDisplayName("Company Numbers")
-    .description("Year-to-date revenue and company value from QuickBooks. Admins only.")
+    .description("Year-to-date revenue, sale estimate and book value from QuickBooks. Admins only.")
     .supportedFamilies([.systemSmall, .systemMedium])
   }
 }
