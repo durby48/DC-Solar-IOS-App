@@ -9,6 +9,7 @@
 //   3. Cromwell $13,100 (11/13, still in the bank feed's For Review): three Payments
 //      (DC-26050 / 26007 / 26044) and ONE Deposit into checking — Devon then MATCHES the feed
 //      line to it (never "Add").
+//   3b. Cromwell $9,100 (11/21): DC-26025 + DC-26049, same as 3.
 //   4. DC-26032 / 26038 / 26035: already paid in QuickBooks (Payments 367 / 381 / 395) — only
 //      linked to the app rows so the import never makes them again.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -125,6 +126,28 @@ for (const [depId, no, ref] of [['451', 'DC-26042', '2026-11-11|31980.89|SUNSMAR
       const dep = (await qbo.post('deposit', {
         DepositToAccountRef: acct('BUS COMPLETE CHK (7086)'), TxnDate: '2026-11-13',
         PrivateNote: 'Cromwell ACH $13,100 = DC-26050 + DC-26007 + DC-26044 (DC Solar app 2026-11-21). MATCH the bank-feed line to this.',
+        Line: ids.map((id, i) => ({ Amount: money(Number(rows[i][1].amount)), LinkedTxn: [{ TxnId: id, TxnType: 'Payment', TxnLineId: '0' }] })),
+      })).Deposit;
+      await save('feed_deposit', ref, 'Deposit', dep.Id, rows.map(([, r]) => r.id));
+    }
+  }
+}
+
+// 3b. Cromwell $9,100 (11/21, same pattern): DC-26025 $6,300 + DC-26049 $2,800
+{
+  const ref = '2026-11-21|9100.00|CROMWELL ACH';
+  if (link('feed_deposit', ref)) log('Cromwell $9,100 deposit already made');
+  else {
+    const rows = await Promise.all(['DC-26025', 'DC-26049'].map(async (no) => [no, await appPayment(no, ref)] as const));
+    const total = money(rows.reduce((s, [, r]) => s + Number(r.amount), 0));
+    if (total !== 9100) throw new Error(`Cromwell 9,100 rows add to ${total}`);
+    const ids = [];
+    for (const [no, r] of rows) ids.push(await payment(no, r));
+    log(`Cromwell: deposit $${total} 2026-11-21 into checking from payments ${ids.join(', ')}`);
+    if (APPLY) {
+      const dep = (await qbo.post('deposit', {
+        DepositToAccountRef: acct('BUS COMPLETE CHK (7086)'), TxnDate: '2026-11-21',
+        PrivateNote: 'Cromwell ACH $9,100 = DC-26025 + DC-26049 (DC Solar app 2026-11-21). MATCH the bank-feed line to this.',
         Line: ids.map((id, i) => ({ Amount: money(Number(rows[i][1].amount)), LinkedTxn: [{ TxnId: id, TxnType: 'Payment', TxnLineId: '0' }] })),
       })).Deposit;
       await save('feed_deposit', ref, 'Deposit', dep.Id, rows.map(([, r]) => r.id));
