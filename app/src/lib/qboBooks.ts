@@ -123,3 +123,23 @@ export function findGroup(rows: ReportNode[], group: string): ReportNode | null 
   }
   return null;
 }
+
+export type PayrollSplit = {
+  runs: {
+    runId: string;
+    payday: string;
+    period?: string;
+    gross?: number;
+    withdrawn?: number;
+    qboId?: string;
+    status: string;
+    lines?: { account: string; amount: number; job: string | null }[];
+  }[];
+  unmatchedFeed: { qboId: string; date: string; amount: number; memo: string | null }[];
+};
+
+/** Which Gusto runs can be split to jobs by hours (writes nothing). */
+export const previewPayrollSplit = () => call<PayrollSplit>({ action: 'split_payroll', dryRun: true });
+
+/** Rewrite the chosen runs' Chase payroll lines in QuickBooks: Job labor per job + overhead wages + employer taxes. */
+export const applyPayrollSplit = (runIds: string[]) => call<PayrollSplit>({ action: 'split_payroll', runIds });

@@ -13,12 +13,15 @@ import * as haptics from '@/lib/haptics';
 import { fetchPipelineJobs } from '@/lib/pipeline';
 import {
   assignLineToJob,
+  applyPayrollSplit,
   confirmAppMatches,
   fetchUntaggedLines,
   markLineOverhead,
   previewAppMatches,
+  previewPayrollSplit,
   type AccountChoice,
   type MatchResult,
+  type PayrollSplit,
   type UntaggedLine,
 } from '@/lib/qboBooks';
 import { isCompanyJob } from '@/lib/stages';
@@ -45,6 +48,7 @@ export default function BooksJobsScreen() {
   const [lines, setLines] = useState<UntaggedLine[] | null>(null);
   const [accounts, setAccounts] = useState<AccountChoice[]>([]);
   const [matches, setMatches] = useState<MatchResult | null>(null);
+  const [payroll, setPayroll] = useState<PayrollSplit | null>(null);
   const [jobOptions, setJobOptions] = useState<JobOption[]>([]);
   const [companyJobId, setCompanyJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +59,8 @@ export default function BooksJobsScreen() {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const [u, m, j] = await Promise.all([fetchUntaggedLines('2026-10-15'), previewAppMatches(), fetchPipelineJobs()]);
+    const [u, m, j, p] = await Promise.all([fetchUntaggedLines('2026-10-15'), previewAppMatches(), fetchPipelineJobs(), previewPayrollSplit()]);
+    if (p.ok) setPayroll(p.value);
     if (u.ok) {
       setLines(u.value.lines);
       setAccounts(u.value.accounts);
@@ -89,6 +94,17 @@ export default function BooksJobsScreen() {
     void load();
   };
 
+  const splitRun = async (runId: string) => {
+    setConfirming(runId);
+    const res = await applyPayrollSplit([runId]);
+    setConfirming(null);
+    if (!res.ok) setError(res.message);
+    else {
+      haptics.success?.();
+      void load();
+    }
+  };
+  const toSplit = (payroll?.runs ?? []).filter((r) => r.status === 'would split');
   const matchable = matches?.matched ?? [];
   const jobLabel = useMemo(() => new Map(jobOptions.map((o) => [o.id, o.label])), [jobOptions]);
 
@@ -151,6 +167,48 @@ export default function BooksJobsScreen() {
               {matches.waiting.length} more app receipt{matches.waiting.length === 1 ? ' is' : 's are'} waiting for the bank feed. Accept the Chase lines in QuickBooks and they show up here.
             </AppText>
           ) : null}
+        </>
+      ) : null}
+
+      {toSplit.length || payroll?.unmatchedFeed.length ? (
+        <>
+          <SectionHeader
+            title="Payroll → jobs"
+            subtitle="Splits Gusto's Chase line into Job labor per job by logged hours, overhead wages and employer taxes. Same transaction, same total."
+            icon="people"
+          />
+          <Card padded={false}>
+            {toSplit.map((r) => (
+              <View key={r.runId} style={styles.payrollRun}>
+                <View style={styles.row}>
+                  <View style={styles.flex}>
+                    <AppText variant="bodyStrong">Payday {formatShortDate(r.payday)}</AppText>
+                    <AppText variant="caption" color={colors.textMuted}>{r.period} · gross {formatMoney(r.gross ?? 0)}</AppText>
+                  </View>
+                  <AppText variant="numeric">{formatMoney(r.withdrawn ?? 0)}</AppText>
+                  <Button label={confirming === r.runId ? '…' : 'Split'} size="sm" disabled={confirming !== null} onPress={() => void splitRun(r.runId)} />
+                </View>
+                {(r.lines ?? []).map((l, i) => (
+                  <View key={i} style={styles.subRow}>
+                    <AppText variant="caption" color={colors.textSecondary} style={styles.flex}>{l.job ? `${l.job} · ${l.account}` : l.account}</AppText>
+                    <AppText variant="caption">{formatMoney(l.amount)}</AppText>
+                  </View>
+                ))}
+              </View>
+            ))}
+            {(payroll?.unmatchedFeed ?? []).map((f) => (
+              <View key={f.qboId} style={styles.row}>
+                <Ionicons name="alert-circle" size={18} color={colors.amber} />
+                <View style={styles.flex}>
+                  <AppText variant="bodyStrong" numberOfLines={1}>{f.memo ?? 'Payroll'}</AppText>
+                  <AppText variant="caption" color={colors.textMuted}>
+                    {formatShortDate(f.date)} · no payroll run recorded in the app for this amount — record it on the Hours tab
+                  </AppText>
+                </View>
+                <AppText variant="numeric">{formatMoney(f.amount)}</AppText>
+              </View>
+            ))}
+          </Card>
         </>
       ) : null}
 
@@ -315,6 +373,8 @@ const styles = StyleSheet.create({
   lineCard: { gap: spacing.sm },
   lineHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   editor: { gap: spacing.sm },
+  payrollRun: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line, paddingBottom: spacing.sm },
+  subRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md + spacing.md, paddingVertical: 2 },
   accountRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
 });
 

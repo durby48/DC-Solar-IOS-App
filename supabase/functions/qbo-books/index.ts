@@ -23,6 +23,10 @@
  *         project if the job has none yet), on `accountId` when given or else
  *         an overhead account's job-cost twin; `overhead: true` keeps it off
  *         any job (and recategorizes when accountId is given).
+ *   { action: 'split_payroll', dryRun?, runIds? }
+ *       → rewrites a Gusto run's Chase-feed purchase (one "Payroll expenses"
+ *         line) into Job labor per job by hours + overhead wages + employer
+ *         taxes. Same transaction, same total. See splitPayroll().
  *   { action: 'match_app', dryRun?, keys? }
  *       → THE DUPLICATE GUARD. App expenses paid from the bank are never
  *         created in QuickBooks — Chase's bank feed already brings that money
@@ -647,6 +651,148 @@ export async function matchApp(qbo: Qbo, admin: SupabaseClient, company: string,
   return { matched, waiting, ambiguous };
 }
 
+
+// ---------------------------------------------------------------- payroll → jobs
+
+/**
+ * Gusto's withdrawals arrive through the Chase feed as ONE "Payroll expenses"
+ * purchase per run. This rewrites that purchase's lines — same total, same
+ * bank match, no new transaction — the way the 2026-10-14 import split payroll:
+ *
+ *   Job labor (COGS), one line per job      gross × that job's share of the period's labor cost
+ *   Office & overhead wages                 the rest of gross (hours not on a job)
+ *   Payroll taxes (employer)                withdrawn − gross
+ *
+ * Labor cost = logged hours (employee_hours) + clocked shifts (time_entries) ×
+ * pay rate, within the run's pay period. A run needs a payroll_runs row (gross
+ * + withdrawn, from the Gusto receipt); feed payroll lines without one are
+ * reported, not touched. Links: qbo_links app_kind 'payroll_split', key = run id.
+ */
+type Run = { id: string; period_start: string; period_end: string; payday: string; gross_wages: number; total_withdrawn: number; kind: string; notes: string | null; reimbursements: number | null };
+
+export async function splitPayroll(qbo: Qbo, admin: SupabaseClient, company: string, dryRun: boolean, runIds: Set<string> | null) {
+  const [runsRes, hoursRes, clocksRes, empRes, jobsRes, linksRes] = await Promise.all([
+    admin.from('payroll_runs').select('*').eq('company', company).gte('payday', FEED_START).order('payday'),
+    admin.from('employee_hours').select('employee, email, job_id, occurred_on, hours, rate').eq('company', company).gte('occurred_on', addDays(FEED_START, -40)),
+    admin.from('time_entries').select('employee, job_id, clock_in, clock_out').eq('company', company).not('clock_out', 'is', null).gte('clock_in', `${addDays(FEED_START, -40)}T00:00:00Z`),
+    admin.from('employees').select('email, display_name, pay_rate').eq('company', company),
+    admin.from('jobs').select('id, job_number, name, is_internal, customer_id, stage').eq('company', company),
+    // A run the 10/14 import already booked as a split journal entry counts as done too.
+    admin.from('qbo_links').select('app_key, qbo_id').eq('company', company).in('app_kind', ['payroll_split', 'journal']),
+  ]);
+  const runs = (runsRes.data ?? []) as Run[];
+  const rateOf = new Map(((empRes.data ?? []) as { email: string; pay_rate: number }[]).map((e) => [e.email?.toLowerCase(), Number(e.pay_rate) || 0]));
+  const nameToEmail = new Map(((empRes.data ?? []) as { email: string; display_name: string }[]).map((e) => [e.display_name?.toLowerCase(), e.email?.toLowerCase()]));
+  const jobs = new Map(((jobsRes.data ?? []) as JobRef[]).map((j) => [j.id, j]));
+  const onJob = (id: string | null) => !!id && !!jobs.get(id) && !jobs.get(id)!.is_internal;
+  const done = new Map(((linksRes.data ?? []) as { app_key: string; qbo_id: string }[]).map((l) => [l.app_key, l.qbo_id]));
+  const localDay = (ts: string) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+
+  const labor: { email: string; jobId: string | null; day: string; hours: number; cost: number }[] = [];
+  for (const h of (hoursRes.data ?? []) as any[]) {
+    const email = String(h.email ?? h.employee ?? '').toLowerCase();
+    const hours = num(h.hours);
+    labor.push({ email, jobId: h.job_id, day: h.occurred_on, hours, cost: hours * (num(h.rate) || rateOf.get(email) || 0) });
+  }
+  for (const c of (clocksRes.data ?? []) as any[]) {
+    const email = String(c.employee ?? '').toLowerCase();
+    const hours = Math.max(0, (Date.parse(c.clock_out) - Date.parse(c.clock_in)) / 3_600_000);
+    labor.push({ email, jobId: c.job_id, day: localDay(c.clock_in), hours, cost: hours * (rateOf.get(email) || 0) });
+  }
+
+  const accounts = await accountsByName(qbo);
+  const acct = (name: string) => {
+    const a = accounts.get(name);
+    if (!a) throw new QboError(500, `QuickBooks account "${name}" is missing.`);
+    return { value: a.Id, name: a.Name };
+  };
+  const payrollAcct = accounts.get('Payroll expenses');
+  const feed = payrollAcct
+    ? (await qbo.query(`select * from Purchase where TxnDate >= '${addDays(FEED_START, -2)}'`)).filter((p) => {
+        const lines = (p.Line ?? []).filter((l: any) => l.AccountBasedExpenseLineDetail);
+        const isFee = /\bfee/i.test(`${p.PrivateNote ?? ''} ${lines[0]?.Description ?? ''}`); // "Chase Payroll Fee" is a bank fee, not a run
+        return !isFee && lines.length === 1 && lines[0].AccountBasedExpenseLineDetail.AccountRef?.value === payrollAcct.Id && !lines[0].AccountBasedExpenseLineDetail.CustomerRef;
+      })
+    : [];
+  const claimed = new Set(done.values());
+  const results: Record<string, unknown>[] = [];
+
+  for (const run of runs) {
+    if (runIds && !runIds.has(run.id)) continue;
+    if (done.has(run.id)) {
+      results.push({ runId: run.id, payday: run.payday, status: 'already split', qboId: done.get(run.id) });
+      continue;
+    }
+    const gross = money(num(run.gross_wages));
+    const withdrawn = money(num(run.total_withdrawn));
+    const target = feed
+      .filter((p) => !claimed.has(p.Id) && Math.abs(money(num(p.TotalAmt)) - withdrawn) < 0.005 && dayDiff(p.TxnDate, run.payday) <= 7)
+      .sort((a, b) => dayDiff(a.TxnDate, run.payday) - dayDiff(b.TxnDate, run.payday))[0];
+    if (!target) {
+      results.push({ runId: run.id, payday: run.payday, withdrawn, status: 'no matching Chase payroll line in QuickBooks yet' });
+      continue;
+    }
+    claimed.add(target.Id);
+    const only = run.kind === 'off_cycle' ? nameToEmail.get((run.notes ?? '').match(/for ([A-Z][a-z]+ [A-Z][a-z]+)/)?.[1]?.toLowerCase() ?? '') : null;
+    const inPeriod = labor.filter((l) => l.day >= run.period_start && l.day <= run.period_end && (!only || l.email === only));
+    const totalCost = inPeriod.reduce((s, l) => s + l.cost, 0);
+    const byJob = new Map<string, { cost: number; hours: number }>();
+    for (const l of inPeriod) {
+      if (!onJob(l.jobId)) continue;
+      const cur = byJob.get(l.jobId!) ?? { cost: 0, hours: 0 };
+      byJob.set(l.jobId!, { cost: cur.cost + l.cost, hours: cur.hours + l.hours });
+    }
+    type Out = { account: string; amount: number; jobId?: string; description: string };
+    const out: Out[] = [];
+    let allocated = 0;
+    if (totalCost > 0) {
+      for (const [jobId, v] of [...byJob.entries()].sort()) {
+        const amount = money((gross * v.cost) / totalCost);
+        if (amount <= 0) continue;
+        allocated = money(allocated + amount);
+        out.push({ account: 'Job labor', amount, jobId, description: `${jobs.get(jobId)?.job_number ?? ''} labor, ${Math.round(v.hours * 10) / 10} h, ${run.period_start}–${run.period_end}` });
+      }
+    }
+    if (gross - allocated > 0.004) out.push({ account: 'Payroll expenses:Office & overhead wages', amount: money(gross - allocated), description: 'Hours not on a job (shop, office, travel)' });
+    if (withdrawn - gross > 0.004) out.push({ account: 'Payroll expenses:Payroll taxes (employer)', amount: money(withdrawn - gross), description: 'Employer payroll taxes' });
+    const drift = money(withdrawn - out.reduce((s, l) => s + l.amount, 0));
+    if (drift !== 0 && out.length) {
+      const big = out.reduce((a, b) => (b.amount > a.amount ? b : a));
+      big.amount = money(big.amount + drift);
+    }
+    const summary = {
+      runId: run.id, payday: run.payday, period: `${run.period_start}–${run.period_end}`, gross, withdrawn, qboId: target.Id, qboDate: target.TxnDate,
+      lines: out.map((l) => ({ account: l.account, amount: l.amount, job: l.jobId ? jobs.get(l.jobId)?.job_number : null })),
+    };
+    if (dryRun) {
+      results.push({ ...summary, status: 'would split' });
+      continue;
+    }
+    const keepId = (target.Line ?? []).find((l: any) => l.AccountBasedExpenseLineDetail)?.Id;
+    const newLines = [];
+    for (const [i, l] of out.entries()) {
+      const customer = l.jobId ? (await projectLinks(admin, company)).byJob.get(l.jobId) ?? (await ensureProject(qbo, admin, company, l.jobId)) : null;
+      newLines.push({
+        ...(i === 0 && keepId ? { Id: keepId } : {}), // keep the bank-feed match on the original line
+        Amount: l.amount,
+        DetailType: 'AccountBasedExpenseLineDetail',
+        Description: l.description.slice(0, 4000),
+        AccountBasedExpenseLineDetail: { AccountRef: acct(l.account), BillableStatus: 'NotBillable', ...(customer ? { CustomerRef: { value: customer } } : {}) },
+      });
+    }
+    target.Line = newLines;
+    target.PrivateNote = [target.PrivateNote, `Split to jobs by hours (app payroll run ${run.id.slice(0, 8)})`].filter(Boolean).join(' | ').slice(0, 4000);
+    const saved = (await qbo.post('purchase', target)).Purchase;
+    await admin.from('qbo_links').upsert({
+      company, app_kind: 'payroll_split', app_key: run.id, qbo_type: 'Purchase', qbo_id: saved.Id, sync_token: saved.SyncToken,
+      app_ids: [run.id], synced_at: new Date().toISOString(),
+    });
+    results.push({ ...summary, status: 'split' });
+  }
+  const unmatchedFeed = feed.filter((p) => !claimed.has(p.Id)).map((p) => ({ qboId: p.Id, date: p.TxnDate, amount: money(num(p.TotalAmt)), memo: p.PrivateNote ?? null }));
+  return { runs: results, unmatchedFeed };
+}
+
 // ---------------------------------------------------------------- handler
 
 // Served only when run as the function; scripts/qbo/books-check.ts imports the helpers above.
@@ -708,8 +854,13 @@ if (import.meta.main) Deno.serve(async (req) => {
         if (body.dryRun !== true && !keys?.size) return fail(400, 'bad_request', 'Pick the matches to confirm (keys).');
         return ok(await matchApp(qbo, admin, company, body.dryRun === true, keys));
       }
+      case 'split_payroll': {
+        const runIds = Array.isArray(body.runIds) ? new Set(body.runIds.filter((k): k is string => typeof k === 'string')) : null;
+        if (body.dryRun !== true && !runIds?.size) return fail(400, 'bad_request', 'Pick the payroll runs to split (runIds).');
+        return ok(await splitPayroll(qbo, admin, company, body.dryRun === true, runIds));
+      }
       default:
-        return fail(400, 'bad_request', "action must be 'overview', 'jobs', 'untagged', 'assign' or 'match_app'.");
+        return fail(400, 'bad_request', "action must be 'overview', 'jobs', 'untagged', 'assign', 'match_app' or 'split_payroll'.");
     }
   } catch (e) {
     if (e instanceof QboError) return fail(e.status, 'qbo', e.message);
